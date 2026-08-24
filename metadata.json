@@ -1,0 +1,6 @@
+{
+  "name": "35º BPM - Sistema de Inteligência Policial",
+  "description": "Sistema Integrado de Inteligência Policial e Análise Geoespacial do 35º BPM (PMMG), com cruzamento de suspeitos por IA, extração de fichas em PDF e mapeamento tático.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
