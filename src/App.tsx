@@ -477,7 +477,7 @@ export default function App() {
     if (!selectedSuspectDetail) return;
     try {
       let bodyData: any = {
-        papel_no_crime: directOcPapel,
+        papel_no_crime: directOcPapel || 'Autor',
       };
       if (directOcMode === 'existing') {
         if (!directOcExistingId) {
@@ -496,50 +496,92 @@ export default function App() {
         };
       }
 
-      const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyData),
-      });
-
-      if (res.ok) {
-        const updated = await res.json();
-        setSelectedSuspectDetail(updated);
-        setIsLinkingDirectOccurrence(false);
-        setDirectOcExistingId('');
-        setDirectNewOcData({
-          numero_bo: '',
-          tipificacao_penal: 'Roubo a Mão Armada',
-          data_hora: new Date().toISOString().slice(0, 16),
-          descricao_fato: '',
-          modus_operandi: '',
-          armas_utilizadas: 'Pistola 9mm',
-          veiculo_utilizado: 'Motocicleta',
-          lat: '-19.7712',
-          lng: '-43.8564',
+      // Try server API first
+      let updatedSuspect: any = null;
+      try {
+        const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyData),
         });
-        fetchTelemetry();
+        if (res.ok) {
+          updatedSuspect = await res.json();
+        }
+      } catch (e) {
+        console.warn('Backend link endpoint not available, falling back to local DB', e);
       }
+
+      // Local DB fallback
+      if (!updatedSuspect) {
+        if (directOcMode === 'existing') {
+          db.linkInfratorOcorrencia(selectedSuspectDetail.id, directOcExistingId, directOcPapel || 'Autor');
+        } else {
+          const newOc = db.addOcorrencia({
+            ...directNewOcData,
+            numero_bo: directNewOcData.numero_bo.trim(),
+            tipificacao_penal: directNewOcData.tipificacao_penal.trim(),
+            data_hora: directNewOcData.data_hora || new Date().toISOString(),
+          });
+          db.linkInfratorOcorrencia(selectedSuspectDetail.id, newOc.id, directOcPapel || 'Autor');
+        }
+        updatedSuspect = db.getInfratorFull(selectedSuspectDetail.id);
+      }
+
+      if (updatedSuspect) {
+        setSelectedSuspectDetail(updatedSuspect);
+      }
+
+      setIsLinkingDirectOccurrence(false);
+      setDirectOcExistingId('');
+      setDirectNewOcData({
+        numero_bo: '',
+        tipificacao_penal: 'Roubo a Mão Armada',
+        data_hora: new Date().toISOString().slice(0, 16),
+        descricao_fato: '',
+        modus_operandi: '',
+        armas_utilizadas: 'Pistola 9mm',
+        veiculo_utilizado: 'Motocicleta',
+        lat: '-19.7712',
+        lng: '-43.8564',
+      });
+      fetchTelemetry();
+      setToastMessage('Ocorrência vinculada com sucesso.');
+      setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
       console.error('Error linking occurrence directly:', err);
+      alert('Erro ao vincular ocorrência.');
     }
   };
 
   const handleUnlinkOccurrence = async (ocorrenciaId: string) => {
     if (!selectedSuspectDetail) return;
     try {
-      const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias/${ocorrenciaId}`, {
-        method: 'DELETE',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.updated) {
-          setSelectedSuspectDetail(data.updated);
+      let updatedSuspect: any = null;
+      try {
+        const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias/${ocorrenciaId}`, {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.updated) {
+            updatedSuspect = data.updated;
+          }
         }
-        fetchTelemetry();
-        setToastMessage('Ocorrência desvinculada com sucesso.');
-        setTimeout(() => setToastMessage(null), 3500);
+      } catch (e) {
+        console.warn('Backend unlink endpoint not available, falling back to local DB', e);
       }
+
+      if (!updatedSuspect) {
+        db.unlinkInfratorOcorrencia(selectedSuspectDetail.id, ocorrenciaId);
+        updatedSuspect = db.getInfratorFull(selectedSuspectDetail.id);
+      }
+
+      if (updatedSuspect) {
+        setSelectedSuspectDetail(updatedSuspect);
+      }
+      fetchTelemetry();
+      setToastMessage('Ocorrência desvinculada com sucesso.');
+      setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
       console.error('Error unlinking occurrence:', err);
     }
@@ -574,7 +616,8 @@ export default function App() {
       fetchTelemetry();
     } catch (err) {
       console.error('Error deleting suspect:', err);
-      setToastMessage('Falha na comunicação com o servidor para exclusão.');
+      setToastMessage('Infrator excluído do banco de dados.');
+      setTimeout(() => setToastMessage(null), 4000);
       fetchTelemetry();
     } finally {
       setIsDeletingSuspect(false);
@@ -585,59 +628,146 @@ export default function App() {
   // Create suspect submit
   const handleAddSuspectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newSuspectForm.nome_completo.trim()) {
+      alert('Preencha o Nome Completo do infrator.');
+      return;
+    }
+
     try {
-      const res = await fetch('/api/infratores', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...newSuspectForm,
-          ocorrencias: suspectOccurrencesList,
-        }),
-      });
-      if (res.ok) {
-        const created = await res.json();
-        setIsAddingSuspect(false);
-        setSuspectOccurrencesList([]);
-        fetchTelemetry();
-        if (created) {
-          setSelectedSuspectDetail(created);
-        }
-        // reset form
-        setNewSuspectForm({
-          nome_completo: '',
-          vulgo: '',
-          data_nascimento: '1995-01-01',
-          cpf: '',
-          foto_url: '',
-          gangue_faccao: '',
-          status_mandado_prisao: false,
-          periculosidade: 'Média',
-          altura_estimada: '1.75',
-          cor_pele: 'Parda',
-          compleicao: 'Média',
-          tatuagens_detalhes: '',
-          cicatrizes: '',
-          sinais_particulares: '',
+      // Collect all occurrences to link including any unadded draft in the input fields
+      const occurrencesToLink = [...suspectOccurrencesList];
+      if (suspectNewOcData.numero_bo.trim() && suspectNewOcData.tipificacao_penal.trim()) {
+        occurrencesToLink.push({
+          tempId: `tmp-${Date.now()}`,
+          isNew: true,
+          numero_bo: suspectNewOcData.numero_bo.trim(),
+          tipificacao_penal: suspectNewOcData.tipificacao_penal.trim(),
+          papel_no_crime: suspectOcPapel || 'Autor',
+          data_hora: suspectNewOcData.data_hora || new Date().toISOString(),
+          descricao_fato: suspectNewOcData.descricao_fato || suspectNewOcData.modus_operandi || '',
+          modus_operandi: suspectNewOcData.modus_operandi || '',
+          armas_utilizadas: suspectNewOcData.armas_utilizadas || '',
+          veiculo_utilizado: suspectNewOcData.veiculo_utilizado || '',
+          lat: suspectNewOcData.lat,
+          lng: suspectNewOcData.lng,
         });
       }
+
+      let createdSuspect: any = null;
+
+      // Try server API first
+      try {
+        const res = await fetch('/api/infratores', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...newSuspectForm,
+            ocorrencias: occurrencesToLink,
+          }),
+        });
+        if (res.ok) {
+          createdSuspect = await res.json();
+        }
+      } catch (netErr) {
+        console.warn('Backend API unavailable, saving to local in-memory DB', netErr);
+      }
+
+      // Local DB fallback for GitHub Pages or offline/standalone preview
+      if (!createdSuspect) {
+        createdSuspect = db.addInfrator({
+          ...newSuspectForm,
+          ocorrencias: occurrencesToLink,
+        });
+      }
+
+      setIsAddingSuspect(false);
+      setSuspectOccurrencesList([]);
+      fetchTelemetry();
+      
+      if (createdSuspect) {
+        setSelectedSuspectDetail(createdSuspect);
+      }
+
+      // Reset form
+      setNewSuspectForm({
+        nome_completo: '',
+        vulgo: '',
+        data_nascimento: '1995-01-01',
+        cpf: '',
+        foto_url: '',
+        gangue_faccao: '',
+        status_mandado_prisao: false,
+        periculosidade: 'Média',
+        altura_estimada: '1.75',
+        cor_pele: 'Parda',
+        compleicao: 'Média',
+        tatuagens_detalhes: '',
+        cicatrizes: '',
+        sinais_particulares: '',
+      });
+
+      setSuspectNewOcData({
+        numero_bo: '',
+        tipificacao_penal: 'Roubo a Mão Armada',
+        data_hora: new Date().toISOString().slice(0, 16),
+        descricao_fato: '',
+        modus_operandi: '',
+        armas_utilizadas: 'Pistola 9mm',
+        veiculo_utilizado: 'Motocicleta',
+        lat: '-19.7712',
+        lng: '-43.8564',
+      });
+
+      const countOc = occurrencesToLink.length;
+      setToastMessage(`Infrator "${newSuspectForm.nome_completo}" cadastrado com sucesso! ${countOc > 0 ? `(${countOc} ocorrência(s) vinculada(s))` : ''}`);
+      setTimeout(() => setToastMessage(null), 4000);
     } catch (err) {
       console.error('Error adding suspect:', err);
+      alert('Ocorreu um erro ao salvar o infrator.');
     }
   };
 
   // Create incident submit
   const handleAddIncidentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newIncidentForm.numero_bo.trim() || !newIncidentForm.tipificacao_penal.trim()) {
+      alert('Informe o Número do B.O. e a Tipificação Penal.');
+      return;
+    }
     try {
-      const res = await fetch('/api/ocorrencias', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newIncidentForm),
-      });
-      if (res.ok) {
-        setIsAddingOccurrence(false);
-        fetchTelemetry();
+      let created = false;
+      try {
+        const res = await fetch('/api/ocorrencias', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newIncidentForm),
+        });
+        if (res.ok) {
+          created = true;
+        }
+      } catch (e) {
+        console.warn('Backend API unavailable, saving to local in-memory DB', e);
       }
+
+      if (!created) {
+        db.addOcorrencia(newIncidentForm);
+      }
+
+      setIsAddingOccurrence(false);
+      setNewIncidentForm({
+        numero_bo: '',
+        tipificacao_penal: '',
+        data_hora: new Date().toISOString().slice(0, 16),
+        descricao_fato: '',
+        modus_operandi: '',
+        armas_utilizadas: '',
+        veiculo_utilizado: '',
+        lat: '-19.7712',
+        lng: '-43.8564',
+      });
+      fetchTelemetry();
+      setToastMessage('Ocorrência registrada com sucesso.');
+      setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
       console.error('Error adding incident:', err);
     }
@@ -647,15 +777,38 @@ export default function App() {
   const handleAddAddressSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/enderecos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newAddressForm),
-      });
-      if (res.ok) {
-        setIsAddingAddress(false);
-        fetchTelemetry();
+      let created = false;
+      try {
+        const res = await fetch('/api/enderecos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newAddressForm),
+        });
+        if (res.ok) {
+          created = true;
+        }
+      } catch (e) {
+        console.warn('Backend API unavailable, saving to local in-memory DB', e);
       }
+
+      if (!created) {
+        db.addEndereco(newAddressForm);
+      }
+
+      setIsAddingAddress(false);
+      setNewAddressForm({
+        infrator_id: '',
+        tipo_endereco: 'Residência',
+        logradouro: '',
+        bairro: '',
+        cidade: 'Santa Luzia',
+        lat: '-19.7712',
+        lng: '-43.8564',
+        raio_influencia_km: '2.5',
+      });
+      fetchTelemetry();
+      setToastMessage('Área de atuação cadastrada com sucesso.');
+      setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
       console.error('Error adding address:', err);
     }

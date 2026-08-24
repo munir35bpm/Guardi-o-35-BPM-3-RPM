@@ -48,7 +48,7 @@ export interface OcorrenciaCriminal {
 export interface InfratorOcorrencia {
   infrator_id: string;
   ocorrencia_id: string;
-  papel_no_crime: 'Executor' | 'Mandante' | 'Co-autor' | 'Olheiro' | 'Receptador' | 'Suspeito';
+  papel_no_crime: string;
 }
 
 export interface VinculoComparsa {
@@ -391,6 +391,133 @@ class CrimIntelDatabase {
       ocorrencias,
       comparsas: [...comparsasOrigem, ...comparsasDestino]
     };
+  }
+
+  public addInfrator(data: any): any {
+    const id = data.id || `inf-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newInfrator: Infrator = {
+      id,
+      nome_completo: data.nome_completo,
+      vulgo: data.vulgo || 'S/V',
+      data_nascimento: data.data_nascimento || '1990-01-01',
+      cpf: data.cpf || '000.000.000-00',
+      foto_url: data.foto_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop',
+      gangue_faccao: data.gangue_faccao || 'Nenhuma',
+      status_mandado_prisao: !!data.status_mandado_prisao,
+      periculosidade: data.periculosidade || 'Média',
+      created_at: new Date().toISOString()
+    };
+
+    const newFisicas: CaracteristicasFisicas = {
+      infrator_id: id,
+      altura_estimada: Number(data.altura_estimada) || 1.75,
+      cor_pele: data.cor_pele || 'Parda',
+      compleicao: data.compleicao || 'Média',
+      tatuagens_detalhes: data.tatuagens_detalhes || 'Sem tatuagens cadastradas',
+      cicatrizes: data.cicatrizes || 'Sem cicatrizes cadastradas',
+      sinais_particulares: data.sinais_particulares || 'Sem sinais particulares cadastrados'
+    };
+
+    this.infratores.unshift(newInfrator);
+    this.caracteristicas_fisicas.unshift(newFisicas);
+
+    if (Array.isArray(data.ocorrencias) && data.ocorrencias.length > 0) {
+      for (const item of data.ocorrencias) {
+        const papel = item.papel_no_crime || item.papel || 'Autor';
+        if (item.ocorrencia_id) {
+          this.infrator_ocorrencia.push({
+            infrator_id: id,
+            ocorrencia_id: item.ocorrencia_id,
+            papel_no_crime: papel
+          });
+        } else if (item.numero_bo && item.tipificacao_penal) {
+          const ocId = `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          const createdOc: OcorrenciaCriminal = {
+            id: ocId,
+            numero_bo: item.numero_bo,
+            data_hora: item.data_hora || new Date().toISOString(),
+            tipificacao_penal: item.tipificacao_penal,
+            descricao_fato: item.descricao_fato || `Ocorrência registrada referente a ${item.tipificacao_penal} com participação de ${newInfrator.nome_completo} como ${papel}.`,
+            modus_operandi: item.modus_operandi || 'Padrão em apuração',
+            armas_utilizadas: item.armas_utilizadas || 'Não informada',
+            veiculo_utilizado: item.veiculo_utilizado || 'Não informado',
+            geom_crime: {
+              lat: item.lat !== undefined && !isNaN(Number(item.lat)) ? Number(item.lat) : -19.7712,
+              lng: item.lng !== undefined && !isNaN(Number(item.lng)) ? Number(item.lng) : -43.8564
+            }
+          };
+          this.ocorrencias_criminais.unshift(createdOc);
+          this.infrator_ocorrencia.push({
+            infrator_id: id,
+            ocorrencia_id: ocId,
+            papel_no_crime: papel
+          });
+        }
+      }
+    }
+
+    return this.getInfratorFull(id);
+  }
+
+  public addOcorrencia(data: any): OcorrenciaCriminal {
+    const id = data.id || `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newOc: OcorrenciaCriminal = {
+      id,
+      numero_bo: data.numero_bo,
+      data_hora: data.data_hora || new Date().toISOString(),
+      tipificacao_penal: data.tipificacao_penal,
+      descricao_fato: data.descricao_fato || data.modus_operandi || 'Ocorrência registrada no sistema.',
+      modus_operandi: data.modus_operandi || 'Em apuração',
+      armas_utilizadas: data.armas_utilizadas || 'Não informada',
+      veiculo_utilizado: data.veiculo_utilizado || 'Não informado',
+      geom_crime: {
+        lat: data.lat !== undefined && !isNaN(Number(data.lat)) ? Number(data.lat) : (data.geom_crime?.lat ?? -19.7712),
+        lng: data.lng !== undefined && !isNaN(Number(data.lng)) ? Number(data.lng) : (data.geom_crime?.lng ?? -43.8564)
+      }
+    };
+    this.ocorrencias_criminais.unshift(newOc);
+    return newOc;
+  }
+
+  public addEndereco(data: any): EnderecoAtuacao {
+    const id = data.id || `end-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newEnd: EnderecoAtuacao = {
+      id,
+      infrator_id: data.infrator_id,
+      tipo_endereco: data.tipo_endereco || 'Residência',
+      logradouro: data.logradouro || 'Não informado',
+      bairro: data.bairro || 'Centro',
+      cidade: data.cidade || 'Santa Luzia',
+      raio_influencia_km: Number(data.raio_influencia_km) || 2.5,
+      geom_ponto: {
+        lat: data.lat !== undefined && !isNaN(Number(data.lat)) ? Number(data.lat) : (data.geom_ponto?.lat ?? -19.7712),
+        lng: data.lng !== undefined && !isNaN(Number(data.lng)) ? Number(data.lng) : (data.geom_ponto?.lng ?? -43.8564)
+      }
+    };
+    this.enderecos_atuacao.unshift(newEnd);
+    return newEnd;
+  }
+
+  public linkInfratorOcorrencia(infrator_id: string, ocorrencia_id: string, papel_no_crime: string = 'Autor'): boolean {
+    const exists = this.infrator_ocorrencia.some(io => io.infrator_id === infrator_id && io.ocorrencia_id === ocorrencia_id);
+    if (exists) {
+      const item = this.infrator_ocorrencia.find(io => io.infrator_id === infrator_id && io.ocorrencia_id === ocorrencia_id);
+      if (item) item.papel_no_crime = papel_no_crime;
+      return true;
+    }
+    this.infrator_ocorrencia.push({
+      infrator_id,
+      ocorrencia_id,
+      papel_no_crime
+    });
+    return true;
+  }
+
+  public unlinkInfratorOcorrencia(infrator_id: string, ocorrencia_id: string): boolean {
+    this.infrator_ocorrencia = this.infrator_ocorrencia.filter(
+      io => !(io.infrator_id === infrator_id && io.ocorrencia_id === ocorrencia_id)
+    );
+    return true;
   }
 
   public deleteInfrator(id: string): boolean {
