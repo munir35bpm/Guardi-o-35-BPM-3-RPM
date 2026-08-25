@@ -170,3 +170,24 @@ export interface OrcrimData {
   estrutura_piramidal: EstruturaPiramidalOrcrim;
 }
 
+export interface GangAreaZone {
+  id: string;
+  name: string;
+  gangName?: string;
+  description?: string;
+  color: string;
+  fillOpacity?: number;
+  strokeWidth?: number;
+  coordinates: [number, number][]; // [lat, lng] pairs
+  innerHoles?: [number, number][][];
+  type: 'Polygon' | 'LineString' | 'Point';
+  pointCoords?: [number, number];
+  visible: boolean;
+  sourceFile?: string;
+  dangerLevel?: 'CRÍTICO' | 'ALTO' | 'MÉDIO' | 'BAIXO';
+  rivalGang?: string;
+  notes?: string;
+  areaKm2?: number;
+}
+
+

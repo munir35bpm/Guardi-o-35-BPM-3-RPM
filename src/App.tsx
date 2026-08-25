@@ -126,6 +126,30 @@ export default function App() {
     lng: '-43.8564',
   });
 
+  // Attached addresses during suspect registration (Multiple Addresses Support)
+  const [suspectAddressesList, setSuspectAddressesList] = useState<any[]>([]);
+  const [suspectNewAddrData, setSuspectNewAddrData] = useState({
+    tipo_endereco: 'Residência',
+    logradouro: '',
+    bairro: '',
+    cidade: 'Santa Luzia',
+    raio_influencia_km: '2.5',
+    lat: '-19.7712',
+    lng: '-43.8564',
+  });
+
+  // Direct address addition in suspect detail card
+  const [isAddingDirectAddress, setIsAddingDirectAddress] = useState(false);
+  const [directNewAddrData, setDirectNewAddrData] = useState({
+    tipo_endereco: 'Residência',
+    logradouro: '',
+    bairro: '',
+    cidade: 'Santa Luzia',
+    raio_influencia_km: '2.5',
+    lat: '-19.7712',
+    lng: '-43.8564',
+  });
+
   // Direct linkage from suspect detail card
   const [isLinkingDirectOccurrence, setIsLinkingDirectOccurrence] = useState(false);
   const [directOcMode, setDirectOcMode] = useState<'new' | 'existing'>('new');
@@ -469,6 +493,122 @@ export default function App() {
     setSuspectOccurrencesList((prev) => prev.filter((item) => item.tempId !== tempId));
   };
 
+  // Add an address to the temporary suspect creation list (Multiple Addresses)
+  const handleAddAddressToSuspect = () => {
+    if (!suspectNewAddrData.logradouro.trim()) {
+      alert('Informe o Logradouro / Endereço (Rua, Avenida, Beco, etc.).');
+      return;
+    }
+    setSuspectAddressesList((prev) => [
+      ...prev,
+      {
+        tempId: `tmp-addr-${Date.now()}-${Math.random()}`,
+        tipo_endereco: suspectNewAddrData.tipo_endereco,
+        logradouro: suspectNewAddrData.logradouro.trim(),
+        bairro: suspectNewAddrData.bairro.trim() || 'Centro',
+        cidade: suspectNewAddrData.cidade.trim() || 'Santa Luzia',
+        raio_influencia_km: suspectNewAddrData.raio_influencia_km || '2.5',
+        lat: suspectNewAddrData.lat,
+        lng: suspectNewAddrData.lng,
+      },
+    ]);
+    setSuspectNewAddrData({
+      tipo_endereco: 'Residência',
+      logradouro: '',
+      bairro: '',
+      cidade: 'Santa Luzia',
+      raio_influencia_km: '2.5',
+      lat: '-19.7712',
+      lng: '-43.8564',
+    });
+  };
+
+  const handleRemoveAddressFromSuspect = (tempId: string) => {
+    setSuspectAddressesList((prev) => prev.filter((item) => item.tempId !== tempId));
+  };
+
+  // Direct address addition in suspect detail drawer
+  const handleAddAddressDirectly = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSuspectDetail) return;
+    if (!directNewAddrData.logradouro.trim()) {
+      alert('Informe o Logradouro / Endereço.');
+      return;
+    }
+    try {
+      const payload = {
+        infrator_id: selectedSuspectDetail.id,
+        tipo_endereco: directNewAddrData.tipo_endereco,
+        logradouro: directNewAddrData.logradouro.trim(),
+        bairro: directNewAddrData.bairro.trim() || 'Centro',
+        cidade: directNewAddrData.cidade.trim() || 'Santa Luzia',
+        raio_influencia_km: directNewAddrData.raio_influencia_km || '2.5',
+        lat: directNewAddrData.lat,
+        lng: directNewAddrData.lng,
+      };
+
+      let created = false;
+      try {
+        const res = await fetch('/api/enderecos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) created = true;
+      } catch (err) {
+        console.warn('Backend API unavailable, saving to local in-memory DB', err);
+      }
+
+      if (!created) {
+        db.addEndereco(payload);
+      }
+
+      // Refresh suspect detail
+      const updated = db.getInfratorFull(selectedSuspectDetail.id);
+      if (updated) {
+        setSelectedSuspectDetail(updated);
+      }
+
+      setIsAddingDirectAddress(false);
+      setDirectNewAddrData({
+        tipo_endereco: 'Residência',
+        logradouro: '',
+        bairro: '',
+        cidade: 'Santa Luzia',
+        raio_influencia_km: '2.5',
+        lat: '-19.7712',
+        lng: '-43.8564',
+      });
+      fetchTelemetry();
+      setToastMessage('Novo endereço vinculado com sucesso.');
+      setTimeout(() => setToastMessage(null), 3500);
+    } catch (err) {
+      console.error('Error adding address directly:', err);
+      alert('Erro ao cadastrar endereço.');
+    }
+  };
+
+  const handleDeleteAddressDirectly = async (enderecoId: string) => {
+    if (!selectedSuspectDetail) return;
+    try {
+      try {
+        await fetch(`/api/enderecos/${enderecoId}`, { method: 'DELETE' });
+      } catch (e) {
+        console.warn('Backend delete address failed, using local DB fallback', e);
+      }
+      db.enderecos_atuacao = db.enderecos_atuacao.filter((ea) => ea.id !== enderecoId);
+      const updated = db.getInfratorFull(selectedSuspectDetail.id);
+      if (updated) {
+        setSelectedSuspectDetail(updated);
+      }
+      fetchTelemetry();
+      setToastMessage('Endereço removido com sucesso.');
+      setTimeout(() => setToastMessage(null), 3500);
+    } catch (err) {
+      console.error('Error deleting address:', err);
+    }
+  };
+
   // Direct linkage from suspect detail drawer
   const handleLinkOccurrenceDirectly = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -651,6 +791,21 @@ export default function App() {
         });
       }
 
+      // Collect all operational addresses to attach (Multiple Addresses Support)
+      const addressesToAttach = [...suspectAddressesList];
+      if (suspectNewAddrData.logradouro.trim()) {
+        addressesToAttach.push({
+          tempId: `tmp-addr-${Date.now()}`,
+          tipo_endereco: suspectNewAddrData.tipo_endereco,
+          logradouro: suspectNewAddrData.logradouro.trim(),
+          bairro: suspectNewAddrData.bairro.trim() || 'Centro',
+          cidade: suspectNewAddrData.cidade.trim() || 'Santa Luzia',
+          raio_influencia_km: suspectNewAddrData.raio_influencia_km || '2.5',
+          lat: suspectNewAddrData.lat,
+          lng: suspectNewAddrData.lng,
+        });
+      }
+
       let createdSuspect: any = null;
 
       // Try server API first
@@ -660,6 +815,7 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...newSuspectForm,
+            enderecos: addressesToAttach,
             ocorrencias: occurrencesToLink,
           }),
         });
@@ -674,12 +830,14 @@ export default function App() {
       if (!createdSuspect) {
         createdSuspect = db.addInfrator({
           ...newSuspectForm,
+          enderecos: addressesToAttach,
           ocorrencias: occurrencesToLink,
         });
       }
 
       setIsAddingSuspect(false);
       setSuspectOccurrencesList([]);
+      setSuspectAddressesList([]);
       fetchTelemetry();
       
       if (createdSuspect) {
@@ -704,6 +862,16 @@ export default function App() {
         sinais_particulares: '',
       });
 
+      setSuspectNewAddrData({
+        tipo_endereco: 'Residência',
+        logradouro: '',
+        bairro: '',
+        cidade: 'Santa Luzia',
+        raio_influencia_km: '2.5',
+        lat: '-19.7712',
+        lng: '-43.8564',
+      });
+
       setSuspectNewOcData({
         numero_bo: '',
         tipificacao_penal: 'Roubo a Mão Armada',
@@ -717,7 +885,8 @@ export default function App() {
       });
 
       const countOc = occurrencesToLink.length;
-      setToastMessage(`Infrator "${newSuspectForm.nome_completo}" cadastrado com sucesso! ${countOc > 0 ? `(${countOc} ocorrência(s) vinculada(s))` : ''}`);
+      const countAddr = addressesToAttach.length;
+      setToastMessage(`Infrator "${newSuspectForm.nome_completo}" cadastrado com sucesso! ${countAddr > 0 ? `(${countAddr} endereço(s))` : ''} ${countOc > 0 ? `(${countOc} ocorrência(s))` : ''}`);
       setTimeout(() => setToastMessage(null), 4000);
     } catch (err) {
       console.error('Error adding suspect:', err);
@@ -1882,6 +2051,196 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Endereços Operacionais / Residência / Esconderijos (Múltiplos Endereços) */}
+                      <div className="bg-[#0A0A0B] p-4 rounded border border-zinc-800 space-y-4 tactical-corner mt-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-850 pb-2.5 gap-2">
+                          <div>
+                            <label className="text-[11px] uppercase text-amber-400 font-bold flex items-center gap-1.5 tracking-widest font-mono">
+                              <MapPin className="w-4 h-4 text-amber-500" />
+                              Endereços do Infrator (Residência, Esconderijos e Pontos de Atuação)
+                            </label>
+                            <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                              Cadastre um ou múltiplos endereços conhecidos (Residência, Esconderijo, Boca de Fumo, Área de Atuação).
+                            </p>
+                          </div>
+                          <span className="text-[10px] bg-zinc-900 border border-zinc-750 text-amber-400 font-bold px-2 py-0.5 rounded font-mono">
+                            {suspectAddressesList.length} Endereço(s) Adicionado(s)
+                          </span>
+                        </div>
+
+                        {/* Address Input Sub-Form */}
+                        <div className="bg-[#121216] p-3 rounded border border-zinc-800 space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                Tipo de Endereço / Local *
+                              </label>
+                              <select
+                                value={suspectNewAddrData.tipo_endereco}
+                                onChange={(e) => setSuspectNewAddrData({ ...suspectNewAddrData, tipo_endereco: e.target.value })}
+                                className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none text-zinc-200"
+                              >
+                                <option value="Residência">Residência (Casa/Apto)</option>
+                                <option value="Esconderijo">Esconderijo / Aparelho</option>
+                                <option value="Área de Atuação">Área de Atuação / Território</option>
+                                <option value="Ponto de Venda">Ponto de Venda / Boca de Fumo</option>
+                                <option value="Local de Trabalho / Cobertura">Local de Trabalho / Cobertura</option>
+                                <option value="Casa de Parentes">Casa de Parentes / Cônjuge</option>
+                              </select>
+                            </div>
+
+                            <div className="md:col-span-2">
+                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                Logradouro / Endereço (Rua, Avenida, Número, Beco) *
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="Ex: Rua Direita, 450 ou Beco dos Artistas, próx. ao nº 12"
+                                value={suspectNewAddrData.logradouro}
+                                onChange={(e) => setSuspectNewAddrData({ ...suspectNewAddrData, logradouro: e.target.value })}
+                                className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none text-zinc-200"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                Bairro
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="Ex: São Benedito, Palmital, Centro"
+                                value={suspectNewAddrData.bairro}
+                                onChange={(e) => setSuspectNewAddrData({ ...suspectNewAddrData, bairro: e.target.value })}
+                                className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none text-zinc-200"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                Cidade / Município
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="Ex: Santa Luzia, Belo Horizonte"
+                                value={suspectNewAddrData.cidade}
+                                onChange={(e) => setSuspectNewAddrData({ ...suspectNewAddrData, cidade: e.target.value })}
+                                className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none text-zinc-200"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                Raio Estimado de Influência (km)
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="Ex: 2.5"
+                                value={suspectNewAddrData.raio_influencia_km}
+                                onChange={(e) => setSuspectNewAddrData({ ...suspectNewAddrData, raio_influencia_km: e.target.value })}
+                                className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none text-zinc-200"
+                              />
+                            </div>
+
+                            {/* Geo Coordinates */}
+                            <div>
+                              <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1 mb-1">
+                                <MapPin className="w-3 h-3 text-cyan-400" /> Latitude (Lat)
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="-19.7712"
+                                value={suspectNewAddrData.lat}
+                                onChange={(e) => setSuspectNewAddrData({ ...suspectNewAddrData, lat: e.target.value })}
+                                className="w-full bg-[#0A0A0B] border border-cyan-900/50 rounded p-2 text-xs text-cyan-200 focus:outline-none font-mono"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1 mb-1">
+                                <MapPin className="w-3 h-3 text-cyan-400" /> Longitude (Long)
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="-43.8564"
+                                value={suspectNewAddrData.lng}
+                                onChange={(e) => setSuspectNewAddrData({ ...suspectNewAddrData, lng: e.target.value })}
+                                className="w-full bg-[#0A0A0B] border border-cyan-900/50 rounded p-2 text-xs text-cyan-200 focus:outline-none font-mono"
+                              />
+                            </div>
+
+                            <div className="flex items-end pb-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSuspectNewAddrData({
+                                    ...suspectNewAddrData,
+                                    lat: selectedCoords ? selectedCoords.lat.toFixed(5) : '-19.7712',
+                                    lng: selectedCoords ? selectedCoords.lng.toFixed(5) : '-43.8564',
+                                  })
+                                }
+                                className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 rounded text-[10px] font-bold uppercase transition flex items-center justify-center gap-1 cursor-pointer"
+                                title="Carregar coordenadas do ponto selecionado no mapa"
+                              >
+                                <Crosshair className="w-3 h-3 text-amber-400" /> Ponto 35º BPM / Mapa
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end pt-1">
+                            <button
+                              type="button"
+                              onClick={handleAddAddressToSuspect}
+                              className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs rounded transition uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md shadow-amber-500/10"
+                            >
+                              <Plus className="w-4 h-4 stroke-[2.5]" />
+                              <span>Adicionar Este Endereço à Ficha</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* List of Attached Addresses */}
+                        {suspectAddressesList.length > 0 && (
+                          <div className="space-y-2 pt-2">
+                            <span className="text-[9px] uppercase text-zinc-400 font-bold block">
+                              Endereços a serem gravados com o infrator:
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                              {suspectAddressesList.map((addrItem) => (
+                                <div
+                                  key={addrItem.tempId}
+                                  className="bg-[#0F0F12] border border-zinc-800 rounded p-2.5 flex items-start justify-between gap-2 text-xs font-mono"
+                                >
+                                  <div className="space-y-0.5 flex-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-bold text-amber-400 text-[10px] uppercase bg-amber-950/60 border border-amber-800/80 px-1.5 py-0.5 rounded">
+                                        {addrItem.tipo_endereco}
+                                      </span>
+                                      <span className="text-zinc-400 text-[10px]">{addrItem.bairro}</span>
+                                    </div>
+                                    <p className="text-zinc-200 font-medium text-xs">
+                                      {addrItem.logradouro}
+                                    </p>
+                                    <div className="text-[10px] text-zinc-500 flex items-center gap-2">
+                                      <span>{addrItem.cidade}</span>
+                                      <span>•</span>
+                                      <span>Raio: {addrItem.raio_influencia_km} km</span>
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveAddressFromSuspect(addrItem.tempId)}
+                                    className="p-1 text-zinc-500 hover:text-red-400 rounded transition cursor-pointer"
+                                    title="Remover endereço"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="bg-[#0A0A0B] p-4 rounded border border-zinc-800 space-y-4 tactical-corner mt-4">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-850 pb-2.5 gap-2">
                           <div>
@@ -2898,15 +3257,103 @@ export default function App() {
                       </div>
 
                       <div className="border-t border-zinc-800/80 pt-3 space-y-2">
-                        <span className="text-[9px] text-zinc-500 block uppercase font-bold font-mono">Áreas de Influência / Atuação</span>
-                        <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1 font-mono">
-                          {selectedSuspectDetail.enderecos.map((ea) => (
-                            <div key={ea.id} className="bg-[#0A0A0B] p-2 rounded border border-zinc-800">
-                              <span className="font-bold text-amber-400 block uppercase text-[9px]">{ea.tipo_endereco}</span>
-                              <p className="text-zinc-300 mt-0.5 text-[11px] font-sans">{ea.logradouro}, {ea.bairro}</p>
-                              <span className="text-[9px] text-zinc-500 block mt-0.5">Raio Influência: {ea.raio_influencia_km} km</span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] text-zinc-400 block uppercase font-bold font-mono flex items-center gap-1">
+                            <MapPin className="w-3.5 h-3.5 text-amber-500" />
+                            Endereços Conhecidos ({selectedSuspectDetail.enderecos?.length || 0})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setIsAddingDirectAddress(!isAddingDirectAddress)}
+                            className="px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded text-[9px] font-mono font-bold flex items-center gap-1 transition cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" />
+                            {isAddingDirectAddress ? 'Cancelar' : '+ Endereço'}
+                          </button>
+                        </div>
+
+                        {/* Inline Form to add address directly to existing suspect */}
+                        {isAddingDirectAddress && (
+                          <form onSubmit={handleAddAddressDirectly} className="bg-[#121216] p-2.5 rounded border border-zinc-800 space-y-2 font-mono text-xs">
+                            <span className="text-[9px] text-amber-400 font-bold uppercase block">Adicionar Novo Endereço</span>
+                            <div>
+                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">Tipo de Local</label>
+                              <select
+                                value={directNewAddrData.tipo_endereco}
+                                onChange={(e) => setDirectNewAddrData({ ...directNewAddrData, tipo_endereco: e.target.value })}
+                                className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                              >
+                                <option value="Residência">Residência (Casa/Apto)</option>
+                                <option value="Esconderijo">Esconderijo / Aparelho</option>
+                                <option value="Área de Atuação">Área de Atuação / Território</option>
+                                <option value="Ponto de Venda">Ponto de Venda / Boca de Fumo</option>
+                                <option value="Local de Trabalho / Cobertura">Local de Trabalho / Cobertura</option>
+                                <option value="Casa de Parentes">Casa de Parentes / Cônjuge</option>
+                              </select>
                             </div>
-                          ))}
+                            <div>
+                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">Logradouro / Rua *</label>
+                              <input
+                                type="text"
+                                placeholder="Ex: Rua Direita, 450"
+                                value={directNewAddrData.logradouro}
+                                onChange={(e) => setDirectNewAddrData({ ...directNewAddrData, logradouro: e.target.value })}
+                                className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">Bairro</label>
+                                <input
+                                  type="text"
+                                  placeholder="Ex: São Benedito"
+                                  value={directNewAddrData.bairro}
+                                  onChange={(e) => setDirectNewAddrData({ ...directNewAddrData, bairro: e.target.value })}
+                                  className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">Cidade</label>
+                                <input
+                                  type="text"
+                                  placeholder="Ex: Santa Luzia"
+                                  value={directNewAddrData.cidade}
+                                  onChange={(e) => setDirectNewAddrData({ ...directNewAddrData, cidade: e.target.value })}
+                                  className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                            <button
+                              type="submit"
+                              className="w-full py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-xs transition uppercase tracking-wider cursor-pointer"
+                            >
+                              Salvar Endereço
+                            </button>
+                          </form>
+                        )}
+
+                        <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 font-mono">
+                          {selectedSuspectDetail.enderecos && selectedSuspectDetail.enderecos.length > 0 ? (
+                            selectedSuspectDetail.enderecos.map((ea) => (
+                              <div key={ea.id} className="bg-[#0A0A0B] p-2 rounded border border-zinc-800 flex items-start justify-between gap-2">
+                                <div className="space-y-0.5">
+                                  <span className="font-bold text-amber-400 block uppercase text-[9px]">{ea.tipo_endereco}</span>
+                                  <p className="text-zinc-300 text-[11px] font-sans">{ea.logradouro}, {ea.bairro}</p>
+                                  <span className="text-[9px] text-zinc-500 block">Cidade: {ea.cidade} • Raio: {ea.raio_influencia_km} km</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteAddressDirectly(ea.id)}
+                                  className="p-1 text-zinc-500 hover:text-red-400 transition cursor-pointer"
+                                  title="Remover endereço"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-[10px] text-zinc-500 font-mono italic">Nenhum endereço cadastrado para este infrator.</p>
+                          )}
                         </div>
                       </div>
 

@@ -1,3 +1,6 @@
+import { GangAreaZone } from '../types';
+import { DEFAULT_GANG_AREAS_35BPM } from '../utils/kmlGeoJsonParser';
+
 // Types representing the database schema
 export interface Infrator {
   id: string;
@@ -66,6 +69,7 @@ class CrimIntelDatabase {
   public ocorrencias_criminais: OcorrenciaCriminal[] = [];
   public infrator_ocorrencia: InfratorOcorrencia[] = [];
   public vinculos_comparsas: VinculoComparsa[] = [];
+  public gang_areas: GangAreaZone[] = [];
 
   constructor() {
     this.seedDatabase();
@@ -91,6 +95,32 @@ class CrimIntelDatabase {
     this.ocorrencias_criminais = [];
     this.infrator_ocorrencia = [];
     this.vinculos_comparsas = [];
+    this.gang_areas = [...DEFAULT_GANG_AREAS_35BPM];
+  }
+
+  public getGangAreas(): GangAreaZone[] {
+    return this.gang_areas;
+  }
+
+  public setGangAreas(areas: GangAreaZone[]): GangAreaZone[] {
+    this.gang_areas = areas;
+    return this.gang_areas;
+  }
+
+  public addGangArea(area: GangAreaZone): GangAreaZone {
+    this.gang_areas.push(area);
+    return area;
+  }
+
+  public removeGangArea(id: string): boolean {
+    const prevLen = this.gang_areas.length;
+    this.gang_areas = this.gang_areas.filter((a) => a.id !== id);
+    return this.gang_areas.length < prevLen;
+  }
+
+  public resetGangAreas(): GangAreaZone[] {
+    this.gang_areas = [...DEFAULT_GANG_AREAS_35BPM];
+    return this.gang_areas;
   }
 
   // Database helper actions
@@ -153,6 +183,24 @@ class CrimIntelDatabase {
 
     this.infratores.unshift(newInfrator);
     this.caracteristicas_fisicas.unshift(newFisicas);
+
+    // Process attached addresses (multiple addresses supported)
+    if (Array.isArray(data.enderecos) && data.enderecos.length > 0) {
+      for (const end of data.enderecos) {
+        if (end.logradouro && end.logradouro.trim()) {
+          this.addEndereco({
+            infrator_id: id,
+            tipo_endereco: end.tipo_endereco || 'Residência',
+            logradouro: end.logradouro.trim(),
+            bairro: end.bairro || 'Centro',
+            cidade: end.cidade || 'Santa Luzia',
+            raio_influencia_km: Number(end.raio_influencia_km) || 2.5,
+            lat: end.lat !== undefined && !isNaN(Number(end.lat)) ? Number(end.lat) : -19.7712,
+            lng: end.lng !== undefined && !isNaN(Number(end.lng)) ? Number(end.lng) : -43.8564
+          });
+        }
+      }
+    }
 
     if (Array.isArray(data.ocorrencias) && data.ocorrencias.length > 0) {
       for (const item of data.ocorrencias) {

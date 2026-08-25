@@ -81,6 +81,7 @@ app.post('/api/infratores', (req, res) => {
       tatuagens_detalhes,
       cicatrizes,
       sinais_particulares,
+      enderecos, // Array of operational addresses
       ocorrencias // Array of occurrences to link (existing or new)
     } = req.body;
 
@@ -115,6 +116,28 @@ app.post('/api/infratores', (req, res) => {
 
     db.infratores.push(newInfrator);
     db.caracteristicas_fisicas.push(newFisicas);
+
+    // Process attached addresses during suspect registration
+    if (Array.isArray(enderecos) && enderecos.length > 0) {
+      for (const end of enderecos) {
+        if (end.logradouro && end.logradouro.trim()) {
+          const endId = `end-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          db.enderecos_atuacao.push({
+            id: endId,
+            infrator_id: id,
+            tipo_endereco: end.tipo_endereco || 'Residência',
+            logradouro: end.logradouro.trim(),
+            bairro: end.bairro || 'Centro',
+            cidade: end.cidade || 'Santa Luzia',
+            raio_influencia_km: Number(end.raio_influencia_km) || 2.5,
+            geom_ponto: {
+              lat: end.lat !== undefined && !isNaN(Number(end.lat)) ? Number(end.lat) : -19.7712,
+              lng: end.lng !== undefined && !isNaN(Number(end.lng)) ? Number(end.lng) : -43.8564
+            }
+          });
+        }
+      }
+    }
 
     // Process attached occurrences during suspect registration
     if (Array.isArray(ocorrencias) && ocorrencias.length > 0) {
@@ -423,6 +446,122 @@ app.post('/api/enderecos', (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+app.delete('/api/enderecos/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const initialLen = db.enderecos_atuacao.length;
+    db.enderecos_atuacao = db.enderecos_atuacao.filter(ea => ea.id !== id);
+    if (db.enderecos_atuacao.length === initialLen) {
+      res.status(404).json({ error: 'Endereço não encontrado.' });
+      return;
+    }
+    res.json({ success: true, message: 'Endereço excluído com sucesso.' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// GANG AREAS / TERRITORIAL MAPS (KML, KMZ, GEOJSON)
+// ==========================================
+
+app.get('/api/gang-areas', (req, res) => {
+  try {
+    res.json(db.getGangAreas());
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/gang-areas', (req, res) => {
+  try {
+    const zone = req.body;
+    if (!zone.name || !zone.coordinates || !Array.isArray(zone.coordinates)) {
+      res.status(400).json({ error: 'Dados da área de gangue inválidos. Coordenadas obrigatórias.' });
+      return;
+    }
+    const newZone = {
+      ...zone,
+      id: zone.id || `gang-zone-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      visible: zone.visible !== undefined ? zone.visible : true,
+    };
+    db.addGangArea(newZone);
+    res.status(201).json(newZone);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/gang-areas/import', (req, res) => {
+  try {
+    const { zones, replaceAll } = req.body;
+    if (!Array.isArray(zones)) {
+      res.status(400).json({ error: 'Array de zonas (zones) é obrigatório.' });
+      return;
+    }
+
+    if (replaceAll) {
+      db.setGangAreas(zones);
+    } else {
+      // Append only unique / new zones
+      for (const z of zones) {
+        if (!db.gang_areas.some(existing => existing.id === z.id)) {
+          db.gang_areas.push(z);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `${zones.length} área(s) de gangues importadas com sucesso.`,
+      total: db.gang_areas.length,
+      data: db.gang_areas,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/gang-areas/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const idx = db.gang_areas.findIndex(g => g.id === id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Área de gangue não encontrada.' });
+      return;
+    }
+    db.gang_areas[idx] = { ...db.gang_areas[idx], ...updates };
+    res.json(db.gang_areas[idx]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/gang-areas/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const removed = db.removeGangArea(id);
+    if (!removed) {
+      res.status(404).json({ error: 'Área de gangue não encontrada.' });
+      return;
+    }
+    res.json({ success: true, message: 'Área de gangue excluída com sucesso.' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/gang-areas/reset', (req, res) => {
+  try {
+    const defaultAreas = db.resetGangAreas();
+    res.json({ success: true, message: 'Áreas redefinidas para o padrão do 35º BPM.', data: defaultAreas });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 // 4. Cúmplices / Vínculos CRUD
 app.post('/api/links', (req, res) => {
