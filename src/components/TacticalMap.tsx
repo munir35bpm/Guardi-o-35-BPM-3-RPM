@@ -448,32 +448,210 @@ export default function TacticalMap({
 
       const marker = L.marker([lat, lng], { icon: crimeIcon });
 
-      const involvedHTML =
-        oc.envolvidos && oc.envolvidos.length > 0
-          ? `<div style="margin-top: 8px; border-top: 1px solid #e2e8f0; padding-top: 4px;">
-              <strong style="color: #475569; font-size: 11px; text-transform: uppercase;">Infratores Vinculados:</strong>
-              <ul style="margin: 3px 0; padding-left: 14px; font-size: 11px;">
-                ${oc.envolvidos
-                  .map((e) => `<li>${e.nome} (${e.vulgo}) - <strong>${e.papel}</strong></li>`)
-                  .join('')}
-              </ul>
-             </div>`
-          : '<div style="margin-top: 6px; font-style: italic; color: #94a3b8; font-size: 11px;">Nenhum autor autuado diretamente neste B.O.</div>';
+      // Intelligent detection of arrests, qualified authors, and linkages
+      const allSuspects = db.infratores || [];
+      const fullText = `${oc.descricao_fato || ''} ${oc.modus_operandi || ''}`;
+      const textLower = fullText.toLowerCase();
+
+      // Detect arrest / detention keywords
+      const isPrisaoDetectada =
+        /pres[oa]s?|pris[aã]o|flagrante|conduzid[oa]s?|detid[oa]s?|apreendid[oa]s?|autuad[oa]s?|recolhid[oa]s?|mandado cumprido|ratificad[oa]|presídio|delegacia|apresentad[oa]s?\s+[àa]o?\s+delegad[oa]|ratificou/i.test(fullText);
+
+      const autoresVinculados: { nome: string; vulgo?: string; papel: string; preso?: boolean }[] = [];
+
+      // A. Formally attached involved list
+      if (oc.envolvidos && Array.isArray(oc.envolvidos) && oc.envolvidos.length > 0) {
+        oc.envolvidos.forEach((e: any) => {
+          autoresVinculados.push({
+            nome: e.nome,
+            vulgo: e.vulgo,
+            papel: e.papel || (isPrisaoDetectada ? 'Autor Preso' : 'Autor Qualificado'),
+            preso: isPrisaoDetectada || /pres|autuad/i.test(e.papel || ''),
+          });
+        });
+      }
+
+      // B. Links from infrator_ocorrencia in DB
+      if (db.infrator_ocorrencia && db.infrator_ocorrencia.length > 0) {
+        const links = db.infrator_ocorrencia.filter(
+          (l) => l.ocorrencia_id === oc.id || l.ocorrencia_id === oc.numero_bo
+        );
+        links.forEach((l) => {
+          const suspect = allSuspects.find((s) => s.id === l.infrator_id);
+          if (
+            suspect &&
+            !autoresVinculados.some(
+              (a) => a.nome.toLowerCase() === suspect.nome_completo.toLowerCase()
+            )
+          ) {
+            autoresVinculados.push({
+              nome: suspect.nome_completo,
+              vulgo: suspect.vulgo,
+              papel: l.papel_no_crime || (isPrisaoDetectada ? 'Autor Preso' : 'Autor Vinculado'),
+              preso: isPrisaoDetectada || /pres|autuad/i.test(l.papel_no_crime || ''),
+            });
+          }
+        });
+      }
+
+      // C. Extract authors mentioned in the text (e.g. "AUTORES DE AÇÃO CRIMINAL: ...", "AUTOR: ...")
+      const autorPatterns = [
+        /AUTOR(?:ES)?\s*(?:DE\s*A[CÇ][AÃ]O\s*CRIMINAL)?\s*:\s*([^.\n]+)/gi,
+        /(?:PRESOS?|CONDUZIDOS?|QUALIFICADOS?|INFRATORES?)\s*:\s*([^.\n]+)/gi,
+      ];
+
+      autorPatterns.forEach((regex) => {
+        let match;
+        while ((match = regex.exec(fullText)) !== null) {
+          const captured = match[1];
+          const segments = captured.split(/[;,]|\se\s/i).map((s) => s.trim());
+          segments.forEach((seg) => {
+            const cleaned = seg.replace(/^(e\s+|da\s+|do\s+|de\s+)/i, '').trim();
+            if (
+              cleaned.length > 2 &&
+              !/^(vitima|arma|veiculo|local|hora|data)/i.test(cleaned)
+            ) {
+              if (
+                !autoresVinculados.some(
+                  (a) =>
+                    a.nome.toLowerCase().includes(cleaned.toLowerCase()) ||
+                    cleaned.toLowerCase().includes(a.nome.toLowerCase())
+                )
+              ) {
+                const foundInDb = allSuspects.find(
+                  (s) =>
+                    s.nome_completo.toLowerCase().includes(cleaned.toLowerCase()) ||
+                    cleaned.toLowerCase().includes(s.nome_completo.toLowerCase())
+                );
+
+                autoresVinculados.push({
+                  nome: foundInDb ? foundInDb.nome_completo : cleaned,
+                  vulgo: foundInDb ? foundInDb.vulgo : undefined,
+                  papel: isPrisaoDetectada ? 'Autor Preso / Qualificado' : 'Autor Qualificado',
+                  preso: isPrisaoDetectada,
+                });
+              }
+            }
+          });
+        }
+      });
+
+      // D. Registered suspects in database whose names/nicknames appear in the narrative
+      allSuspects.forEach((s) => {
+        const nomeNorm = s.nome_completo?.trim().toLowerCase();
+        const vulgoNorm = s.vulgo?.trim().toLowerCase();
+
+        if (nomeNorm && nomeNorm.length > 5 && textLower.includes(nomeNorm)) {
+          if (!autoresVinculados.some((a) => a.nome.toLowerCase().includes(nomeNorm))) {
+            autoresVinculados.push({
+              nome: s.nome_completo,
+              vulgo: s.vulgo,
+              papel: isPrisaoDetectada ? 'Autor Preso / Vinculado' : 'Autor Vinculado',
+              preso: isPrisaoDetectada,
+            });
+          }
+        } else if (vulgoNorm && vulgoNorm.length > 2 && textLower.includes(vulgoNorm)) {
+          if (
+            !autoresVinculados.some(
+              (a) =>
+                a.vulgo?.toLowerCase() === vulgoNorm ||
+                a.nome.toLowerCase() === s.nome_completo.toLowerCase()
+            )
+          ) {
+            autoresVinculados.push({
+              nome: s.nome_completo,
+              vulgo: s.vulgo,
+              papel: isPrisaoDetectada ? 'Autor Preso / Vinculado' : 'Autor Vinculado',
+              preso: isPrisaoDetectada,
+            });
+          }
+        }
+      });
+
+      const temAutores = autoresVinculados.length > 0;
+      const temPrisao = isPrisaoDetectada || autoresVinculados.some((a) => a.preso);
+
+      let involvedHTML = '';
+      if (temPrisao && temAutores) {
+        involvedHTML = `
+          <div style="margin-top: 8px; border-top: 1px solid rgba(16, 185, 129, 0.3); padding-top: 6px; background: rgba(6, 78, 59, 0.25); border-radius: 4px; padding: 6px 8px;">
+            <div style="display: flex; align-items: center; gap: 5px; color: #34d399; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+              <span style="display: inline-block; width: 7px; height: 7px; background: #10b981; border-radius: 50%; box-shadow: 0 0 6px #10b981;"></span>
+              Autores Presos / Autuados no B.O.:
+            </div>
+            <ul style="margin: 4px 0 3px 0; padding-left: 14px; font-size: 11px; color: #f1f5f9; line-height: 1.35;">
+              ${autoresVinculados
+                .map(
+                  (e) =>
+                    `<li style="margin-bottom: 2px;"><strong>${e.nome}</strong>${
+                      e.vulgo ? ` (<em>${e.vulgo}</em>)` : ''
+                    } - <span style="color: #34d399; font-weight: 600;">${e.papel}</span></li>`
+                )
+                .join('')}
+            </ul>
+            <div style="font-size: 10px; color: #a7f3d0; font-weight: 500; display: flex; align-items: center; gap: 4px; margin-top: 2px;">
+              <span>✓</span> Prisão/condução registrada no relato desta ocorrência.
+            </div>
+          </div>
+        `;
+      } else if (temPrisao && !temAutores) {
+        involvedHTML = `
+          <div style="margin-top: 8px; border-top: 1px solid rgba(16, 185, 129, 0.3); padding-top: 6px; background: rgba(6, 78, 59, 0.25); border-radius: 4px; padding: 6px 8px;">
+            <div style="display: flex; align-items: center; gap: 5px; color: #34d399; font-size: 11px; font-weight: 700; text-transform: uppercase;">
+              <span style="display: inline-block; width: 7px; height: 7px; background: #10b981; border-radius: 50%; box-shadow: 0 0 6px #10b981;"></span>
+              Prisão / Condução Registrada
+            </div>
+            <div style="font-size: 10px; color: #a7f3d0; margin-top: 2px;">
+              ✓ Consta registro de prisão/apreensão de autores nos autos deste B.O.
+            </div>
+          </div>
+        `;
+      } else if (!temPrisao && temAutores) {
+        involvedHTML = `
+          <div style="margin-top: 8px; border-top: 1px solid rgba(245, 158, 11, 0.3); padding-top: 6px; background: rgba(120, 53, 15, 0.2); border-radius: 4px; padding: 6px 8px;">
+            <div style="display: flex; align-items: center; gap: 5px; color: #fbbf24; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+              <span style="display: inline-block; width: 7px; height: 7px; background: #f59e0b; border-radius: 50%; box-shadow: 0 0 6px #f59e0b;"></span>
+              Autores Identificados / Qualificados:
+            </div>
+            <ul style="margin: 4px 0 3px 0; padding-left: 14px; font-size: 11px; color: #f1f5f9; line-height: 1.35;">
+              ${autoresVinculados
+                .map(
+                  (e) =>
+                    `<li style="margin-bottom: 2px;"><strong>${e.nome}</strong>${
+                      e.vulgo ? ` (<em>${e.vulgo}</em>)` : ''
+                    } - <span style="color: #fbbf24; font-weight: 600;">${e.papel}</span></li>`
+                )
+                .join('')}
+            </ul>
+            <div style="font-size: 10px; color: #fde68a; margin-top: 2px;">
+              Identificados no histórico policial (Investigação preliminar / Mandado).
+            </div>
+          </div>
+        `;
+      } else {
+        involvedHTML = `
+          <div style="margin-top: 6px; font-style: italic; color: #94a3b8; font-size: 11px; border-top: 1px solid #334155; padding-top: 4px;">
+            Autoria não informada / Em apuração preliminar.
+          </div>
+        `;
+      }
 
       marker.bindPopup(`
-        <div style="font-size: 13px; font-family: sans-serif; color: #1e293b; max-width: 250px;">
-          <h4 style="margin: 0 0 5px 0; color: #991b1b; font-weight: bold; border-bottom: 1px solid #fecaca; padding-bottom: 4px; display: flex; align-items: center; gap: 4px;">
-            <span style="display:inline-block; width: 8px; height: 8px; background: #ef4444; border-radius: 50%;"></span>
+        <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace, sans-serif; color: #F3EEE4; max-width: 270px;">
+          <h4 style="margin: 0 0 6px 0; color: #f87171; font-weight: bold; border-bottom: 1px solid rgba(239, 68, 68, 0.4); padding-bottom: 4px; display: flex; align-items: center; gap: 6px; font-size: 12px;">
+            <span style="display:inline-block; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; box-shadow: 0 0 6px #ef4444;"></span>
             ${oc.numero_bo} - ${oc.tipificacao_penal}
           </h4>
-          <p style="margin: 3px 0; font-size: 11px; color: #64748b;"><strong>Data:</strong> ${new Date(
-            oc.data_hora
-          ).toLocaleString('pt-BR')}</p>
-          <p style="margin: 4px 0; font-size: 12px; font-weight: 500; color: #334155; max-height: 80px; overflow-y: auto;">
-            ${oc.descricao_fato}
+          <p style="margin: 3px 0; font-size: 11px; color: #94a3b8;">
+            <strong style="color: #cbd5e1;">Data:</strong> ${new Date(oc.data_hora).toLocaleString('pt-BR')}
           </p>
-          <p style="margin: 2px 0; font-size: 11px;"><strong>Arma:</strong> ${oc.armas_utilizadas || 'Não informada'}</p>
-          <p style="margin: 2px 0; font-size: 11px;"><strong>Veículo:</strong> ${oc.veiculo_utilizado || 'Não informado'}</p>
+          <div style="margin: 5px 0; font-size: 11px; line-height: 1.4; color: #cbd5e1; max-height: 90px; overflow-y: auto; background: rgba(0,0,0,0.35); padding: 5px 7px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.08);">
+            ${oc.descricao_fato}
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr; gap: 2px; font-size: 11px; margin: 4px 0;">
+            <div><strong style="color: #94a3b8;">Arma:</strong> <span style="color: #e2e8f0;">${oc.armas_utilizadas || 'Não informada'}</span></div>
+            <div><strong style="color: #94a3b8;">Veículo:</strong> <span style="color: #e2e8f0;">${oc.veiculo_utilizado || 'Não informado'}</span></div>
+          </div>
           ${involvedHTML}
         </div>
       `);
