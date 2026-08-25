@@ -34,7 +34,13 @@ import {
   Scan,
   Users,
   Copy,
-  Link2
+  Link2,
+  RotateCcw,
+  Filter,
+  ChevronDown,
+  ChevronUp,
+  Car,
+  Fingerprint
 } from 'lucide-react';
 import TacticalMap from './components/TacticalMap';
 import NetworkGraph from './components/NetworkGraph';
@@ -94,6 +100,53 @@ export default function App() {
   const [isIntelligenceAnalyzing, setIsIntelligenceAnalyzing] = useState(false);
   const [intelligenceResult, setIntelligenceResult] = useState<IntelligenceAnalysisResult | null>(null);
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null);
+
+  // Dedicated Physical, Tattoos, Scars, Vehicle & Territorial filters for Intelligence Triage
+  const [showPhysicalFilters, setShowPhysicalFilters] = useState(false);
+  const [intelligenceFilters, setIntelligenceFilters] = useState<{
+    tatuagens: string;
+    cicatrizes: string;
+    sinais_particulares: string;
+    cor_pele: string;
+    compleicao: string;
+    veiculo: string;
+    armas: string;
+    bairro: string;
+    faccao: string;
+  }>({
+    tatuagens: '',
+    cicatrizes: '',
+    sinais_particulares: '',
+    cor_pele: '',
+    compleicao: '',
+    veiculo: '',
+    armas: '',
+    bairro: '',
+    faccao: '',
+  });
+
+  const activeFiltersCount = (Object.values(intelligenceFilters) as string[]).filter(v => Boolean(v && v.trim())).length;
+
+  const handleResetIntelligence = () => {
+    setNarrativeInput('');
+    setIntelligenceFilters({
+      tatuagens: '',
+      cicatrizes: '',
+      sinais_particulares: '',
+      cor_pele: '',
+      compleicao: '',
+      veiculo: '',
+      armas: '',
+      bairro: '',
+      faccao: '',
+    });
+    setIntelligenceResult(null);
+    setIntelligenceError(null);
+    setParsedReport(null);
+    setMatchResults([]);
+    setParseError(null);
+    setMatchError(null);
+  };
 
   // Module B (Geospatial Scorer) states
   const [searchRadius, setSearchRadius] = useState<number>(5.0);
@@ -425,10 +478,14 @@ export default function App() {
 
   // Full Integrated Intelligence Analysis (35º BPM Schema: Ocorrência + Cruzamento + Alerta de Reincidência)
   const handleRunIntelligenceAnalysis = async () => {
-    if (!narrativeInput || narrativeInput.trim() === '') {
-      setIntelligenceError('Insira uma narrativa policial ou descrição dos fatos para iniciar a análise.');
+    const hasNarrative = Boolean(narrativeInput && narrativeInput.trim() !== '');
+    const hasFilters = (Object.values(intelligenceFilters) as string[]).some(v => Boolean(v && v.trim()));
+
+    if (!hasNarrative && !hasFilters) {
+      setIntelligenceError('Insira o relato do fato policial ou selecione filtros de características físicas, tatuagens, cicatrizes ou veículos.');
       return;
     }
+
     setIsIntelligenceAnalyzing(true);
     setIntelligenceError(null);
     try {
@@ -441,7 +498,8 @@ export default function App() {
             narrative: narrativeInput,
             lat: selectedCoords?.lat,
             lng: selectedCoords?.lng,
-            radius_km: searchRadius
+            radius_km: searchRadius,
+            filters: intelligenceFilters
           }),
         });
 
@@ -461,7 +519,8 @@ export default function App() {
         data = analyzeCrimeIntelligenceLocally(
           narrativeInput,
           suspects.length > 0 ? suspects : undefined,
-          selectedCoords ? { lat: selectedCoords.lat, lng: selectedCoords.lng } : undefined
+          selectedCoords ? { lat: selectedCoords.lat, lng: selectedCoords.lng } : undefined,
+          intelligenceFilters
         );
       }
 
@@ -1600,224 +1659,534 @@ export default function App() {
                 />
               ) : (
                 <>
-                  {/* Top Controls Card: Narrative Input & Intelligence Execution */}
+                  {/* Top Controls Card: Narrative Input, Physical Filters & Intelligence Execution */}
                   <div className="bg-[#0F0F12] border border-zinc-800 rounded p-5 flex flex-col shadow-2xl tactical-corner">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-4 border-b border-zinc-800 pb-2.5">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="text-amber-500 w-4 h-4" />
-                    <h3 className="font-bold text-zinc-100 text-xs uppercase tracking-widest font-mono">
-                      Mecanismo de Inteligência Tática & Cruzamento Criminal // 35º BPM
-                    </h3>
-                  </div>
-                  <span className="text-[9px] font-mono text-amber-400 bg-amber-950/30 border border-amber-800/40 px-2 py-0.5 rounded font-bold">
-                    GEMINI 3.7 FLASH • ESQUEMA OFICIAL DE INTELIGÊNCIA
-                  </span>
-                </div>
-
-                <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
-                  Insira o relato da ocorrência policial, denúncia anônima ou transcrição do COPOM/SOU. A IA estruturará os dados do B.O., emitirá alerta de reincidência no perímetro e executará o cruzamento analítico com a base de infratores calculando o score de compatibilidade, fatores convergentes/divergentes e recomendação operacional.
-                </p>
-
-                <textarea
-                  value={narrativeInput}
-                  onChange={(e) => setNarrativeInput(e.target.value)}
-                  className="w-full min-h-28 bg-[#0A0A0B] text-zinc-200 p-3 rounded border border-zinc-800 focus:outline-none focus:border-amber-500 text-xs font-mono leading-relaxed resize-y focus:ring-1 focus:ring-amber-500/20"
-                  placeholder="Cole aqui a narrativa policial do Boletim de Ocorrência..."
-                />
-
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={handleRunIntelligenceAnalysis}
-                      disabled={isIntelligenceAnalyzing}
-                      className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-black font-black rounded text-xs transition uppercase flex items-center justify-center gap-1.5 font-mono shadow-md shadow-amber-500/20 cursor-pointer"
-                    >
-                      {isIntelligenceAnalyzing ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Executando Cruzamento IA...
-                        </>
-                      ) : (
-                        <>
-                          <BrainCircuit className="w-3.5 h-3.5" /> Executar Cruzamento de Inteligência
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={handleParseReport}
-                      disabled={isParsing}
-                      className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded transition font-mono flex items-center gap-1.5 cursor-pointer"
-                    >
-                      {isParsing ? (
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <FileText className="w-3 h-3 text-cyan-400" />
-                      )}
-                      Parser B.O. Rápido
-                    </button>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() =>
-                        setNarrativeInput(
-                          'Na noite de ontem, um caminhão contendo televisores de última geração foi interceptado por criminosos armados na região de Heliópolis. O motorista relatou que foi abordado de forma agressiva por dois homens utilizando uma van Sprinter branca. O líder da quadrilha era careca de compleição atlética e possuía uma tatuagem visível de palhaço no braço, proferindo ameaças verbais com uma pistola calibre 380, auxiliado por um comparsa alto conhecido como Neguinho.'
-                        )
-                      }
-                      className="px-2.5 py-1.5 bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-[11px] rounded transition font-mono cursor-pointer"
-                    >
-                      Exemplo 1 (Carga)
-                    </button>
-                    <button
-                      onClick={() =>
-                        setNarrativeInput(
-                          'Dois indivíduos numa motocicleta Honda preta assaltaram um estudante na passarela do Brás. O motorista era de cor parda, vestia blusa cinza e fazia alusão de portar arma sob o casaco. O rapaz que estava na garupa foi identificado como "Didi", de dente de ouro frontal superior, o qual recolheu os celulares das vítimas ameaçando-as verbalmente antes de fugir.'
-                        )
-                      }
-                      className="px-2.5 py-1.5 bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-[11px] rounded transition font-mono cursor-pointer"
-                    >
-                      Exemplo 2 (Transeunte)
-                    </button>
-                  </div>
-                </div>
-
-                {intelligenceError && (
-                  <div className="mt-4 p-3 bg-red-950/40 border border-red-900 text-red-200 rounded text-xs font-mono">
-                    <p className="font-semibold">Erro na análise de inteligência:</p>
-                    <p className="mt-1">{intelligenceError}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Structured Output of Intelligence Analysis (User Schema: Ocorrência Processada, Alerta, Cruzamento) */}
-              {intelligenceResult && (
-                <div className="space-y-6">
-                  {/* Alert Banner: Alerta de Reincidência no Perímetro */}
-                  {intelligenceResult.alerta_reincidencia_perimetro && (
-                    <div
-                      className={`p-4 rounded border font-mono flex items-start gap-3 shadow-lg ${
-                        intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'ALTO'
-                          ? 'bg-red-950/30 border-red-800/80 text-red-200'
-                          : intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'MEDIO'
-                          ? 'bg-amber-950/30 border-amber-800/80 text-amber-200'
-                          : 'bg-blue-950/30 border-blue-800/80 text-blue-200'
-                      }`}
-                    >
-                      <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
-                        intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'ALTO'
-                          ? 'text-red-400 animate-pulse'
-                          : intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'MEDIO'
-                          ? 'text-amber-400'
-                          : 'text-blue-400'
-                      }`} />
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">
-                            ALERTA DE REINCIDÊNCIA NO PERÍMETRO:
-                          </span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
-                            intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'ALTO'
-                              ? 'bg-red-500 text-black'
-                              : intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'MEDIO'
-                              ? 'bg-amber-500 text-black'
-                              : 'bg-blue-500 text-black'
-                          }`}>
-                            NÍVEL {intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta}
-                          </span>
-                        </div>
-                        <p className="text-xs font-sans leading-relaxed text-zinc-200">
-                          {intelligenceResult.alerta_reincidencia_perimetro.observacao}
-                        </p>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-4 border-b border-zinc-800 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="text-amber-500 w-4 h-4" />
+                        <h3 className="font-bold text-zinc-100 text-xs uppercase tracking-widest font-mono">
+                          Mecanismo de Inteligência Tática & Cruzamento Criminal // 35º BPM
+                        </h3>
                       </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                    {/* Panel 1: Ocorrência Processada */}
-                    <div className="bg-[#0F0F12] border border-zinc-800 rounded p-5 shadow-2xl tactical-corner font-mono space-y-4">
-                      <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
-                        <div className="flex items-center gap-2">
-                          <FileText className="text-cyan-400 w-4 h-4" />
-                          <h4 className="font-bold text-zinc-100 text-xs uppercase tracking-wider">
-                            Ocorrência Processada
-                          </h4>
-                        </div>
-                        <span className="text-[9px] bg-zinc-900 border border-zinc-800 text-cyan-400 px-1.5 py-0.5 rounded">
-                          ESTRUTURA B.O.
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleResetIntelligence}
+                          className="px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white text-[10px] font-mono font-bold rounded transition flex items-center gap-1.5 cursor-pointer"
+                          title="Limpar campos e iniciar uma nova consulta do zero"
+                        >
+                          <RotateCcw className="w-3 h-3 text-amber-400" />
+                          <span>Nova Consulta / Limpar</span>
+                        </button>
+                        <span className="text-[9px] font-mono text-amber-400 bg-amber-950/30 border border-amber-800/40 px-2 py-0.5 rounded font-bold">
+                          GEMINI 3.7 FLASH + HEURÍSTICA FORENSE
                         </span>
                       </div>
+                    </div>
 
-                      <div className="space-y-3 text-xs">
-                        <div className="bg-[#0A0A0B] p-2.5 rounded border border-zinc-800">
-                          <span className="text-[9px] text-zinc-500 block uppercase font-bold">Tipificação Penal</span>
-                          <span className="text-amber-400 font-bold text-xs">
-                            {intelligenceResult.ocorrencia_processada.tipificacao}
-                          </span>
-                        </div>
+                    <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
+                      Insira o relato da ocorrência policial (B.O., COPOM, SOU) e/ou defina características físicas, tatuagens, cicatrizes e veículos. O sistema processará as evidências, avaliará o nível de alerta territorial e cruzará a base de infratores calculando a probabilidade de autoria.
+                    </p>
 
-                        <div className="bg-[#0A0A0B] p-2.5 rounded border border-zinc-800">
-                          <span className="text-[9px] text-zinc-500 block uppercase font-bold">Localização</span>
-                          <span className="text-zinc-200 block">
-                            {intelligenceResult.ocorrencia_processada.logradouro ? `${intelligenceResult.ocorrencia_processada.logradouro}, ` : ''}
-                            {intelligenceResult.ocorrencia_processada.bairro} - {intelligenceResult.ocorrencia_processada.municipio}
-                          </span>
-                        </div>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-[10px] font-mono text-zinc-400 uppercase font-bold mb-1 flex items-center justify-between">
+                          <span>Narrativa do Boletim de Ocorrência / COPOM</span>
+                          {narrativeInput && (
+                            <button
+                              onClick={() => setNarrativeInput('')}
+                              className="text-[10px] text-zinc-500 hover:text-zinc-300 font-normal lowercase"
+                            >
+                              limpar texto
+                            </button>
+                          )}
+                        </label>
+                        <textarea
+                          value={narrativeInput}
+                          onChange={(e) => setNarrativeInput(e.target.value)}
+                          className="w-full min-h-28 bg-[#0A0A0B] text-zinc-200 p-3 rounded border border-zinc-800 focus:outline-none focus:border-amber-500 text-xs font-mono leading-relaxed resize-y focus:ring-1 focus:ring-amber-500/20"
+                          placeholder="Cole aqui a narrativa policial, transcrição do chamado COPOM ou descrição dos fatos..."
+                        />
+                      </div>
 
-                        <div className="bg-[#0A0A0B] p-2.5 rounded border border-zinc-800">
-                          <span className="text-[9px] text-zinc-500 block uppercase font-bold">Modus Operandi (Resumo)</span>
-                          <p className="text-zinc-300 font-sans text-xs leading-relaxed mt-1">
-                            {intelligenceResult.ocorrencia_processada.modus_operandi_resumo}
-                          </p>
-                        </div>
+                      {/* Expandable Section: Filtros Táticos por Características Físicas, Tatuagens, Cicatrizes & Veículos */}
+                      <div className="bg-[#0A0A0B] border border-zinc-800 rounded p-3 transition">
+                        <button
+                          type="button"
+                          onClick={() => setShowPhysicalFilters(!showPhysicalFilters)}
+                          className="w-full flex items-center justify-between text-left font-mono text-xs text-zinc-200 hover:text-amber-400 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Fingerprint className="w-4 h-4 text-amber-500" />
+                            <span className="font-bold uppercase tracking-wider text-[11px]">
+                              Triagem Específica por Tatuagens, Cicatrizes, Físico & Veículos
+                            </span>
+                            {activeFiltersCount > 0 && (
+                              <span className="bg-amber-500 text-black text-[9px] font-black px-1.5 py-0.2 rounded">
+                                {activeFiltersCount} ativo(s)
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 text-zinc-500 text-[10px]">
+                            <span>{showPhysicalFilters ? 'Ocultar Filtros' : 'Expandir Filtros'}</span>
+                            {showPhysicalFilters ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                          </div>
+                        </button>
 
-                        {/* Características Declaradas */}
-                        <div className="bg-[#0A0A0B] p-2.5 rounded border border-zinc-800 space-y-2">
-                          <span className="text-[9px] text-cyan-400 block uppercase font-bold border-b border-zinc-800 pb-1">
-                            Características Declaradas
-                          </span>
-                          <div className="grid grid-cols-2 gap-2 text-[11px]">
-                            <div>
-                              <span className="text-[9px] text-zinc-500 block">Cor de Pele</span>
-                              <span className="text-zinc-200 font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.pele || 'Não declarada'}</span>
+                        {showPhysicalFilters && (
+                          <div className="mt-3 pt-3 border-t border-zinc-800/80 space-y-3 font-mono text-xs">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                              {/* Tatuagens */}
+                              <div>
+                                <label className="block text-[10px] text-zinc-400 uppercase font-bold mb-1">
+                                  Tatuagens / Desenhos Corporais
+                                </label>
+                                <input
+                                  type="text"
+                                  value={intelligenceFilters.tatuagens}
+                                  onChange={(e) => setIntelligenceFilters({ ...intelligenceFilters, tatuagens: e.target.value })}
+                                  placeholder="Ex: Palhaço no braço, Carpa, Teia, Pescoço..."
+                                  className="w-full bg-[#0F0F12] border border-zinc-800 text-zinc-200 text-xs px-2.5 py-1.5 rounded focus:border-amber-500 focus:outline-none"
+                                />
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                  {['Palhaço', 'Carpa', 'Coringa', 'Teia', 'Braço', 'Pescoço', 'Mão', 'Cruz'].map((tag) => (
+                                    <button
+                                      key={tag}
+                                      type="button"
+                                      onClick={() => {
+                                        const current = intelligenceFilters.tatuagens;
+                                        const next = current ? (current.includes(tag) ? current : `${current}, ${tag}`) : tag;
+                                        setIntelligenceFilters({ ...intelligenceFilters, tatuagens: next });
+                                      }}
+                                      className="text-[9px] px-1.5 py-0.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-amber-300 rounded cursor-pointer transition"
+                                    >
+                                      +{tag}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Cicatrizes & Sinais */}
+                              <div>
+                                <label className="block text-[10px] text-zinc-400 uppercase font-bold mb-1">
+                                  Cicatrizes & Sinais Particulares
+                                </label>
+                                <input
+                                  type="text"
+                                  value={intelligenceFilters.cicatrizes}
+                                  onChange={(e) => setIntelligenceFilters({ ...intelligenceFilters, cicatrizes: e.target.value })}
+                                  placeholder="Ex: Cicatriz no rosto, marca de tiro, queimadura..."
+                                  className="w-full bg-[#0F0F12] border border-zinc-800 text-zinc-200 text-xs px-2.5 py-1.5 rounded focus:border-amber-500 focus:outline-none"
+                                />
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                  {['Rosto', 'Tiro', 'Queimadura', 'Dente de ouro', 'Manco'].map((tag) => (
+                                    <button
+                                      key={tag}
+                                      type="button"
+                                      onClick={() => {
+                                        const current = intelligenceFilters.cicatrizes;
+                                        const next = current ? (current.includes(tag) ? current : `${current}, ${tag}`) : tag;
+                                        setIntelligenceFilters({ ...intelligenceFilters, cicatrizes: next });
+                                      }}
+                                      className="text-[9px] px-1.5 py-0.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-amber-300 rounded cursor-pointer transition"
+                                    >
+                                      +{tag}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Veículo Utilizado */}
+                              <div>
+                                <label className="block text-[10px] text-zinc-400 uppercase font-bold mb-1">
+                                  Veículo / Meio de Transporte
+                                </label>
+                                <input
+                                  type="text"
+                                  value={intelligenceFilters.veiculo}
+                                  onChange={(e) => setIntelligenceFilters({ ...intelligenceFilters, veiculo: e.target.value })}
+                                  placeholder="Ex: Moto Titan preta, Fan vermelha, Palio prata..."
+                                  className="w-full bg-[#0F0F12] border border-zinc-800 text-zinc-200 text-xs px-2.5 py-1.5 rounded focus:border-amber-500 focus:outline-none"
+                                />
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                  {['Moto Titan Preta', 'Fan Vermelha', 'XRE', 'Palio Prata', 'Van Sprinter', 'Sem Placa'].map((tag) => (
+                                    <button
+                                      key={tag}
+                                      type="button"
+                                      onClick={() => setIntelligenceFilters({ ...intelligenceFilters, veiculo: tag })}
+                                      className="text-[9px] px-1.5 py-0.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-amber-300 rounded cursor-pointer transition"
+                                    >
+                                      +{tag}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Cor de Pele */}
+                              <div>
+                                <label className="block text-[10px] text-zinc-400 uppercase font-bold mb-1">
+                                  Cor da Pele / Etnia
+                                </label>
+                                <select
+                                  value={intelligenceFilters.cor_pele}
+                                  onChange={(e) => setIntelligenceFilters({ ...intelligenceFilters, cor_pele: e.target.value })}
+                                  className="w-full bg-[#0F0F12] border border-zinc-800 text-zinc-200 text-xs px-2.5 py-1.5 rounded focus:border-amber-500 focus:outline-none"
+                                >
+                                  <option value="">Todas / Não declarada</option>
+                                  <option value="Parda">Parda</option>
+                                  <option value="Negra">Negra / Preta</option>
+                                  <option value="Branca">Branca / Clara</option>
+                                  <option value="Morena">Morena</option>
+                                </select>
+                              </div>
+
+                              {/* Compleição Física */}
+                              <div>
+                                <label className="block text-[10px] text-zinc-400 uppercase font-bold mb-1">
+                                  Compleição Física
+                                </label>
+                                <select
+                                  value={intelligenceFilters.compleicao}
+                                  onChange={(e) => setIntelligenceFilters({ ...intelligenceFilters, compleicao: e.target.value })}
+                                  className="w-full bg-[#0F0F12] border border-zinc-800 text-zinc-200 text-xs px-2.5 py-1.5 rounded focus:border-amber-500 focus:outline-none"
+                                >
+                                  <option value="">Qualquer compleição</option>
+                                  <option value="Atlética">Atlética / Forte</option>
+                                  <option value="Delgada">Magra / Delgada</option>
+                                  <option value="Média">Média</option>
+                                  <option value="Robusta">Robusta / Obesa</option>
+                                </select>
+                              </div>
+
+                              {/* Bairro / Setor do 35º BPM */}
+                              <div>
+                                <label className="block text-[10px] text-zinc-400 uppercase font-bold mb-1">
+                                  Bairro / Região de Atuação (35º BPM)
+                                </label>
+                                <select
+                                  value={intelligenceFilters.bairro}
+                                  onChange={(e) => setIntelligenceFilters({ ...intelligenceFilters, bairro: e.target.value })}
+                                  className="w-full bg-[#0F0F12] border border-zinc-800 text-zinc-200 text-xs px-2.5 py-1.5 rounded focus:border-amber-500 focus:outline-none"
+                                >
+                                  <option value="">Qualquer bairro da circunscrição</option>
+                                  <option value="Bom Destino">Bom Destino</option>
+                                  <option value="Palmital">Palmital</option>
+                                  <option value="São Benedito">São Benedito</option>
+                                  <option value="Campão">Campão</option>
+                                  <option value="Duquesa">Duquesa</option>
+                                  <option value="Cristina">Cristina</option>
+                                  <option value="Baronesa">Baronesa</option>
+                                  <option value="Asteca">Asteca</option>
+                                  <option value="Frimisa">Frimisa</option>
+                                  <option value="Centro">Centro</option>
+                                  <option value="Morada dos Nobres">Morada dos Nobres</option>
+                                  <option value="Londrina">Londrina</option>
+                                  <option value="Adeodato">Adeodato</option>
+                                </select>
+                              </div>
+
+                              {/* Gangue / Facção */}
+                              <div className="md:col-span-2 lg:col-span-3">
+                                <label className="block text-[10px] text-zinc-400 uppercase font-bold mb-1">
+                                  Facção / Gangue Suspeita
+                                </label>
+                                <div className="flex flex-wrap gap-2 items-center">
+                                  <input
+                                    type="text"
+                                    value={intelligenceFilters.faccao}
+                                    onChange={(e) => setIntelligenceFilters({ ...intelligenceFilters, faccao: e.target.value })}
+                                    placeholder="Ex: Gangue do Muleta, Gangue do Campão, PCC, CV..."
+                                    className="flex-1 min-w-[200px] bg-[#0F0F12] border border-zinc-800 text-zinc-200 text-xs px-2.5 py-1.5 rounded focus:border-amber-500 focus:outline-none"
+                                  />
+                                  {['Gangue do Muleta', 'Gangue do Campão', 'Palmital', 'PCC', 'CV'].map((fac) => (
+                                    <button
+                                      key={fac}
+                                      type="button"
+                                      onClick={() => setIntelligenceFilters({ ...intelligenceFilters, faccao: fac })}
+                                      className="text-[10px] px-2 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-amber-400 rounded cursor-pointer"
+                                    >
+                                      +{fac}
+                                    </button>
+                                  ))}
+                                  {activeFiltersCount > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setIntelligenceFilters({
+                                        tatuagens: '',
+                                        cicatrizes: '',
+                                        sinais_particulares: '',
+                                        cor_pele: '',
+                                        compleicao: '',
+                                        veiculo: '',
+                                        armas: '',
+                                        bairro: '',
+                                        faccao: '',
+                                      })}
+                                      className="text-[10px] text-red-400 hover:text-red-300 underline cursor-pointer ml-auto"
+                                    >
+                                      Limpar Filtros
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                            <div>
-                              <span className="text-[9px] text-zinc-500 block">Vestimentas</span>
-                              <span className="text-zinc-200 font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.vestimentas || 'Não declarada'}</span>
-                            </div>
                           </div>
-                          <div>
-                            <span className="text-[9px] text-zinc-500 block">Sinais Particulares</span>
-                            <span className="text-amber-300 text-xs font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.sinais_particulares || 'Nenhum'}</span>
-                          </div>
-                          <div>
-                            <span className="text-[9px] text-zinc-500 block">Armas & Veículos</span>
-                            <span className="text-red-300 text-xs font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.armas_veiculos || 'Nenhum'}</span>
-                          </div>
-                        </div>
+                        )}
+                      </div>
+                    </div>
 
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800/80 pt-3">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={handleRunIntelligenceAnalysis}
+                          disabled={isIntelligenceAnalyzing}
+                          className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-black font-black rounded text-xs transition uppercase flex items-center justify-center gap-1.5 font-mono shadow-md shadow-amber-500/20 cursor-pointer"
+                        >
+                          {isIntelligenceAnalyzing ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Executando Cruzamento IA...
+                            </>
+                          ) : (
+                            <>
+                              <BrainCircuit className="w-3.5 h-3.5" /> Executar Cruzamento de Inteligência
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={handleResetIntelligence}
+                          className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded transition font-mono flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <RotateCcw className="w-3 h-3 text-zinc-400" />
+                          Nova Consulta
+                        </button>
+                        <button
+                          onClick={handleParseReport}
+                          disabled={isParsing}
+                          className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded transition font-mono flex items-center gap-1.5 cursor-pointer"
+                        >
+                          {isParsing ? (
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <FileText className="w-3 h-3 text-cyan-400" />
+                          )}
+                          Parser B.O.
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5">
                         <button
                           onClick={() => {
-                            setNewIncidentForm({
-                              numero_bo: `BO-${Date.now().toString().slice(-4)}/2026`,
-                              data_hora: new Date().toISOString(),
-                              tipificacao_penal: intelligenceResult.ocorrencia_processada.tipificacao,
-                              descricao_fato: narrativeInput,
-                              modus_operandi: intelligenceResult.ocorrencia_processada.modus_operandi_resumo,
-                              armas_utilizadas: intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.armas_veiculos || 'Conforme B.O.',
-                              veiculo_utilizado: intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.armas_veiculos || 'Conforme B.O.',
-                              lat: selectedCoords?.lat.toString() || '-23.6141',
-                              lng: selectedCoords?.lng.toString() || '-46.5892',
+                            setNarrativeInput(
+                              'ACIONADOS PELO COPOM PARA ATENDIMENTO DE UMA CHAMADA DE HOMICÍDIO NA RUA DOS PEQUIZEIROS 187, BAIRRO BOM DESTINO - SANTA LUZIA. NO LOCAL DEPARAMOS COM UM CORPO CAÍDO AO SOLO SEM VIDA, COM PERFURAÇÕES PROVENIENTES DE DISPAROS DE ARMA DE FOGO. TESTEMUNHAS RELATAM AÇÃO DE DOIS INDIVÍDUOS EM UMA MOTOCICLETA ESCURA ENVOLVIDOS EM GUERRA DE FACÇÕES.'
+                            );
+                            setIntelligenceFilters({
+                              ...intelligenceFilters,
+                              bairro: 'Bom Destino',
+                              veiculo: 'Motocicleta escura'
                             });
-                            setIsAddingOccurrence(true);
-                            setActiveTab('db');
                           }}
-                          className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs rounded uppercase transition font-mono cursor-pointer flex items-center justify-center gap-1.5"
+                          className="px-2 py-1 bg-amber-950/30 hover:bg-amber-900/40 border border-amber-800/50 text-amber-300 text-[10px] rounded transition font-mono cursor-pointer"
                         >
-                          <Plus className="w-3.5 h-3.5 stroke-[2.5]" /> Salvar como Ocorrência B.O.
+                          Exemplo Homicídio (Bom Destino)
+                        </button>
+                        <button
+                          onClick={() =>
+                            setNarrativeInput(
+                              'Na noite de ontem, um caminhão contendo televisores de última geração foi interceptado por criminosos armados na região de Heliópolis. O motorista relatou que foi abordado de forma agressiva por dois homens utilizando uma van Sprinter branca. O líder da quadrilha era careca de compleição atlética e possuía uma tatuagem visível de palhaço no braço, proferindo ameaças verbais com uma pistola calibre 380, auxiliado por um comparsa alto conhecido como Neguinho.'
+                            )
+                          }
+                          className="px-2 py-1 bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-[10px] rounded transition font-mono cursor-pointer"
+                        >
+                          Exemplo Carga (Palhaço/Armado)
+                        </button>
+                        <button
+                          onClick={() =>
+                            setNarrativeInput(
+                              'Dois indivíduos numa motocicleta Honda preta assaltaram um estudante na passarela do Brás. O motorista era de cor parda, vestia blusa cinza e fazia alusão de portar arma sob o casaco. O rapaz que estava na garupa foi identificado como "Didi", de dente de ouro frontal superior, o qual recolheu os celulares das vítimas ameaçando-as verbalmente antes de fugir.'
+                            )
+                          }
+                          className="px-2 py-1 bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-[10px] rounded transition font-mono cursor-pointer"
+                        >
+                          Exemplo Transeunte (Didi)
                         </button>
                       </div>
                     </div>
 
-                    {/* Panel 2 & 3: Cruzamento de Suspeitos (Matrix & Operational Triage) */}
+                    {intelligenceError && (
+                      <div className="mt-4 p-3 bg-red-950/40 border border-red-900 text-red-200 rounded text-xs font-mono flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold">Aviso de Triagem:</p>
+                          <p className="mt-0.5">{intelligenceError}</p>
+                        </div>
+                        <button
+                          onClick={() => setIntelligenceError(null)}
+                          className="text-xs text-red-400 hover:text-white px-2 py-1"
+                        >
+                          Fechar
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Structured Output of Intelligence Analysis (User Schema: Ocorrência Processada, Alerta, Cruzamento) */}
+                  {intelligenceResult && (
+                    <div className="space-y-6">
+                      {/* Sub-header with Reset Consultation Button */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 bg-[#0F0F12] border border-zinc-800 p-2.5 rounded font-mono text-xs">
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <CheckCircle className="w-4 h-4 text-emerald-400" />
+                          <span className="font-bold">Cruzamento Concluído:</span>
+                          <span className="text-zinc-400">
+                            {intelligenceResult.cruzamento_suspeitos?.length || 0} suspeito(s) compatibilizado(s)
+                          </span>
+                        </div>
+                        <button
+                          onClick={handleResetIntelligence}
+                          className="px-3 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-amber-200 font-bold rounded flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Fazer Nova Consulta</span>
+                        </button>
+                      </div>
+
+                      {/* Alert Banner: Alerta de Reincidência no Perímetro */}
+                      {intelligenceResult.alerta_reincidencia_perimetro && (
+                        <div
+                          className={`p-4 rounded border font-mono flex items-start gap-3 shadow-lg ${
+                            intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'ALTO'
+                              ? 'bg-red-950/30 border-red-800/80 text-red-200'
+                              : intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'MEDIO'
+                              ? 'bg-amber-950/30 border-amber-800/80 text-amber-200'
+                              : 'bg-blue-950/30 border-blue-800/80 text-blue-200'
+                          }`}
+                        >
+                          <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                            intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'ALTO'
+                              ? 'text-red-400 animate-pulse'
+                              : intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'MEDIO'
+                              ? 'text-amber-400'
+                              : 'text-blue-400'
+                          }`} />
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">
+                                ALERTA DE REINCIDÊNCIA NO PERÍMETRO:
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                                intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'ALTO'
+                                  ? 'bg-red-500 text-black'
+                                  : intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta === 'MEDIO'
+                                  ? 'bg-amber-500 text-black'
+                                  : 'bg-blue-500 text-black'
+                              }`}>
+                                NÍVEL {intelligenceResult.alerta_reincidencia_perimetro.nivel_alerta}
+                              </span>
+                            </div>
+                            <p className="text-xs font-sans leading-relaxed text-zinc-200">
+                              {intelligenceResult.alerta_reincidencia_perimetro.observacao}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                        {/* Panel 1: Ocorrência Processada */}
+                        <div className="bg-[#0F0F12] border border-zinc-800 rounded p-5 shadow-2xl tactical-corner font-mono space-y-4">
+                          <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+                            <div className="flex items-center gap-2">
+                              <FileText className="text-cyan-400 w-4 h-4" />
+                              <h4 className="font-bold text-zinc-100 text-xs uppercase tracking-wider">
+                                Ocorrência Processada
+                              </h4>
+                            </div>
+                            <span className="text-[9px] bg-zinc-900 border border-zinc-800 text-cyan-400 px-1.5 py-0.5 rounded">
+                              ESTRUTURA B.O.
+                            </span>
+                          </div>
+
+                          <div className="space-y-3 text-xs">
+                            <div className="bg-[#0A0A0B] p-2.5 rounded border border-zinc-800">
+                              <span className="text-[9px] text-zinc-500 block uppercase font-bold">Tipificação Penal</span>
+                              <span className="text-amber-400 font-bold text-xs">
+                                {intelligenceResult.ocorrencia_processada.tipificacao}
+                              </span>
+                            </div>
+
+                            <div className="bg-[#0A0A0B] p-2.5 rounded border border-zinc-800">
+                              <span className="text-[9px] text-zinc-500 block uppercase font-bold">Localização</span>
+                              <span className="text-zinc-200 block">
+                                {intelligenceResult.ocorrencia_processada.logradouro ? `${intelligenceResult.ocorrencia_processada.logradouro}, ` : ''}
+                                {intelligenceResult.ocorrencia_processada.bairro} - {intelligenceResult.ocorrencia_processada.municipio}
+                              </span>
+                            </div>
+
+                            <div className="bg-[#0A0A0B] p-2.5 rounded border border-zinc-800">
+                              <span className="text-[9px] text-zinc-500 block uppercase font-bold">Modus Operandi (Resumo)</span>
+                              <p className="text-zinc-300 font-sans text-xs leading-relaxed mt-1">
+                                {intelligenceResult.ocorrencia_processada.modus_operandi_resumo}
+                              </p>
+                            </div>
+
+                            {/* Características Declaradas */}
+                            <div className="bg-[#0A0A0B] p-2.5 rounded border border-zinc-800 space-y-2">
+                              <span className="text-[9px] text-cyan-400 block uppercase font-bold border-b border-zinc-800 pb-1">
+                                Características Físicas & Tatuagens Declaradas
+                              </span>
+                              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                <div>
+                                  <span className="text-[9px] text-zinc-500 block">Cor de Pele</span>
+                                  <span className="text-zinc-200 font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.pele || 'Não declarada'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[9px] text-zinc-500 block">Vestimentas</span>
+                                  <span className="text-zinc-200 font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.vestimentas || 'Não declarada'}</span>
+                                </div>
+                              </div>
+                              {intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.tatuagens && (
+                                <div>
+                                  <span className="text-[9px] text-zinc-500 block">Tatuagens Declaradas</span>
+                                  <span className="text-amber-300 text-xs font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas.tatuagens}</span>
+                                </div>
+                              )}
+                              {intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.cicatrizes && (
+                                <div>
+                                  <span className="text-[9px] text-zinc-500 block">Cicatrizes / Marcas</span>
+                                  <span className="text-amber-300 text-xs font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas.cicatrizes}</span>
+                                </div>
+                              )}
+                              <div>
+                                <span className="text-[9px] text-zinc-500 block">Sinais Particulares</span>
+                                <span className="text-zinc-300 text-xs">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.sinais_particulares || 'Nenhum'}</span>
+                              </div>
+                              <div>
+                                <span className="text-[9px] text-zinc-500 block">Armas & Veículos</span>
+                                <span className="text-red-300 text-xs font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.armas_veiculos || 'Nenhum'}</span>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => {
+                                setNewIncidentForm({
+                                  numero_bo: `BO-${Date.now().toString().slice(-4)}/2026`,
+                                  data_hora: new Date().toISOString(),
+                                  tipificacao_penal: intelligenceResult.ocorrencia_processada.tipificacao,
+                                  descricao_fato: narrativeInput,
+                                  modus_operandi: intelligenceResult.ocorrencia_processada.modus_operandi_resumo,
+                                  armas_utilizadas: intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.armas_veiculos || 'Conforme B.O.',
+                                  veiculo_utilizado: intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.armas_veiculos || 'Conforme B.O.',
+                                  lat: selectedCoords?.lat.toString() || '-19.7712',
+                                  lng: selectedCoords?.lng.toString() || '-43.8564',
+                                });
+                                setIsAddingOccurrence(true);
+                                setActiveTab('db');
+                              }}
+                              className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs rounded uppercase transition font-mono cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              <Plus className="w-3.5 h-3.5 stroke-[2.5]" /> Salvar como Ocorrência B.O.
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Panel 2 & 3: Cruzamento de Suspeitos (Matrix & Operational Triage) */}
                     <div className="xl:col-span-2 bg-[#0F0F12] border border-zinc-800 rounded p-5 shadow-2xl tactical-corner font-mono flex flex-col">
                       <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5 mb-4">
                         <div className="flex items-center gap-2">

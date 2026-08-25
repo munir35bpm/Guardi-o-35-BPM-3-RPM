@@ -740,11 +740,13 @@ Narrativa: "${narrative}"`;
 // ==========================================
 app.post('/api/ai/intelligence-analysis', async (req, res) => {
   try {
-    const { narrative, lat, lng, radius_km } = req.body;
-    if (!narrative || narrative.trim() === '') {
-      res.status(400).json({ error: 'A narrativa ou descrição do fato é obrigatória.' });
+    const { narrative, lat, lng, radius_km, filters } = req.body;
+    if ((!narrative || narrative.trim() === '') && (!filters || Object.values(filters).every(v => !v))) {
+      res.status(400).json({ error: 'Insira a narrativa do fato ou pelo menos um filtro de características físicas/veículo.' });
       return;
     }
+
+    const narrativeText = narrative || 'Triagem criminal orientada por filtros de características físicas, tatuagens, cicatrizes e veículos informados.';
 
     // 1. Gather all candidates in the system (or filtered by proximity if coordinates provided)
     let candidates = db.infratores.map(i => db.getInfratorFull(i.id)).filter(Boolean);
@@ -752,7 +754,6 @@ app.post('/api/ai/intelligence-analysis', async (req, res) => {
       const radius = Number(radius_km) || 10.0;
       const inRadius = db.matchSuspectsInRadius(Number(lat), Number(lng), radius);
       if (inRadius && inRadius.length > 0) {
-        // Prioritize or merge inRadius candidates
         const inRadiusIds = new Set(inRadius.map(c => c.id));
         candidates = [
           ...inRadius,
@@ -781,19 +782,22 @@ app.post('/api/ai/intelligence-analysis', async (req, res) => {
 
       const systemPrompt = `Você é um Analista de Inteligência Policial da Seção de Inteligência do 35º BPM (PMMG - Guardião do Alto Rio das Velhas).
 Sua missão é realizar uma análise rigorosa e estruturada de ocorrências policiais, executando três tarefas integradas:
-1. Extração e processamento da ocorrência (município, bairro, logradouro, tipificação, resumo do modus operandi e características declaradas como pele, vestimentas, sinais particulares/tatuagens e armas/veículos).
-2. Cruzamento analítico com a base de dados de infratores cadastrados, avaliando o score_compatibilidade (0 a 100%), identificando fatores convergentes, fatores divergentes, justificativa analítica técnica e recomendação operacional de campo.
+1. Extração e processamento da ocorrência (município, bairro, logradouro, tipificação, resumo do modus operandi e características declaradas como pele, vestimentas, sinais particulares/tatuagens/cicatrizes e armas/veículos).
+2. Cruzamento analítico minucioso com a base de dados de infratores cadastrados, avaliando o score_compatibilidade (0 a 100%) baseado em convergência de tatuagens, cicatrizes, cor de pele, compleição, bairro de atuação, facção criminosa, armas e veículos utilizados, justificativa analítica técnica e recomendação operacional de campo.
 3. Avaliação do perímetro e alerta de reincidência operacional (nível de alerta: ALTO, MEDIO ou BAIXO e observação circunstanciada).
 
 Você DEVE responder estritamente de acordo com o esquema JSON solicitado.`;
 
       const userPrompt = `NARRATIVA POLICIAL REGISTRADA:
-"${narrative}"
+"${narrativeText}"
+
+FILTROS ESPECÍFICOS DE CARACTERÍSTICAS DECLARADAS (SE HOUVER):
+${JSON.stringify(filters || {}, null, 2)}
 
 BASE DE INFRATORES E SUSPEITOS CADASTRADOS NO SISTEMA:
 ${JSON.stringify(formattedCandidates, null, 2)}
 
-Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibilidade com os infratores cadastrados e gere o alerta de reincidência no perímetro.`;
+Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibilidade com os infratores cadastrados (valorizando correspondência de tatuagens, cicatrizes, sinais físicos, bairros e veículos) e gere o alerta de reincidência no perímetro.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3.7-flash',
@@ -818,6 +822,8 @@ Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibili
                       pele: { type: Type.STRING },
                       vestimentas: { type: Type.STRING },
                       sinais_particulares: { type: Type.STRING },
+                      tatuagens: { type: Type.STRING },
+                      cicatrizes: { type: Type.STRING },
                       armas_veiculos: { type: Type.STRING }
                     },
                     required: ["pele", "sinais_particulares", "armas_veiculos"]
@@ -878,9 +884,10 @@ Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibili
     // Fallback: If AI is unavailable or output couldn't be parsed, run deterministic intelligence engine
     if (!parsedResult || !parsedResult.ocorrencia_processada) {
       parsedResult = analyzeCrimeIntelligenceLocally(
-        narrative,
+        narrativeText,
         candidates,
-        lat !== undefined && lng !== undefined ? { lat: Number(lat), lng: Number(lng) } : undefined
+        lat !== undefined && lng !== undefined ? { lat: Number(lat), lng: Number(lng) } : undefined,
+        filters
       );
     }
 
@@ -898,9 +905,13 @@ Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibili
     res.json(parsedResult);
   } catch (error: any) {
     console.error('Error in intelligence-analysis:', error);
-    // Even on server exception, return a local fallback response rather than breaking the UI
     try {
-      const fallback = analyzeCrimeIntelligenceLocally(req.body?.narrative || '');
+      const fallback = analyzeCrimeIntelligenceLocally(
+        req.body?.narrative || '',
+        undefined,
+        req.body?.lat !== undefined && req.body?.lng !== undefined ? { lat: Number(req.body.lat), lng: Number(req.body.lng) } : undefined,
+        req.body?.filters
+      );
       res.json(fallback);
     } catch (fbErr) {
       res.status(500).json({ error: error.message });
