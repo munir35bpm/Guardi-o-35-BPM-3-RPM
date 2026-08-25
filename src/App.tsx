@@ -57,8 +57,8 @@ export default function App() {
   const [occurrences, setOccurrences] = useState<OcorrenciaCriminal[]>([]);
   const [addresses, setAddresses] = useState<EnderecoAtuacao[]>([]);
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>({
-    lat: -23.6141,
-    lng: -46.5892, // Heliópolis default coordinates
+    lat: -19.7712,
+    lng: -43.8564, // Santa Luzia / 35º BPM default coordinates
   });
   const [highlightedSuspectId, setHighlightedSuspectId] = useState<string | null>(null);
 
@@ -68,9 +68,7 @@ export default function App() {
   const [totalIncidents, setTotalIncidents] = useState(0);
 
   // Module A (AI Narrative Parser) states
-  const [narrativeInput, setNarrativeInput] = useState<string>(
-    'Na noite de ontem, um caminhão contendo televisores de última geração foi interceptado por criminosos armados na região de Heliópolis. O motorista relatou que foi abordado de forma agressiva por dois homens utilizando uma van Sprinter branca. O líder da quadrilha era careca de compleição atlética e possuía uma tatuagem visível de palhaço no braço, proferindo ameaças verbais com uma pistola calibre 380, auxiliado por um comparsa alto conhecido como Neguinho.'
-  );
+  const [narrativeInput, setNarrativeInput] = useState<string>('');
   const [isParsing, setIsParsing] = useState(false);
   const [parsedReport, setParsedReport] = useState<any | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -198,14 +196,14 @@ export default function App() {
   // New Incident Form
   const [newIncidentForm, setNewIncidentForm] = useState({
     numero_bo: '',
-    data_hora: '',
-    tipificacao_penal: 'Roubo de Carga',
+    data_hora: new Date().toISOString().slice(0, 16),
+    tipificacao_penal: '',
     descricao_fato: '',
     modus_operandi: '',
     armas_utilizadas: '',
     veiculo_utilizado: '',
-    lat: '-23.6141',
-    lng: '-46.5892',
+    lat: '-19.7712',
+    lng: '-43.8564',
   });
 
   // New Address Form
@@ -214,9 +212,9 @@ export default function App() {
     tipo_endereco: 'Residência',
     logradouro: '',
     bairro: '',
-    cidade: 'São Paulo',
-    lat: '-23.6141',
-    lng: '-46.5892',
+    cidade: 'Santa Luzia',
+    lat: '-19.7712',
+    lng: '-43.8564',
     raio_influencia_km: '2.5',
   });
 
@@ -2040,6 +2038,51 @@ export default function App() {
                                   className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
                                 />
                               </div>
+
+                              {/* Coordenadas Geográficas (Lat / Long) */}
+                              <div>
+                                <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1 mb-1">
+                                  <MapPin className="w-3 h-3 text-cyan-400" /> Latitude (Lat) *
+                                </label>
+                                <input
+                                  type="text"
+                                  required
+                                  placeholder="Ex: -19.7712"
+                                  value={suspectNewOcData.lat}
+                                  onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, lat: e.target.value })}
+                                  className="w-full bg-[#0A0A0B] border border-cyan-900/50 rounded p-2 text-xs text-cyan-200 focus:outline-none focus:border-cyan-500 font-mono"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1 mb-1">
+                                  <MapPin className="w-3 h-3 text-cyan-400" /> Longitude (Long) *
+                                </label>
+                                <input
+                                  type="text"
+                                  required
+                                  placeholder="Ex: -43.8564"
+                                  value={suspectNewOcData.lng}
+                                  onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, lng: e.target.value })}
+                                  className="w-full bg-[#0A0A0B] border border-cyan-900/50 rounded p-2 text-xs text-cyan-200 focus:outline-none focus:border-cyan-500 font-mono"
+                                />
+                              </div>
+                              <div className="flex items-end pb-1">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setSuspectNewOcData({
+                                      ...suspectNewOcData,
+                                      lat: selectedCoords ? selectedCoords.lat.toFixed(5) : '-19.7712',
+                                      lng: selectedCoords ? selectedCoords.lng.toFixed(5) : '-43.8564',
+                                    })
+                                  }
+                                  className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 rounded text-[10px] font-bold uppercase transition flex items-center justify-center gap-1 cursor-pointer"
+                                  title="Carregar coordenadas do 35º BPM / Centro"
+                                >
+                                  <Crosshair className="w-3 h-3 text-amber-400" /> Ponto 35º BPM / Mapa
+                                </button>
+                              </div>
+
                               <div className="sm:col-span-3">
                                 <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
                                   Modus Operandi / Resumo do Histórico
@@ -2153,16 +2196,22 @@ export default function App() {
 
                   {isAddingOccurrence && (
                     <form onSubmit={handleAddIncidentSubmit} className="space-y-4 font-mono">
-                      <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                        <Plus className="w-4 h-4 text-cyan-400" /> Registrar Novo Evento Criminal
-                      </h3>
+                      <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+                        <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest flex items-center gap-1.5">
+                          <Plus className="w-4 h-4 text-cyan-400" /> Registrar Novo Evento Criminal (B.O. / REDS)
+                        </h3>
+                        <span className="text-[10px] text-zinc-400 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded">
+                          Georreferenciamento Parametrizado
+                        </span>
+                      </div>
+                      
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Número do B.O. *</label>
+                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Número do B.O. / REDS *</label>
                           <input
                             type="text"
                             required
-                            placeholder="Ex: BO-4432/2026"
+                            placeholder="Ex: REDS-2026-00458921-001"
                             value={newIncidentForm.numero_bo}
                             onChange={(e) => setNewIncidentForm({ ...newIncidentForm, numero_bo: e.target.value })}
                             className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none focus:border-amber-500 text-zinc-200"
@@ -2173,9 +2222,18 @@ export default function App() {
                           <input
                             type="text"
                             required
-                            placeholder="Ex: Roubo de Carga, Roubo de Veículo"
+                            placeholder="Ex: Roubo a Mão Armada (Art. 157)"
                             value={newIncidentForm.tipificacao_penal}
                             onChange={(e) => setNewIncidentForm({ ...newIncidentForm, tipificacao_penal: e.target.value })}
+                            className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none focus:border-amber-500 text-zinc-200"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Data / Hora do Fato</label>
+                          <input
+                            type="datetime-local"
+                            value={newIncidentForm.data_hora}
+                            onChange={(e) => setNewIncidentForm({ ...newIncidentForm, data_hora: e.target.value })}
                             className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none focus:border-amber-500 text-zinc-200"
                           />
                         </div>
@@ -2193,46 +2251,122 @@ export default function App() {
                           <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Veículo Empregado</label>
                           <input
                             type="text"
-                            placeholder="Ex: Sprinter Branca"
+                            placeholder="Ex: Moto Honda CG 160 Preta"
                             value={newIncidentForm.veiculo_utilizado}
                             onChange={(e) => setNewIncidentForm({ ...newIncidentForm, veiculo_utilizado: e.target.value })}
                             className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none text-zinc-200"
                           />
                         </div>
                         <div>
-                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Latitude *</label>
+                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Modus Operandi</label>
                           <input
                             type="text"
-                            required
-                            value={newIncidentForm.lat}
-                            onChange={(e) => setNewIncidentForm({ ...newIncidentForm, lat: e.target.value })}
+                            placeholder="Ex: Abordagem com arma em punho e fuga rápida"
+                            value={newIncidentForm.modus_operandi}
+                            onChange={(e) => setNewIncidentForm({ ...newIncidentForm, modus_operandi: e.target.value })}
                             className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none text-zinc-200"
                           />
                         </div>
-                        <div>
-                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Longitude *</label>
-                          <input
-                            type="text"
-                            required
-                            value={newIncidentForm.lng}
-                            onChange={(e) => setNewIncidentForm({ ...newIncidentForm, lng: e.target.value })}
-                            className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none text-zinc-200"
-                          />
+
+                        {/* Coordenadas Geográficas Parametrizadas */}
+                        <div className="md:col-span-3 bg-[#0A0A0D] p-3.5 rounded border border-cyan-900/40 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <label className="text-[10px] uppercase text-cyan-400 font-bold flex items-center gap-1.5 tracking-wider">
+                              <MapPin className="w-3.5 h-3.5 text-cyan-400" />
+                              Coordenadas Geográficas do Fato (Latitude e Longitude) *
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setNewIncidentForm({
+                                    ...newIncidentForm,
+                                    lat: '-19.7712',
+                                    lng: '-43.8564',
+                                  })
+                                }
+                                className="px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 rounded text-[9px] font-bold uppercase transition flex items-center gap-1 cursor-pointer"
+                              >
+                                <Crosshair className="w-3 h-3 text-cyan-400" /> 35º BPM / Santa Luzia (-19.7712, -43.8564)
+                              </button>
+                              {selectedCoords && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setNewIncidentForm({
+                                      ...newIncidentForm,
+                                      lat: selectedCoords.lat.toFixed(5),
+                                      lng: selectedCoords.lng.toFixed(5),
+                                    })
+                                  }
+                                  className="px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-amber-300 rounded text-[9px] font-bold uppercase transition flex items-center gap-1 cursor-pointer"
+                                >
+                                  <MapPin className="w-3 h-3 text-amber-400" /> Usar Ponto Atual do Mapa
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <div className="flex justify-between items-center mb-1">
+                                <label className="text-[9px] uppercase text-zinc-400 font-bold">Latitude (Lat) *</label>
+                                <span className="text-[9px] text-zinc-600">Ex: -19.77120</span>
+                              </div>
+                              <input
+                                type="text"
+                                required
+                                placeholder="-19.7712"
+                                value={newIncidentForm.lat}
+                                onChange={(e) => setNewIncidentForm({ ...newIncidentForm, lat: e.target.value })}
+                                className="w-full bg-[#0F0F12] border border-cyan-900/50 rounded p-2 text-xs focus:outline-none focus:border-cyan-500 text-cyan-200 font-mono"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between items-center mb-1">
+                                <label className="text-[9px] uppercase text-zinc-400 font-bold">Longitude (Long) *</label>
+                                <span className="text-[9px] text-zinc-600">Ex: -43.85640</span>
+                              </div>
+                              <input
+                                type="text"
+                                required
+                                placeholder="-43.8564"
+                                value={newIncidentForm.lng}
+                                onChange={(e) => setNewIncidentForm({ ...newIncidentForm, lng: e.target.value })}
+                                className="w-full bg-[#0F0F12] border border-cyan-900/50 rounded p-2 text-xs focus:outline-none focus:border-cyan-500 text-cyan-200 font-mono"
+                              />
+                            </div>
+                          </div>
                         </div>
+
                         <div className="md:col-span-3">
-                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Narrativa do Fato *</label>
+                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Narrativa Circunstanciada do Fato *</label>
                           <textarea
                             required
+                            placeholder="Descreva a dinâmica do crime, depoimentos de vítimas e circunstâncias da ocorrência..."
                             value={newIncidentForm.descricao_fato}
                             onChange={(e) => setNewIncidentForm({ ...newIncidentForm, descricao_fato: e.target.value })}
-                            className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none h-20 resize-none text-zinc-200 font-sans"
+                            className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none focus:border-amber-500 h-20 resize-none text-zinc-200 font-sans"
                           />
                         </div>
                       </div>
 
-                      <button type="submit" className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs uppercase rounded cursor-pointer">
-                        Registrar Ocorrência
-                      </button>
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingOccurrence(false)}
+                          className="px-4 py-2 bg-zinc-850 hover:bg-zinc-800 text-zinc-400 font-bold text-xs uppercase rounded cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs uppercase rounded cursor-pointer flex items-center gap-2 shadow-lg shadow-cyan-600/20"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          <span>Registrar Ocorrência</span>
+                        </button>
+                      </div>
                     </form>
                   )}
 
@@ -2585,7 +2719,7 @@ export default function App() {
                                 </select>
                               </div>
                             ) : (
-                              <div className="space-y-2">
+                              <div className="space-y-2.5">
                                 <div>
                                   <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
                                     Número do B.O. / REDS *
@@ -2619,15 +2753,86 @@ export default function App() {
                                     <option value="Extorsão / Sequestro">Extorsão / Sequestro</option>
                                   </select>
                                 </div>
+                                
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
+                                      Data / Hora do Fato
+                                    </label>
+                                    <input
+                                      type="datetime-local"
+                                      value={directNewOcData.data_hora}
+                                      onChange={(e) => setDirectNewOcData({ ...directNewOcData, data_hora: e.target.value })}
+                                      className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-[11px] text-zinc-200 focus:outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
+                                      Armas Utilizadas
+                                    </label>
+                                    <input
+                                      type="text"
+                                      placeholder="Ex: Pistola .380"
+                                      value={directNewOcData.armas_utilizadas}
+                                      onChange={(e) => setDirectNewOcData({ ...directNewOcData, armas_utilizadas: e.target.value })}
+                                      className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* Coordenadas Geográficas Parametrizadas (Lat / Long) */}
+                                <div className="p-2 bg-[#09090C] rounded border border-cyan-900/40 space-y-1.5">
+                                  <div className="flex items-center justify-between">
+                                    <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1">
+                                      <MapPin className="w-3 h-3 text-cyan-400" /> Coordenadas Geográficas (Lat / Long) *
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setDirectNewOcData({
+                                          ...directNewOcData,
+                                          lat: '-19.7712',
+                                          lng: '-43.8564',
+                                        })
+                                      }
+                                      className="text-[9px] text-zinc-400 hover:text-cyan-300 font-mono underline cursor-pointer"
+                                    >
+                                      35º BPM
+                                    </button>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <label className="text-[8px] uppercase text-zinc-500 font-bold block">Latitude *</label>
+                                      <input
+                                        type="text"
+                                        placeholder="-19.7712"
+                                        value={directNewOcData.lat}
+                                        onChange={(e) => setDirectNewOcData({ ...directNewOcData, lat: e.target.value })}
+                                        className="w-full bg-[#121216] border border-cyan-900/50 rounded p-1.5 text-xs text-cyan-200 focus:outline-none font-mono"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="text-[8px] uppercase text-zinc-500 font-bold block">Longitude *</label>
+                                      <input
+                                        type="text"
+                                        placeholder="-43.8564"
+                                        value={directNewOcData.lng}
+                                        onChange={(e) => setDirectNewOcData({ ...directNewOcData, lng: e.target.value })}
+                                        className="w-full bg-[#121216] border border-cyan-900/50 rounded p-1.5 text-xs text-cyan-200 focus:outline-none font-mono"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+
                                 <div>
                                   <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
-                                    Armas Utilizadas (Opcional)
+                                    Modus Operandi / Dinâmica
                                   </label>
                                   <input
                                     type="text"
-                                    placeholder="Ex: Pistola .380"
-                                    value={directNewOcData.armas_utilizadas}
-                                    onChange={(e) => setDirectNewOcData({ ...directNewOcData, armas_utilizadas: e.target.value })}
+                                    placeholder="Ex: Abordagem com emprego de arma de fogo e fuga em veículo"
+                                    value={directNewOcData.modus_operandi}
+                                    onChange={(e) => setDirectNewOcData({ ...directNewOcData, modus_operandi: e.target.value })}
                                     className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
                                   />
                                 </div>
