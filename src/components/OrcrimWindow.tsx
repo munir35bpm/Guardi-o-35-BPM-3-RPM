@@ -48,10 +48,12 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
   const [showAddMemberModal, setShowAddMemberModal] = useState<boolean>(false);
   const [targetLevel, setTargetLevel] = useState<1 | 2 | 3>(1);
   const [selectedSuspectId, setSelectedSuspectId] = useState<string>('');
+  const [targetFactionName, setTargetFactionName] = useState<string>('');
   const [memberFuncao, setMemberFuncao] = useState<string>('');
   const [memberArea, setMemberArea] = useState<string>('');
   const [memberSubordinado, setMemberSubordinado] = useState<string>('');
   const [memberSituacao, setMemberSituacao] = useState<SituacaoPrisional>('EM_LIBERDADE');
+  const [isSavingMember, setIsSavingMember] = useState<boolean>(false);
 
   // Load existing organograms from backend
   const fetchOrganogramas = async () => {
@@ -140,70 +142,138 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
     }
   };
 
-  // Add Member to Current Organogram
+  // Add Member to Organogram (with auto-create if no organogram exists)
   const handleAddMember = async () => {
-    if (!currentOrcrim || !selectedSuspectId) {
-      alert('Selecione um infrator cadastrado.');
+    if (!selectedSuspectId) {
+      alert('Por favor, selecione um infrator cadastrado na lista.');
       return;
     }
 
     const suspect = registeredSuspects.find(s => s.id === selectedSuspectId);
-    if (!suspect) return;
-
-    const newMember: MembroEstruturaOrcrim = {
-      infrator_id: suspect.id,
-      nome_completo: suspect.nome_completo,
-      vulgo: suspect.vulgo,
-      funcao_especifica: memberFuncao || 'Operador Tático',
-      foto_url: suspect.foto_url,
-      status_mandado: suspect.status_mandado_prisao,
-      situacao_atual: memberSituacao,
-      area_responsabilidade: memberArea || undefined,
-      subordinado_a_vulgo: memberSubordinado || undefined
-    };
-
-    const updatedOrcrim = { ...currentOrcrim };
-    const estrutura = { ...updatedOrcrim.estrutura_piramidal };
-
-    if (targetLevel === 1) {
-      estrutura.nivel_1_lideranca = [...(estrutura.nivel_1_lideranca || []), newMember];
-    } else if (targetLevel === 2) {
-      const lvl2 = estrutura.nivel_2_gerencia_tatica || estrutura['nivel_2_gerencia_tática'] || [];
-      estrutura.nivel_2_gerencia_tatica = [...lvl2, newMember];
-      estrutura['nivel_2_gerencia_tática'] = [...lvl2, newMember];
-    } else {
-      estrutura.nivel_3_operacionais_e_linha_de_frente = [
-        ...(estrutura.nivel_3_operacionais_e_linha_de_frente || []),
-        newMember
-      ];
+    if (!suspect) {
+      alert('Infrator selecionado não encontrado no cadastro.');
+      return;
     }
 
-    // Recalculate total mapped
-    const total = (estrutura.nivel_1_lideranca?.length || 0) + 
-      (estrutura.nivel_2_gerencia_tatica?.length || estrutura['nivel_2_gerencia_tática']?.length || 0) + 
-      (estrutura.nivel_3_operacionais_e_linha_de_frente?.length || 0);
-
-    updatedOrcrim.gangue_info.total_integrantes_mapeados = total;
-    updatedOrcrim.estrutura_piramidal = estrutura;
+    setIsSavingMember(true);
 
     try {
+      const newMember: MembroEstruturaOrcrim = {
+        infrator_id: suspect.id,
+        nome_completo: suspect.nome_completo,
+        vulgo: suspect.vulgo,
+        funcao_especifica: memberFuncao.trim() || (targetLevel === 1 ? 'Líder / Sintonia' : targetLevel === 2 ? 'Gerência Operacional' : 'Operador / Linha de Frente'),
+        foto_url: suspect.foto_url,
+        status_mandado: suspect.status_mandado_prisao,
+        situacao_atual: memberSituacao,
+        area_responsabilidade: memberArea.trim() || undefined,
+        subordinado_a_vulgo: memberSubordinado.trim() || undefined
+      };
+
+      // Determine target organogram:
+      // 1. Check if user specified or selected an existing faction name
+      const effectiveFactionName = targetFactionName.trim() || 
+        currentOrcrim?.gangue_info.nome_gangue || 
+        suspect.gangue_faccao || 
+        'GANGUE / ORCRIM REGIONAL';
+
+      let targetOrcrim: OrcrimData;
+
+      const existingOrcrim = organogramas.find(
+        o => (o.id && o.id === selectedOrcrimId) || 
+             (o.gangue_info && o.gangue_info.nome_gangue.toLowerCase() === effectiveFactionName.toLowerCase())
+      );
+
+      if (existingOrcrim) {
+        targetOrcrim = JSON.parse(JSON.stringify(existingOrcrim));
+      } else if (currentOrcrim) {
+        targetOrcrim = JSON.parse(JSON.stringify(currentOrcrim));
+      } else {
+        // Create new Organogram structure from scratch
+        targetOrcrim = {
+          id: `orcrim-${Date.now()}`,
+          gangue_info: {
+            nome_gangue: effectiveFactionName,
+            territorio_principal: 'Santa Luzia / 35º BPM',
+            total_integrantes_mapeados: 1,
+            resumo_atuacao: `Estrutura e organograma da organização ${effectiveFactionName} - Inteligência PMMG.`
+          },
+          estrutura_piramidal: {
+            nivel_1_lideranca: [],
+            nivel_2_gerencia_tatica: [],
+            nivel_3_operacionais_e_linha_de_frente: []
+          }
+        };
+      }
+
+      if (!targetOrcrim.estrutura_piramidal) {
+        targetOrcrim.estrutura_piramidal = {
+          nivel_1_lideranca: [],
+          nivel_2_gerencia_tatica: [],
+          nivel_3_operacionais_e_linha_de_frente: []
+        };
+      }
+
+      const estrutura = targetOrcrim.estrutura_piramidal;
+
+      // Remove member from any level first if already present to avoid duplicate entries
+      estrutura.nivel_1_lideranca = (estrutura.nivel_1_lideranca || []).filter(m => m.infrator_id !== suspect.id);
+      const lvl2 = (estrutura.nivel_2_gerencia_tatica || estrutura['nivel_2_gerencia_tática'] || []).filter(m => m.infrator_id !== suspect.id);
+      estrutura.nivel_2_gerencia_tatica = lvl2;
+      estrutura['nivel_2_gerencia_tática'] = lvl2;
+      estrutura.nivel_3_operacionais_e_linha_de_frente = (estrutura.nivel_3_operacionais_e_linha_de_frente || []).filter(m => m.infrator_id !== suspect.id);
+
+      // Add to requested level
+      if (targetLevel === 1) {
+        estrutura.nivel_1_lideranca = [...estrutura.nivel_1_lideranca, newMember];
+      } else if (targetLevel === 2) {
+        estrutura.nivel_2_gerencia_tatica = [...lvl2, newMember];
+        estrutura['nivel_2_gerencia_tática'] = [...lvl2, newMember];
+      } else {
+        estrutura.nivel_3_operacionais_e_linha_de_frente = [
+          ...estrutura.nivel_3_operacionais_e_linha_de_frente,
+          newMember
+        ];
+      }
+
+      // Recalculate total mapped
+      const total = (estrutura.nivel_1_lideranca?.length || 0) + 
+        (estrutura.nivel_2_gerencia_tatica?.length || 0) + 
+        (estrutura.nivel_3_operacionais_e_linha_de_frente?.length || 0);
+
+      targetOrcrim.gangue_info.total_integrantes_mapeados = total;
+      targetOrcrim.estrutura_piramidal = estrutura;
+
       const res = await fetch('/api/orcrim/organogramas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedOrcrim)
-      });
-      if (res.ok) {
-        const saved = await res.json();
-        setCurrentOrcrim(saved);
-        await fetchOrganogramas();
-        setShowAddMemberModal(false);
-        setSelectedSuspectId('');
-        setMemberFuncao('');
-        setMemberArea('');
-        setMemberSubordinado('');
+        body: JSON.stringify(targetOrcrim)
+      }).catch(() => null);
+
+      let savedData = targetOrcrim;
+      if (res && res.ok) {
+        savedData = await res.json();
+      } else {
+        // Fallback local memory
+        savedData = db.saveOrcrim(targetOrcrim);
       }
-    } catch (e) {
+
+      setCurrentOrcrim(savedData);
+      setSelectedOrcrimId(savedData.id || savedData.gangue_info.nome_gangue);
+      await fetchOrganogramas();
+
+      // Reset form and close modal
+      setShowAddMemberModal(false);
+      setSelectedSuspectId('');
+      setTargetFactionName('');
+      setMemberFuncao('');
+      setMemberArea('');
+      setMemberSubordinado('');
+    } catch (e: any) {
       console.error('Erro ao salvar membro na ORCRIM:', e);
+      alert(`Erro ao salvar integrante na ORCRIM: ${e.message || 'Falha na requisição'}`);
+    } finally {
+      setIsSavingMember(false);
     }
   };
 
@@ -270,9 +340,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
             <button
               onClick={() => {
                 setTargetLevel(1);
+                setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
                 setShowAddMemberModal(true);
               }}
-              className="px-3.5 py-2 bg-[#1D356D] hover:bg-[#2A478C] text-white font-semibold text-xs rounded-lg border border-blue-400/30 flex items-center gap-2 transition-all shadow-sm"
+              className="px-3.5 py-2 bg-[#1D356D] hover:bg-[#2A478C] text-white font-semibold text-xs rounded-lg border border-blue-400/30 flex items-center gap-2 transition-all shadow-sm cursor-pointer"
             >
               <Plus className="w-4 h-4 text-blue-300" />
               <span>Cadastrar Infrator na ORCRIM</span>
@@ -387,7 +458,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                   placeholder="Filtrar por nome, vulgo, função ou área..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 text-slate-900 font-medium border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 placeholder:text-slate-400"
                 />
               </div>
 
@@ -441,9 +512,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                 <button
                   onClick={() => {
                     setTargetLevel(1);
+                    setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
                     setShowAddMemberModal(true);
                   }}
-                  className="p-1.5 bg-red-100 hover:bg-red-200 text-red-800 rounded-lg transition-all"
+                  className="p-1.5 bg-red-100 hover:bg-red-200 text-red-800 rounded-lg transition-all cursor-pointer"
                   title="Adicionar à Liderança"
                 >
                   <Plus className="w-4 h-4" />
@@ -507,9 +579,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                 <button
                   onClick={() => {
                     setTargetLevel(2);
+                    setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
                     setShowAddMemberModal(true);
                   }}
-                  className="p-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg transition-all"
+                  className="p-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg transition-all cursor-pointer"
                   title="Adicionar à Gerência Tática"
                 >
                   <Plus className="w-4 h-4" />
@@ -573,9 +646,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                 <button
                   onClick={() => {
                     setTargetLevel(3);
+                    setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
                     setShowAddMemberModal(true);
                   }}
-                  className="p-1.5 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-lg transition-all"
+                  className="p-1.5 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-lg transition-all cursor-pointer"
                   title="Adicionar aos Operacionais"
                 >
                   <Plus className="w-4 h-4" />
@@ -639,7 +713,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
               </div>
               <button
                 onClick={() => setShowAiModal(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -647,20 +721,20 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
 
             <div className="space-y-4 my-5">
               <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
                   Nome da Organização / Facção / Gangue *
                 </label>
                 <input
                   type="text"
-                  placeholder="Ex: PCC - Regional 35º BPM, Comando Vermelho, Gangue do Palmital..."
+                  placeholder="Ex: PCC - Regional 35º BPM, Comando Vermelho, Gangue do Palmital, Gangue do Muleta..."
                   value={aiFactionName}
                   onChange={(e) => setAiFactionName(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-medium"
+                  className="w-full px-3.5 py-2 text-sm bg-slate-50 text-slate-900 font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:bg-white placeholder:text-slate-400 shadow-xs"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
                   Informações de Inteligência / Relatório Complementar (Opcional)
                 </label>
                 <textarea
@@ -668,9 +742,9 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                   placeholder="Descreva particularidades da facção, território disputado, líderes conhecidos, modus operandi ou informações obtidas em interceptações/depoimentos..."
                   value={aiNarrative}
                   onChange={(e) => setAiNarrative(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                  className="w-full px-3.5 py-2 text-xs bg-slate-50 text-slate-900 font-medium border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:bg-white placeholder:text-slate-400 shadow-xs"
                 ></textarea>
-                <span className="text-[11px] text-slate-400 mt-1 block">
+                <span className="text-[11px] text-slate-500 font-medium mt-1 block">
                   A IA utilizará os {registeredSuspects.length} infratores cadastrados no banco de dados para classificá-los na hierarquia.
                 </span>
               </div>
@@ -680,7 +754,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
               <button
                 type="button"
                 onClick={() => setShowAiModal(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-all cursor-pointer"
               >
                 Cancelar
               </button>
@@ -688,16 +762,16 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                 type="button"
                 disabled={analyzingAi}
                 onClick={handleGenerateAiOrganogram}
-                className="px-5 py-2.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-md flex items-center gap-2 transition-all disabled:opacity-50"
+                className="px-5 py-2.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-md flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
               >
                 {analyzingAi ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
                     <span>Processando Inteligência...</span>
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-4 h-4" />
+                    <Sparkles className="w-4 h-4 text-amber-200" />
                     <span>Gerar Organograma Piramidal</span>
                   </>
                 )}
@@ -711,8 +785,8 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
       {/* MODAL: MANUAL ADD MEMBER TO ORCRIM */}
       {/* ========================================================================= */}
       {showAddMemberModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
                 <div className="p-2.5 bg-blue-500/10 text-blue-600 rounded-xl">
@@ -722,32 +796,50 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                   <h3 className="text-lg font-black text-slate-900">
                     Cadastrar Integrante na ORCRIM
                   </h3>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-500 font-medium">
                     Alocar infrator cadastrado na estrutura piramidal
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowAddMemberModal(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="space-y-4 my-5">
+              {/* Target Faction Name */}
               <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
+                  Facção / Organização Criminosa de Destino *
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: GANGUE DO MULETA, PCC, CV, GANGUE DO PALMITAL..."
+                  value={targetFactionName}
+                  onChange={(e) => setTargetFactionName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 text-slate-900 font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white placeholder:text-slate-400 shadow-xs"
+                />
+                <span className="text-[10px] text-slate-500 font-medium mt-1 block">
+                  Se a facção ainda não tiver organograma criado, este será gerado automaticamente.
+                </span>
+              </div>
+
+              {/* Hierarchical Level Selection */}
+              <div>
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
                   Nível Hierárquico *
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setTargetLevel(1)}
-                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
+                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
                       targetLevel === 1 
-                        ? 'bg-red-600 text-white border-red-700 shadow-xs' 
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        ? 'bg-red-600 text-white border-red-700 shadow-xs ring-2 ring-red-300' 
+                        : 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
                     }`}
                   >
                     👑 Nível 1 (Liderança)
@@ -755,10 +847,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                   <button
                     type="button"
                     onClick={() => setTargetLevel(2)}
-                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
+                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
                       targetLevel === 2 
-                        ? 'bg-amber-600 text-white border-amber-700 shadow-xs' 
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        ? 'bg-amber-600 text-white border-amber-700 shadow-xs ring-2 ring-amber-300' 
+                        : 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
                     }`}
                   >
                     ⚡ Nível 2 (Gerência)
@@ -766,10 +858,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                   <button
                     type="button"
                     onClick={() => setTargetLevel(3)}
-                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
+                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
                       targetLevel === 3 
-                        ? 'bg-blue-600 text-white border-blue-700 shadow-xs' 
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        ? 'bg-blue-600 text-white border-blue-700 shadow-xs ring-2 ring-blue-300' 
+                        : 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
                     }`}
                   >
                     🎯 Nível 3 (Operacional)
@@ -777,41 +869,55 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                 </div>
               </div>
 
+              {/* Suspect Selector */}
               <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
                   Selecione o Infrator Cadastrado *
                 </label>
                 <select
                   value={selectedSuspectId}
-                  onChange={(e) => setSelectedSuspectId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-800"
+                  onChange={(e) => {
+                    const sId = e.target.value;
+                    setSelectedSuspectId(sId);
+                    const found = registeredSuspects.find(s => s.id === sId);
+                    if (found) {
+                      if (found.gangue_faccao && !targetFactionName) {
+                        setTargetFactionName(found.gangue_faccao);
+                      }
+                      if (found.status_mandado_prisao) {
+                        setMemberSituacao('FORAGIDO');
+                      }
+                    }
+                  }}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 text-slate-900 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white font-bold shadow-xs"
                 >
-                  <option value="">-- Selecione um criminoso cadastrado --</option>
+                  <option value="" className="text-slate-500 bg-white">-- Selecione um criminoso cadastrado --</option>
                   {registeredSuspects.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nome_completo} ({s.vulgo}) • Facção: {s.gangue_faccao} {s.status_mandado_prisao ? '⚠️ [MANDADO ATIVO]' : ''}
+                    <option key={s.id} value={s.id} className="text-slate-900 bg-white font-semibold">
+                      {s.nome_completo} ({s.vulgo}) • Facção: {s.gangue_faccao || 'Sem facção'} {s.status_mandado_prisao ? '⚠️ [MANDADO ATIVO]' : ''}
                     </option>
                   ))}
                 </select>
               </div>
 
+              {/* Specific Role */}
               <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
                   Função Específica na Organização *
                 </label>
                 <input
                   type="text"
-                  placeholder="Ex: Geral da Rua, Armeiro, Gerente de Biqueira, Piloto de Fuga, Cobrador..."
+                  placeholder="Ex: Geral da Rua, Armeiro, Gerente de Biqueira, Piloto de Fuga, Executor, Cobrador..."
                   value={memberFuncao}
                   onChange={(e) => setMemberFuncao(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  className="w-full px-3 py-2 text-xs bg-slate-50 text-slate-900 font-semibold border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white placeholder:text-slate-400 shadow-xs"
                 />
               </div>
 
               {targetLevel === 2 && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                    <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
                       Área de Responsabilidade
                     </label>
                     <input
@@ -819,12 +925,12 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                       placeholder="Ex: Eixo Rodoviário / Bairro Palmital"
                       value={memberArea}
                       onChange={(e) => setMemberArea(e.target.value)}
-                      className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg"
+                      className="w-full px-3 py-2 text-xs bg-slate-50 text-slate-900 font-medium border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white placeholder:text-slate-400 shadow-xs"
                     />
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                    <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
                       Subordinado ao Vulgo
                     </label>
                     <input
@@ -832,24 +938,25 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
                       placeholder="Ex: Careca / Chefe Morro"
                       value={memberSubordinado}
                       onChange={(e) => setMemberSubordinado(e.target.value)}
-                      className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg"
+                      className="w-full px-3 py-2 text-xs bg-slate-50 text-slate-900 font-medium border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white placeholder:text-slate-400 shadow-xs"
                     />
                   </div>
                 </div>
               )}
 
+              {/* Prison status */}
               <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
                   Situação Prisional Atual *
                 </label>
                 <select
                   value={memberSituacao}
                   onChange={(e) => setMemberSituacao(e.target.value as SituacaoPrisional)}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg font-semibold"
+                  className="w-full px-3 py-2 text-xs bg-slate-50 text-slate-900 border border-slate-300 rounded-lg font-bold shadow-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white"
                 >
-                  <option value="EM_LIBERDADE">EM LIBERDADE (Atuante na rua)</option>
-                  <option value="FORAGIDO">FORAGIDO (Mandado de prisão pendente)</option>
-                  <option value="PRESO">PRESO (Custodiado no sistema penitenciário)</option>
+                  <option value="EM_LIBERDADE" className="text-slate-900 bg-white font-semibold">EM LIBERDADE (Atuante na rua)</option>
+                  <option value="FORAGIDO" className="text-slate-900 bg-white font-semibold">FORAGIDO (Mandado de prisão pendente)</option>
+                  <option value="PRESO" className="text-slate-900 bg-white font-semibold">PRESO (Custodiado no sistema penitenciário)</option>
                 </select>
               </div>
             </div>
@@ -858,17 +965,22 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ onSelectSuspect, reg
               <button
                 type="button"
                 onClick={() => setShowAddMemberModal(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-all cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 type="button"
+                disabled={isSavingMember}
                 onClick={handleAddMember}
-                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-md flex items-center gap-2 transition-all"
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-md flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
               >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Salvar Integrante</span>
+                {isSavingMember ? (
+                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-white" />
+                )}
+                <span>{isSavingMember ? 'Salvando...' : 'Salvar Integrante'}</span>
               </button>
             </div>
           </div>
