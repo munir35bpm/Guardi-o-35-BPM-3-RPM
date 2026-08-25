@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { NetworkNode, NetworkEdge } from '../types';
 import { Users, AlertTriangle, FileText, Share2, FileDown } from 'lucide-react';
 import { db } from '../backend/db';
+import { openSuspectDossier } from '../utils/dossierGenerator';
 
 interface NetworkGraphProps {
   onSelectNode?: (nodeId: string, nodeType: 'suspect' | 'incident') => void;
@@ -523,14 +524,13 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
 
             <div className="mt-6 border-t border-slate-800 pt-4">
               {selectedNode.type === 'suspect' && (
-                <a
-                  href={`/api/suspects/${selectedNode.id}/dossier`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-xs flex items-center justify-center gap-1.5 transition uppercase shadow-lg shadow-amber-500/20"
+                <button
+                  type="button"
+                  onClick={() => openSuspectDossier(selectedNode.id)}
+                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-xs flex items-center justify-center gap-1.5 transition uppercase shadow-lg shadow-amber-500/20 cursor-pointer"
                 >
                   <FileDown className="w-4 h-4 stroke-[2.5]" /> Extrair Ficha do Infrator em PDF
-                </a>
+                </button>
               )}
             </div>
           </div>

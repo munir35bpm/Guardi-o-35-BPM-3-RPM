@@ -53,6 +53,7 @@ import {
   AlertaReincidenciaPerimetro
 } from './types';
 import { db } from './backend/db';
+import { openSuspectDossier } from './utils/dossierGenerator';
 import {
   initFirebaseSync,
   persistSuspectToFirebase,
@@ -1868,15 +1869,14 @@ export default function App() {
                               >
                                 Ficha Completa
                               </button>
-                              <a
-                                href={`/api/suspects/${item.infrator_id}/dossier`}
-                                target="_blank"
-                                rel="noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => openSuspectDossier(item.infrator_id)}
                                 className="px-3 py-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-[10px] rounded transition uppercase flex items-center gap-1 cursor-pointer shadow-sm shadow-amber-500/20"
                                 title="Extrair Ficha do Infrator em PDF com Foto, Dados Pessoais e B.O.s"
                               >
                                 <FileDown className="w-3.5 h-3.5 stroke-[2.5]" /> Extrair Ficha PDF
-                              </a>
+                              </button>
                             </div>
                           </div>
                         ))}
@@ -3164,16 +3164,15 @@ export default function App() {
                               >
                                 Ficha
                               </button>
-                              <a
-                                href={`/api/suspects/${s.id}/dossier`}
-                                target="_blank"
-                                rel="noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => openSuspectDossier(s.id, s)}
                                 className="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-[10px] transition inline-flex items-center gap-1 cursor-pointer shadow-sm shadow-amber-500/20"
                                 title="Extrair Ficha do Infrator em PDF com Foto, Dados e B.O.s"
                               >
                                 <FileDown className="w-3 h-3 stroke-[2.5]" />
                                 <span>PDF</span>
-                              </a>
+                              </button>
                               <button
                                 onClick={() => handleInitiateDeleteSuspect(s.id, s.nome_completo, s.vulgo)}
                                 className="px-2 py-1 bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-300 hover:text-white rounded text-[10px] font-bold transition inline-flex items-center gap-1 cursor-pointer shadow-sm shadow-red-950/40"
@@ -3657,14 +3656,13 @@ export default function App() {
                       </div>
 
                       <div className="border-t border-zinc-800/80 pt-3 font-mono space-y-2">
-                        <a
-                          href={`/api/suspects/${selectedSuspectDetail.id}/dossier`}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => openSuspectDossier(selectedSuspectDetail.id, selectedSuspectDetail)}
                           className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded flex items-center justify-center gap-2 transition uppercase tracking-wider shadow-lg shadow-amber-500/20 cursor-pointer text-xs"
                         >
                           <FileDown className="w-4 h-4 stroke-[2.5]" /> Extrair Ficha do Infrator em PDF
-                        </a>
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleInitiateDeleteSuspect(selectedSuspectDetail.id, selectedSuspectDetail.nome_completo, selectedSuspectDetail.vulgo)}
@@ -3701,6 +3699,8 @@ export default function App() {
               <OrcrimWindow
                 onSelectSuspect={handleViewSuspectDetail}
                 registeredSuspects={suspects}
+                onDeleteSuspect={handleInitiateDeleteSuspect}
+                onRefreshSuspects={fetchTelemetry}
               />
             </motion.div>
           )}

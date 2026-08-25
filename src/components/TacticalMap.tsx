@@ -450,23 +450,24 @@ export default function TacticalMap({
 
       // Intelligent detection of arrests, qualified authors, and linkages
       const allSuspects = db.infratores || [];
-      const fullText = `${oc.descricao_fato || ''} ${oc.modus_operandi || ''}`;
+      const fullText = `${oc.descricao_fato || ''} ${oc.modus_operandi || ''} ${(oc as any).historico || ''} ${(oc as any).relato || ''} ${(oc as any).narrativa || ''} ${oc.tipificacao_penal || ''}`;
       const textLower = fullText.toLowerCase();
 
       // Detect arrest / detention keywords
       const isPrisaoDetectada =
-        /pres[oa]s?|pris[aã]o|flagrante|conduzid[oa]s?|detid[oa]s?|apreendid[oa]s?|autuad[oa]s?|recolhid[oa]s?|mandado cumprido|ratificad[oa]|presídio|delegacia|apresentad[oa]s?\s+[àa]o?\s+delegad[oa]|ratificou/i.test(fullText);
+        /pres[oa]s?|pris[aã]o|flagrante|conduzid[oa]s?|detid[oa]s?|apreendid[oa]s?|autuad[oa]s?|recolhid[oa]s?|mandado cumprido|ratificad[oa]|presídio|penitenci[aá]ri[oa]|delegacia|apresentad[oa]s?\s+[àa]o?\s+delegad[oa]|ratificou|autua[cç][aã]o|algemad[oa]s?|condu[cç][aã]o|lavratur/i.test(fullText);
 
       const autoresVinculados: { nome: string; vulgo?: string; papel: string; preso?: boolean }[] = [];
 
       // A. Formally attached involved list
       if (oc.envolvidos && Array.isArray(oc.envolvidos) && oc.envolvidos.length > 0) {
         oc.envolvidos.forEach((e: any) => {
+          const isAuthorArrested = isPrisaoDetectada || /pres|autuad|flagrante|conduz|detid|apreend/i.test(e.papel || '') || e.preso === true;
           autoresVinculados.push({
             nome: e.nome,
             vulgo: e.vulgo,
-            papel: e.papel || (isPrisaoDetectada ? 'Autor Preso' : 'Autor Qualificado'),
-            preso: isPrisaoDetectada || /pres|autuad/i.test(e.papel || ''),
+            papel: e.papel || (isAuthorArrested ? 'Autor Preso / Autuado' : 'Autor Qualificado'),
+            preso: isAuthorArrested,
           });
         });
       }
@@ -484,11 +485,12 @@ export default function TacticalMap({
               (a) => a.nome.toLowerCase() === suspect.nome_completo.toLowerCase()
             )
           ) {
+            const isSuspectArrested = isPrisaoDetectada || /pres|autuad|flagrante|conduz|detid/i.test(l.papel_no_crime || '') || (suspect as any).situacao_atual === 'PRESO' || suspect.status_mandado_prisao;
             autoresVinculados.push({
               nome: suspect.nome_completo,
               vulgo: suspect.vulgo,
-              papel: l.papel_no_crime || (isPrisaoDetectada ? 'Autor Preso' : 'Autor Vinculado'),
-              preso: isPrisaoDetectada || /pres|autuad/i.test(l.papel_no_crime || ''),
+              papel: l.papel_no_crime || (isSuspectArrested ? 'Autor Preso / Autuado' : 'Autor Vinculado'),
+              preso: isSuspectArrested,
             });
           }
         });

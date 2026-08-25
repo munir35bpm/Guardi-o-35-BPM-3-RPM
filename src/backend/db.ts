@@ -367,6 +367,14 @@ class CrimIntelDatabase {
     }
   }
 
+  public deleteOrcrim(id: string): boolean {
+    const initialLen = this.orcrim_organogramas.length;
+    this.orcrim_organogramas = this.orcrim_organogramas.filter(
+      o => o.id !== id && o.gangue_info?.nome_gangue?.toLowerCase() !== id.toLowerCase()
+    );
+    return this.orcrim_organogramas.length < initialLen;
+  }
+
   // Get network graph
   public getNetworkGraph(): { nodes: any[]; edges: any[] } {
     const nodes: any[] = [];

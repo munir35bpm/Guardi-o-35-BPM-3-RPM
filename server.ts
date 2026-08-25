@@ -1248,6 +1248,20 @@ app.post('/api/orcrim/organogramas', (req, res) => {
   }
 });
 
+app.delete('/api/orcrim/organogramas/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const deleted = db.deleteOrcrim(id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Organograma não encontrado.' });
+      return;
+    }
+    res.json({ success: true, message: 'Organograma excluído com sucesso.' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // AI-Powered Organogram Generator & Classifier for Factions/Gangues
 app.post('/api/ai/orcrim-analyze', async (req, res) => {
   try {
