@@ -1,0 +1,138 @@
+{
+  "entities": {
+    "infratores": {
+      "title": "Infrator",
+      "description": "Ficha cadastral de infrator/alvo com dados biográficos, fotos e facção",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nome_completo": { "type": "string" },
+        "vulgo": { "type": "string" },
+        "data_nascimento": { "type": "string" },
+        "cpf": { "type": "string" },
+        "foto_url": { "type": "string" },
+        "gangue_faccao": { "type": "string" },
+        "status_mandado_prisao": { "type": "boolean" },
+        "periculosidade": { "type": "string" },
+        "created_at": { "type": "string" },
+        "caracteristicas_fisicas": { "type": "object" }
+      },
+      "required": ["id", "nome_completo"]
+    },
+    "enderecos_atuacao": {
+      "title": "Endereço de Atuação",
+      "description": "Pontos georreferenciados de residência, biqueira, esconderijo de alvos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "infrator_id": { "type": "string" },
+        "tipo_endereco": { "type": "string" },
+        "logradouro": { "type": "string" },
+        "bairro": { "type": "string" },
+        "cidade": { "type": "string" },
+        "geom_ponto": { "type": "object" },
+        "raio_influencia_km": { "type": "number" }
+      },
+      "required": ["id", "infrator_id"]
+    },
+    "ocorrencias_criminais": {
+      "title": "Ocorrência Criminal / BO",
+      "description": "Boletins de ocorrência, tipificação penal, armas e locais dos fatos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "numero_bo": { "type": "string" },
+        "data_hora": { "type": "string" },
+        "tipificacao_penal": { "type": "string" },
+        "descricao_fato": { "type": "string" },
+        "modus_operandi": { "type": "string" },
+        "armas_utilizadas": { "type": "string" },
+        "veiculo_utilizado": { "type": "string" },
+        "geom_crime": { "type": "object" },
+        "envolvidos": { "type": "array" }
+      },
+      "required": ["id", "numero_bo"]
+    },
+    "infrator_ocorrencia": {
+      "title": "Vínculo Infrator-Ocorrência",
+      "description": "Relação de envolvimento de infratores em boletins de ocorrência",
+      "type": "object",
+      "properties": {
+        "infrator_id": { "type": "string" },
+        "ocorrencia_id": { "type": "string" },
+        "papel_no_crime": { "type": "string" }
+      },
+      "required": ["infrator_id", "ocorrencia_id"]
+    },
+    "vinculos_comparsas": {
+      "title": "Vínculo de Cúmplices / Comparsas",
+      "description": "Vínculos entre comparsas de gangues e histórico criminal conjunto",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "infrator_origem_id": { "type": "string" },
+        "infrator_destino_id": { "type": "string" },
+        "grau_relacao": { "type": "string" },
+        "historico_conjunto": { "type": "string" }
+      },
+      "required": ["infrator_origem_id", "infrator_destino_id"]
+    },
+    "gang_areas": {
+      "title": "Área de Gangue / Território Tático",
+      "description": "Polígonos geográficos e camadas territoriais de gangues importados do Google Maps",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "gangName": { "type": "string" },
+        "description": { "type": "string" },
+        "color": { "type": "string" },
+        "coordinates": { "type": "array" },
+        "type": { "type": "string" },
+        "visible": { "type": "boolean" },
+        "dangerLevel": { "type": "string" }
+      },
+      "required": ["id", "name", "coordinates"]
+    },
+    "configuracoes": {
+      "title": "Configurações Globais",
+      "description": "Configurações operacionais do sistema 35º BPM",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tema": { "type": "string" },
+        "bpm": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/infratores/{infratorId}": {
+      "schema": "infratores",
+      "description": "Coleção de infratores cadastrados"
+    },
+    "/enderecos_atuacao/{enderecoId}": {
+      "schema": "enderecos_atuacao",
+      "description": "Coleção de endereços de atuação"
+    },
+    "/ocorrencias_criminais/{ocorrenciaId}": {
+      "schema": "ocorrencias_criminais",
+      "description": "Coleção de boletins de ocorrência"
+    },
+    "/infrator_ocorrencia/{vinculoId}": {
+      "schema": "infrator_ocorrencia",
+      "description": "Coleção de vínculos entre autores e crimes"
+    },
+    "/vinculos_comparsas/{vinculoId}": {
+      "schema": "vinculos_comparsas",
+      "description": "Coleção de ligações e comparsas"
+    },
+    "/gang_areas/{areaId}": {
+      "schema": "gang_areas",
+      "description": "Coleção de demarcações territoriais de gangues"
+    },
+    "/configuracoes/{configId}": {
+      "schema": "configuracoes",
+      "description": "Configurações do sistema"
+    }
+  }
+}

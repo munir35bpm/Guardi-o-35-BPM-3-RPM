@@ -846,6 +846,185 @@ Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibili
   }
 });
 
+// ==========================================
+// MODULE A3: AI FACIAL RECOGNITION & BIOMETRIC MATCHING
+// ==========================================
+app.post('/api/ai/facial-recognition-match', async (req, res) => {
+  try {
+    const { image, additional_context } = req.body;
+
+    if (!image) {
+      res.status(400).json({ error: 'A imagem para reconhecimento facial é obrigatória.' });
+      return;
+    }
+
+    let ai;
+    try {
+      ai = getGeminiClient();
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+      return;
+    }
+
+    // Extract mime type and clean base64 data
+    let mimeType = 'image/jpeg';
+    let base64Data = image;
+
+    if (image.startsWith('data:')) {
+      const match = image.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        mimeType = match[1];
+        base64Data = match[2];
+      }
+    }
+
+    // Gather all registered suspects with their physical characteristics
+    const candidates = db.infratores.map(i => {
+      const full = db.getInfratorFull(i.id);
+      return {
+        infrator_id: i.id,
+        nome_completo: i.nome_completo,
+        vulgo: i.vulgo,
+        gangue_faccao: i.gangue_faccao,
+        periculosidade: i.periculosidade,
+        mandado_ativo: i.status_mandado_prisao,
+        foto_url: i.foto_url,
+        caracteristicas_fisicas: full?.fisicas || {
+          pele: 'Parda',
+          altura_estimada: '1.75m',
+          compleicao: 'Média',
+          cabelo: 'Curto escuro',
+          olhos: 'Castanhos',
+          tatuagens: 'Não informadas',
+          cicatrizes: 'Não informadas',
+          outros_sinais: 'Nenhum'
+        }
+      };
+    });
+
+    const systemPrompt = `Você é um Perito Papiloscopista e Analista Forense Sênior de Reconhecimento Facial e Biometria Humana da Seção de Inteligência do 35º BPM (PMMG - Guardião do Alto Rio das Velhas).
+Sua missão é realizar uma perícia biométrica facial e morfológica comparativa entre a foto fornecida (vítima/câmera de monitoramento/abordagem policial) e o banco de dados oficial de alvos/infratores cadastrados.
+
+Diretrizes da Análise Pericial:
+1. Extraia com precisão os marcos biométricos da imagem de entrada: formato do crânio/rosto (oval, quadrado, triangular), distância interpupilar estimada, linhas da mandíbula e queixo, padrão nasal (largura da base, dorso), formato dos lábios, orelhas, padrão capilar/calvície, tom de pele e quaisquer sinais distintivos particulares (cicatrizes, tatuagens faciais/pescoço, piercings, marcas de nascença, barba/bigode).
+2. Compare detalhadamente essa biometria com TODOS os perfis do banco de dados de infratores fornecido.
+3. Atribua um score de similaridade facial de 0 a 100% para cada suspeito compatível, discriminando com clareza os pontos convergentes da morfologia facial e os pontos divergentes.
+4. Defina o nível de confiança (ALTA para scores >= 75%, MEDIA para 45-74%, BAIXA para < 45%).
+5. Formule uma justificativa pericial formal com terminologia técnica policial/forense e recomendações operacionais para os policiais em campo (ex: confirmação via identificação papiloscópica, abordagem preventiva com cautela).
+
+Responda estritamente no formato do esquema JSON solicitado.`;
+
+    const userPrompt = `FOTO DE ENTRADA / PESSOA DE INTERESSE ENVIADA PARA RECONHECIMENTO FACIAL.
+${additional_context ? `CONTEXTO OPERACIONAL ADICIONAL: "${additional_context}"` : ''}
+
+BANCO DE DADOS DE FICHAS CADASTRAIS DOS INFRATORES DO 35º BPM:
+${JSON.stringify(candidates, null, 2)}
+
+Execute a análise biométrica da foto e confronte os padrões faciais contra cada alvo do banco de dados, listando os mais compatíveis por ordem decrescente de similaridade.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.7-flash',
+      contents: [
+        {
+          inlineData: {
+            mimeType: mimeType,
+            data: base64Data
+          }
+        },
+        userPrompt
+      ],
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            analise_biometrica_imagem: {
+              type: Type.OBJECT,
+              properties: {
+                descricao_geral: { type: Type.STRING, description: "Descrição morfológica e estrutural geral da face identificada" },
+                faixa_etaria_estimada: { type: Type.STRING, description: "Faixa etária aparente (ex: 22 a 28 anos)" },
+                formato_rosto: { type: Type.STRING, description: "Formato geométrico facial (ex: Oval, Quadrado, Triangular, Diamante)" },
+                cor_pele_estimada: { type: Type.STRING, description: "Tom de pele aparente (ex: Parda, Branca, Negra, Clara)" },
+                cabelo_e_barba: { type: Type.STRING, description: "Padrão capilar, corte, calvície e pelos faciais/barba" },
+                olhos_sobrancelhas: { type: Type.STRING, description: "Morfologia ocular, formato de sobrancelhas e distância relativa" },
+                marcas_distintivas_visiveis: { type: Type.STRING, description: "Tatuagens, cicatrizes, marcas, manchas ou particularidades" }
+              },
+              required: [
+                "descricao_geral",
+                "faixa_etaria_estimada",
+                "formato_rosto",
+                "cor_pele_estimada",
+                "cabelo_e_barba",
+                "marcas_distintivas_visiveis"
+              ]
+            },
+            candidatos_compativeis: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  infrator_id: { type: Type.STRING },
+                  nome_completo: { type: Type.STRING },
+                  vulgo: { type: Type.STRING },
+                  score_similaridade_facial: { type: Type.NUMBER, description: "Pontuação percentual de compatibilidade facial de 0 a 100" },
+                  nivel_confianca: { type: Type.STRING, enum: ["ALTA", "MEDIA", "BAIXA"] },
+                  pontos_convergentes_faciais: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: "Semelhanças anatômicas observadas (ex: linha da mandíbula, nariz largo, formato do queixo)"
+                  },
+                  pontos_divergentes_faciais: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: "Diferenças observadas (ex: ausência de cavanhaque no registro, comprimento de cabelo)"
+                  },
+                  justificativa_pericial: { type: Type.STRING, description: "Parecer técnico da comparação morfológica" },
+                  recomendacao_operacional: { type: Type.STRING, description: "Instrução tática para a guarnição em serviço" }
+                },
+                required: [
+                  "infrator_id",
+                  "nome_completo",
+                  "vulgo",
+                  "score_similaridade_facial",
+                  "nivel_confianca",
+                  "pontos_convergentes_faciais",
+                  "pontos_divergentes_faciais",
+                  "justificativa_pericial",
+                  "recomendacao_operacional"
+                ]
+              }
+            },
+            resumo_parecer_forense: {
+              type: Type.STRING,
+              description: "Resumo conclusivo da análise de reconhecimento facial e nível geral de assertividade"
+            }
+          },
+          required: ["analise_biometrica_imagem", "candidatos_compativeis", "resumo_parecer_forense"]
+        }
+      }
+    });
+
+    const parsedResult = JSON.parse(response.text || '{}');
+
+    // Enrich candidate results with full suspect details (addresses, occurrences, physical features, gang, etc.)
+    if (Array.isArray(parsedResult.candidatos_compativeis)) {
+      parsedResult.candidatos_compativeis = parsedResult.candidatos_compativeis.map((item: any) => {
+        const fullProfile = db.getInfratorFull(item.infrator_id);
+        return {
+          ...item,
+          suspect_details: fullProfile
+        };
+      }).sort((a: any, b: any) => (b.score_similaridade_facial || 0) - (a.score_similaridade_facial || 0));
+    }
+
+    res.json(parsedResult);
+  } catch (error: any) {
+    console.error('Error in facial-recognition-match:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 // ==========================================
 // MODULE B: GEOSPATIAL MATCHING & MO SCORING

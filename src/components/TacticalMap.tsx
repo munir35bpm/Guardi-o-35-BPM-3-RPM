@@ -23,6 +23,7 @@ import {
 import { db } from '../backend/db';
 import GangMapImporterModal from './GangMapImporterModal';
 import { isPointInPolygon, DEFAULT_GANG_AREAS_35BPM } from '../utils/kmlGeoJsonParser';
+import { persistGangAreasToFirebase } from '../services/firebaseSync';
 
 interface TacticalMapProps {
   selectedCoords?: { lat: number; lng: number } | null;
@@ -121,6 +122,9 @@ export default function TacticalMap({
     setGangAreas(newAreas);
     try {
       localStorage.setItem('tactical_gang_areas_v1', JSON.stringify(newAreas));
+      // Save to Firebase Firestore
+      await persistGangAreasToFirebase(newAreas, replaceAll);
+
       await fetch('/api/gang-areas/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -30,12 +30,14 @@ import {
   Camera,
   FileDown,
   Shield,
-  X
+  X,
+  Scan
 } from 'lucide-react';
 import TacticalMap from './components/TacticalMap';
 import NetworkGraph from './components/NetworkGraph';
 import Logo35BPM from './components/Logo35BPM';
 import { OrcrimWindow } from './components/OrcrimWindow';
+import FacialRecognitionModule from './components/FacialRecognitionModule';
 import {
   SuspectWithDetails,
   OcorrenciaCriminal,
@@ -47,6 +49,14 @@ import {
   AlertaReincidenciaPerimetro
 } from './types';
 import { db } from './backend/db';
+import {
+  initFirebaseSync,
+  persistSuspectToFirebase,
+  deleteSuspectFromFirebase,
+  persistAddressToFirebase,
+  deleteAddressFromFirebase,
+  persistOccurrenceToFirebase,
+} from './services/firebaseSync';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'map' | 'network' | 'ai' | 'db' | 'orcrim'>('map');
@@ -67,7 +77,8 @@ export default function App() {
   const [activeWarrants, setActiveWarrants] = useState(0);
   const [totalIncidents, setTotalIncidents] = useState(0);
 
-  // Module A (AI Narrative Parser) states
+  // Module A (AI Narrative Parser & Facial Recognition) states
+  const [aiMode, setAiMode] = useState<'narrative' | 'facial'>('narrative');
   const [narrativeInput, setNarrativeInput] = useState<string>('');
   const [isParsing, setIsParsing] = useState(false);
   const [parsedReport, setParsedReport] = useState<any | null>(null);
@@ -286,6 +297,9 @@ export default function App() {
 
   useEffect(() => {
     fetchTelemetry();
+    initFirebaseSync(() => {
+      fetchTelemetry();
+    });
   }, []);
 
   // Module A trigger
@@ -559,9 +573,25 @@ export default function App() {
         console.warn('Backend API unavailable, saving to local in-memory DB', err);
       }
 
+      let createdAddr: any = null;
       if (!created) {
-        db.addEndereco(payload);
+        createdAddr = db.addEndereco(payload);
       }
+
+      // Persist to Firebase Firestore
+      await persistAddressToFirebase({
+        id: createdAddr?.id || `addr-${Date.now()}`,
+        infrator_id: selectedSuspectDetail.id,
+        tipo_endereco: directNewAddrData.tipo_endereco as any,
+        logradouro: directNewAddrData.logradouro.trim(),
+        bairro: directNewAddrData.bairro.trim() || 'Centro',
+        cidade: directNewAddrData.cidade.trim() || 'Santa Luzia',
+        geom_ponto: {
+          lat: Number(directNewAddrData.lat),
+          lng: Number(directNewAddrData.lng)
+        },
+        raio_influencia_km: Number(directNewAddrData.raio_influencia_km) || 2.5
+      });
 
       // Refresh suspect detail
       const updated = db.getInfratorFull(selectedSuspectDetail.id);
@@ -597,6 +627,8 @@ export default function App() {
         console.warn('Backend delete address failed, using local DB fallback', e);
       }
       db.enderecos_atuacao = db.enderecos_atuacao.filter((ea) => ea.id !== enderecoId);
+      // Delete from Firebase Firestore
+      await deleteAddressFromFirebase(enderecoId);
       const updated = db.getInfratorFull(selectedSuspectDetail.id);
       if (updated) {
         setSelectedSuspectDetail(updated);
@@ -744,6 +776,9 @@ export default function App() {
       // Delete from client-side DB instance
       db.deleteInfrator(id);
 
+      // Persist deletion to Firebase Firestore
+      await deleteSuspectFromFirebase(id);
+
       const res = await fetch(`/api/infratores/${id}`, {
         method: 'DELETE',
       }).catch(() => null);
@@ -835,6 +870,11 @@ export default function App() {
         });
       }
 
+      // Persist to Firebase Firestore
+      if (createdSuspect) {
+        await persistSuspectToFirebase(createdSuspect);
+      }
+
       setIsAddingSuspect(false);
       setSuspectOccurrencesList([]);
       setSuspectAddressesList([]);
@@ -920,6 +960,16 @@ export default function App() {
         db.addOcorrencia(newIncidentForm);
       }
 
+      // Persist to Firebase Firestore
+      await persistOccurrenceToFirebase({
+        id: `oc-${Date.now()}`,
+        ...newIncidentForm,
+        geom_crime: {
+          lat: Number(newIncidentForm.lat),
+          lng: Number(newIncidentForm.lng)
+        }
+      });
+
       setIsAddingOccurrence(false);
       setNewIncidentForm({
         numero_bo: '',
@@ -961,6 +1011,21 @@ export default function App() {
       if (!created) {
         db.addEndereco(newAddressForm);
       }
+
+      // Persist to Firebase Firestore
+      await persistAddressToFirebase({
+        id: `addr-${Date.now()}`,
+        infrator_id: newAddressForm.infrator_id,
+        tipo_endereco: newAddressForm.tipo_endereco as any,
+        logradouro: newAddressForm.logradouro,
+        bairro: newAddressForm.bairro || 'Centro',
+        cidade: newAddressForm.cidade || 'Santa Luzia',
+        geom_ponto: {
+          lat: Number(newAddressForm.lat),
+          lng: Number(newAddressForm.lng)
+        },
+        raio_influencia_km: Number(newAddressForm.raio_influencia_km) || 2.5
+      });
 
       setIsAddingAddress(false);
       setNewAddressForm({
@@ -1297,8 +1362,55 @@ export default function App() {
               transition={{ duration: 0.15 }}
               className="space-y-6"
             >
-              {/* Top Controls Card: Narrative Input & Intelligence Execution */}
-              <div className="bg-[#0F0F12] border border-zinc-800 rounded p-5 flex flex-col shadow-2xl tactical-corner">
+              {/* Sub-Mode Selector: Triagem por Narrativa vs. Reconhecimento Facial */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-[#0F0F12] border border-zinc-800 p-2.5 rounded shadow-xl font-mono">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setAiMode('narrative')}
+                    className={`px-3.5 py-2 rounded text-xs font-bold uppercase transition flex items-center gap-2 cursor-pointer ${
+                      aiMode === 'narrative'
+                        ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20'
+                        : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>1. Triagem por Narrativa / B.O.</span>
+                  </button>
+
+                  <button
+                    onClick={() => setAiMode('facial')}
+                    className={`px-3.5 py-2 rounded text-xs font-bold uppercase transition flex items-center gap-2 cursor-pointer ${
+                      aiMode === 'facial'
+                        ? 'bg-cyan-500 text-black shadow-md shadow-cyan-500/20'
+                        : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+                    }`}
+                  >
+                    <Scan className="w-3.5 h-3.5" />
+                    <span>2. Reconhecimento Facial & Biometria IA</span>
+                    <span className="text-[8px] bg-cyan-950 text-cyan-300 border border-cyan-700 px-1 py-0.5 rounded font-black">
+                      NOVO
+                    </span>
+                  </button>
+                </div>
+
+                <div className="text-[10px] text-zinc-400 flex items-center gap-2 px-2">
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  <span>Motor Forense Multimodal // Gemini 3.7 Vision & Flash</span>
+                </div>
+              </div>
+
+              {aiMode === 'facial' ? (
+                <FacialRecognitionModule
+                  onSelectSuspectForDetail={(suspect) => handleViewSuspectDetail(suspect.id)}
+                  onLocateOnMap={(coords) => {
+                    setSelectedCoords(coords);
+                    setActiveTab('map');
+                  }}
+                />
+              ) : (
+                <>
+                  {/* Top Controls Card: Narrative Input & Intelligence Execution */}
+                  <div className="bg-[#0F0F12] border border-zinc-800 rounded p-5 flex flex-col shadow-2xl tactical-corner">
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-4 border-b border-zinc-800 pb-2.5">
                   <div className="flex items-center gap-2">
                     <Sparkles className="text-amber-500 w-4 h-4" />
@@ -1735,6 +1847,8 @@ export default function App() {
                   </div>
                 )}
               </div>
+                </>
+              )}
             </motion.div>
           )}
 

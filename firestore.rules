@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Sistema Tático Policial - 35º BPM Guardião
+    // Permite leitura e escrita para operações policiais autorizadas
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

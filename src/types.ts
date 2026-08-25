@@ -170,6 +170,35 @@ export interface OrcrimData {
   estrutura_piramidal: EstruturaPiramidalOrcrim;
 }
 
+export interface AnaliseBiometricaImagem {
+  descricao_geral: string;
+  faixa_etaria_estimada: string;
+  formato_rosto: string;
+  cor_pele_estimada: string;
+  cabelo_e_barba: string;
+  olhos_sobrancelhas?: string;
+  marcas_distintivas_visiveis: string;
+}
+
+export interface CandidatoSimilaridadeFacial {
+  infrator_id: string;
+  nome_completo: string;
+  vulgo: string;
+  score_similaridade_facial: number;
+  nivel_confianca: 'ALTA' | 'MEDIA' | 'BAIXA';
+  pontos_convergentes_faciais: string[];
+  pontos_divergentes_faciais: string[];
+  justificativa_pericial: string;
+  recomendacao_operacional: string;
+  suspect_details?: SuspectWithDetails;
+}
+
+export interface ResultadoReconhecimentoFacial {
+  analise_biometrica_imagem: AnaliseBiometricaImagem;
+  candidatos_compativeis: CandidatoSimilaridadeFacial[];
+  resumo_parecer_forense: string;
+}
+
 export interface GangAreaZone {
   id: string;
   name: string;
@@ -189,5 +218,6 @@ export interface GangAreaZone {
   notes?: string;
   areaKm2?: number;
 }
+
 
 
