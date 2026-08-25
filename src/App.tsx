@@ -31,13 +31,17 @@ import {
   FileDown,
   Shield,
   X,
-  Scan
+  Scan,
+  Users,
+  Copy,
+  Link2
 } from 'lucide-react';
 import TacticalMap from './components/TacticalMap';
 import NetworkGraph from './components/NetworkGraph';
 import Logo35BPM from './components/Logo35BPM';
 import { OrcrimWindow } from './components/OrcrimWindow';
 import FacialRecognitionModule from './components/FacialRecognitionModule';
+import OccurrencePickerFromSuspects from './components/OccurrencePickerFromSuspects';
 import {
   SuspectWithDetails,
   OcorrenciaCriminal,
@@ -122,7 +126,7 @@ export default function App() {
 
   // Attached occurrences during suspect registration
   const [suspectOccurrencesList, setSuspectOccurrencesList] = useState<any[]>([]);
-  const [suspectOcMode, setSuspectOcMode] = useState<'new' | 'existing'>('new');
+  const [suspectOcMode, setSuspectOcMode] = useState<'new' | 'from_other' | 'existing'>('new');
   const [suspectOcExistingId, setSuspectOcExistingId] = useState('');
   const [suspectOcPapel, setSuspectOcPapel] = useState('Autor');
   const [suspectNewOcData, setSuspectNewOcData] = useState({
@@ -163,7 +167,7 @@ export default function App() {
 
   // Direct linkage from suspect detail card
   const [isLinkingDirectOccurrence, setIsLinkingDirectOccurrence] = useState(false);
-  const [directOcMode, setDirectOcMode] = useState<'new' | 'existing'>('new');
+  const [directOcMode, setDirectOcMode] = useState<'new' | 'from_other' | 'existing'>('new');
   const [directOcExistingId, setDirectOcExistingId] = useState('');
   const [directOcPapel, setDirectOcPapel] = useState('Autor');
   const [directNewOcData, setDirectNewOcData] = useState({
@@ -503,6 +507,50 @@ export default function App() {
     }
   };
 
+  // Link occurrence directly from the other suspects / global picker into registration list
+  const handleLinkOccurrenceFromPicker = (oc: OcorrenciaCriminal, papel: string) => {
+    if (suspectOccurrencesList.some((item) => (item.ocorrencia_id === oc.id) || (item.numero_bo === oc.numero_bo))) {
+      alert(`O B.O. ${oc.numero_bo} já foi adicionado à lista deste infrator.`);
+      return;
+    }
+    setSuspectOccurrencesList((prev) => [
+      ...prev,
+      {
+        tempId: `tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        isNew: false,
+        ocorrencia_id: oc.id,
+        numero_bo: oc.numero_bo,
+        tipificacao_penal: oc.tipificacao_penal,
+        papel_no_crime: papel || suspectOcPapel || 'Autor',
+        data_hora: oc.data_hora,
+        descricao_fato: oc.descricao_fato,
+        modus_operandi: oc.modus_operandi,
+        armas_utilizadas: oc.armas_utilizadas,
+        veiculo_utilizado: oc.veiculo_utilizado,
+      },
+    ]);
+    setToastMessage(`B.O. Nº ${oc.numero_bo} vinculado como ${papel || suspectOcPapel}!`);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  // Copy data from an existing occurrence into the manual creation form
+  const handleCopyOccurrenceDataToForm = (oc: OcorrenciaCriminal) => {
+    setSuspectNewOcData({
+      numero_bo: oc.numero_bo || '',
+      tipificacao_penal: oc.tipificacao_penal || 'Roubo a Mão Armada',
+      data_hora: oc.data_hora ? new Date(oc.data_hora).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+      descricao_fato: oc.descricao_fato || '',
+      modus_operandi: oc.modus_operandi || '',
+      armas_utilizadas: oc.armas_utilizadas || '',
+      veiculo_utilizado: oc.veiculo_utilizado || '',
+      lat: oc.geom_crime?.lat !== undefined ? String(oc.geom_crime.lat) : ((oc as any).lat || '-19.7712'),
+      lng: oc.geom_crime?.lng !== undefined ? String(oc.geom_crime.lng) : ((oc as any).lng || '-43.8564'),
+    });
+    setSuspectOcMode('new');
+    setToastMessage(`Dados do B.O. ${oc.numero_bo} copiados para o formulário.`);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
   const handleRemoveOccurrenceFromSuspect = (tempId: string) => {
     setSuspectOccurrencesList((prev) => prev.filter((item) => item.tempId !== tempId));
   };
@@ -721,6 +769,67 @@ export default function App() {
       console.error('Error linking occurrence directly:', err);
       alert('Erro ao vincular ocorrência.');
     }
+  };
+
+  // Direct link from the other suspects / global picker for selectedSuspectDetail
+  const handleDirectLinkOccurrenceFromPicker = async (oc: OcorrenciaCriminal, papel: string) => {
+    if (!selectedSuspectDetail) return;
+    try {
+      const bodyData = {
+        ocorrencia_id: oc.id,
+        numero_bo: oc.numero_bo,
+        papel_no_crime: papel || directOcPapel || 'Autor',
+      };
+
+      let updatedSuspect: any = null;
+      try {
+        const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyData),
+        });
+        if (res.ok) {
+          updatedSuspect = await res.json();
+        }
+      } catch (e) {
+        console.warn('Backend link endpoint not available, falling back to local DB', e);
+      }
+
+      if (!updatedSuspect) {
+        db.linkInfratorOcorrencia(selectedSuspectDetail.id, oc.id, papel || directOcPapel || 'Autor');
+        updatedSuspect = db.getInfratorFull(selectedSuspectDetail.id);
+      }
+
+      if (updatedSuspect) {
+        setSelectedSuspectDetail(updatedSuspect);
+      }
+
+      setIsLinkingDirectOccurrence(false);
+      fetchTelemetry();
+      setToastMessage(`B.O. Nº ${oc.numero_bo} vinculado como ${papel || directOcPapel}!`);
+      setTimeout(() => setToastMessage(null), 3500);
+    } catch (err) {
+      console.error('Error linking occurrence directly from picker:', err);
+      alert('Erro ao vincular ocorrência.');
+    }
+  };
+
+  // Direct copy from picker to directNewOcData form in drawer
+  const handleDirectCopyOccurrenceToForm = (oc: OcorrenciaCriminal) => {
+    setDirectNewOcData({
+      numero_bo: oc.numero_bo || '',
+      tipificacao_penal: oc.tipificacao_penal || 'Roubo a Mão Armada',
+      data_hora: oc.data_hora ? new Date(oc.data_hora).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+      descricao_fato: oc.descricao_fato || '',
+      modus_operandi: oc.modus_operandi || '',
+      armas_utilizadas: oc.armas_utilizadas || '',
+      veiculo_utilizado: oc.veiculo_utilizado || '',
+      lat: oc.geom_crime?.lat !== undefined ? String(oc.geom_crime.lat) : ((oc as any).lat || '-19.7712'),
+      lng: oc.geom_crime?.lng !== undefined ? String(oc.geom_crime.lng) : ((oc as any).lng || '-43.8564'),
+    });
+    setDirectOcMode('new');
+    setToastMessage(`Dados do B.O. ${oc.numero_bo} copiados para o formulário.`);
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
   const handleUnlinkOccurrence = async (ocorrenciaId: string) => {
@@ -2371,228 +2480,274 @@ export default function App() {
                           </span>
                         </div>
 
-                        {/* Switcher: Existing vs New B.O. */}
-                        <div className="flex items-center gap-2 bg-[#0F0F12] p-1.5 rounded border border-zinc-800">
+                        {/* Switcher: New vs From Other Suspect vs Existing */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 bg-[#0F0F12] p-1.5 rounded border border-zinc-800">
                           <button
                             type="button"
                             onClick={() => setSuspectOcMode('new')}
-                            className={`flex-1 py-1.5 text-xs font-bold font-mono rounded transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                            className={`py-2 px-2 text-xs font-bold font-mono rounded transition flex items-center justify-center gap-1.5 cursor-pointer ${
                               suspectOcMode === 'new'
                                 ? 'bg-amber-500 text-black shadow'
-                                : 'text-zinc-400 hover:text-zinc-200'
+                                : 'text-zinc-400 hover:text-zinc-200 bg-[#141419]'
                             }`}
                           >
                             <PlusCircle className="w-3.5 h-3.5" />
-                            Cadastrar Novo B.O. Diretamente
+                            Cadastrar Novo B.O. (Manual)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSuspectOcMode('from_other')}
+                            className={`py-2 px-2 text-xs font-bold font-mono rounded transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                              suspectOcMode === 'from_other'
+                                ? 'bg-amber-500 text-black shadow'
+                                : 'text-amber-300/90 hover:text-amber-200 bg-amber-950/20 border border-amber-800/40'
+                            }`}
+                          >
+                            <Users className="w-3.5 h-3.5" />
+                            B.O. de Outro Infrator / Copiar
                           </button>
                           <button
                             type="button"
                             onClick={() => setSuspectOcMode('existing')}
-                            className={`flex-1 py-1.5 text-xs font-bold font-mono rounded transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                            className={`py-2 px-2 text-xs font-bold font-mono rounded transition flex items-center justify-center gap-1.5 cursor-pointer ${
                               suspectOcMode === 'existing'
                                 ? 'bg-amber-500 text-black shadow'
-                                : 'text-zinc-400 hover:text-zinc-200'
+                                : 'text-zinc-400 hover:text-zinc-200 bg-[#141419]'
                             }`}
                           >
                             <Search className="w-3.5 h-3.5" />
-                            Vincular B.O. Já Existente no Sistema
+                            Lista Geral de B.O.s
                           </button>
                         </div>
 
-                        {/* Common: Role Selection */}
-                        <div className="bg-[#121216] p-3 rounded border border-zinc-800 space-y-3">
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <div className="sm:col-span-1">
-                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
-                                Condição / Papel do Infrator no Crime *
-                              </label>
-                              <select
-                                value={suspectOcPapel}
-                                onChange={(e) => setSuspectOcPapel(e.target.value)}
-                                className="w-full bg-[#0A0A0B] border border-amber-500/50 rounded p-2 text-xs text-amber-300 font-bold focus:outline-none"
-                              >
-                                <option value="Autor">Autor (Principal)</option>
-                                <option value="Coautor">Coautor</option>
-                                <option value="Suspeito">Suspeito</option>
-                                <option value="Vítima">Vítima</option>
-                                <option value="Notificado">Notificado</option>
-                                <option value="Testemunha / Condutor">Testemunha / Condutor</option>
-                                <option value="Indiciado">Indiciado</option>
-                              </select>
-                            </div>
+                        {/* MODE 1: FROM OTHER SUSPECT / SYSTEM PICKER */}
+                        {suspectOcMode === 'from_other' && (
+                          <OccurrencePickerFromSuspects
+                            occurrences={occurrences}
+                            suspects={suspects}
+                            currentSuspectName={newSuspectForm.nome_completo || 'Novo Infrator'}
+                            selectedPapel={suspectOcPapel}
+                            onChangePapel={(papel) => setSuspectOcPapel(papel)}
+                            onLinkOccurrence={handleLinkOccurrenceFromPicker}
+                            onCopyOccurrence={handleCopyOccurrenceDataToForm}
+                            alreadyLinkedIds={suspectOccurrencesList.map((item) => item.ocorrencia_id || item.numero_bo)}
+                          />
+                        )}
 
-                            {suspectOcMode === 'existing' ? (
-                              <div className="sm:col-span-2">
+                        {/* MODE 2 & 3: MANUAL REGISTRATION OR SIMPLE SELECTOR */}
+                        {suspectOcMode !== 'from_other' && (
+                          <div className="bg-[#121216] p-3 rounded border border-zinc-800 space-y-3">
+                            {/* Quick shortcut to copy from other suspect */}
+                            {suspectOcMode === 'new' && (
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 bg-[#09090C] rounded border border-amber-500/20 text-xs">
+                                <span className="text-zinc-400 text-[11px] flex items-center gap-1.5">
+                                  <Users className="w-3.5 h-3.5 text-amber-400" />
+                                  Deseja reutilizar ou copiar um B.O. já registrado em outro infrator?
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setSuspectOcMode('from_other')}
+                                  className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded text-[10px] font-bold uppercase transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+                                >
+                                  <Users className="w-3 h-3" />
+                                  Buscar B.O. de Outro Infrator
+                                </button>
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div className="sm:col-span-1">
                                 <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
-                                  Selecione a Ocorrência Cadastrada *
+                                  Condição / Papel do Infrator no Crime *
                                 </label>
                                 <select
-                                  value={suspectOcExistingId}
-                                  onChange={(e) => setSuspectOcExistingId(e.target.value)}
-                                  className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
+                                  value={suspectOcPapel}
+                                  onChange={(e) => setSuspectOcPapel(e.target.value)}
+                                  className="w-full bg-[#0A0A0B] border border-amber-500/50 rounded p-2 text-xs text-amber-300 font-bold focus:outline-none"
                                 >
-                                  <option value="">Selecione o B.O. na lista...</option>
-                                  {occurrences.map((oc) => (
-                                    <option key={oc.id} value={oc.id}>
-                                      B.O. {oc.numero_bo} — {oc.tipificacao_penal} ({new Date(oc.data_hora).toLocaleDateString('pt-BR')})
-                                    </option>
-                                  ))}
+                                  <option value="Autor">Autor (Principal)</option>
+                                  <option value="Coautor">Coautor</option>
+                                  <option value="Suspeito">Suspeito</option>
+                                  <option value="Vítima">Vítima</option>
+                                  <option value="Notificado">Notificado</option>
+                                  <option value="Testemunha / Condutor">Testemunha / Condutor</option>
+                                  <option value="Indiciado">Indiciado</option>
                                 </select>
                               </div>
-                            ) : (
-                              <>
-                                <div>
+
+                              {suspectOcMode === 'existing' ? (
+                                <div className="sm:col-span-2">
                                   <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
-                                    Número do B.O. / REDS *
+                                    Selecione a Ocorrência Cadastrada *
                                   </label>
+                                  <select
+                                    value={suspectOcExistingId}
+                                    onChange={(e) => setSuspectOcExistingId(e.target.value)}
+                                    className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
+                                  >
+                                    <option value="">Selecione o B.O. na lista...</option>
+                                    {occurrences.map((oc) => (
+                                      <option key={oc.id} value={oc.id}>
+                                        B.O. {oc.numero_bo} — {oc.tipificacao_penal} ({new Date(oc.data_hora).toLocaleDateString('pt-BR')})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              ) : (
+                                <>
+                                  <div>
+                                    <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                      Número do B.O. / REDS *
+                                    </label>
+                                    <input
+                                      type="text"
+                                      placeholder="Ex: REDS-2026-00458921-001"
+                                      value={suspectNewOcData.numero_bo}
+                                      onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, numero_bo: e.target.value })}
+                                      className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                      Tipificação Penal *
+                                    </label>
+                                    <select
+                                      value={suspectNewOcData.tipificacao_penal}
+                                      onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, tipificacao_penal: e.target.value })}
+                                      className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
+                                    >
+                                      <option value="Roubo a Mão Armada">Roubo a Mão Armada (Art. 157 §2º)</option>
+                                      <option value="Roubo de Carga">Roubo de Carga</option>
+                                      <option value="Tráfico de Drogas">Tráfico Ilícito de Drogas (Art. 33)</option>
+                                      <option value="Associação para o Tráfico">Associação para o Tráfico (Art. 35)</option>
+                                      <option value="Homicídio Tentado">Homicídio Tentado (Art. 121 c/c 14)</option>
+                                      <option value="Homicídio Consumado">Homicídio Consumado (Art. 121)</option>
+                                      <option value="Porte Ilegal de Arma de Fogo">Porte Ilegal de Arma de Fogo (Lei 10.826)</option>
+                                      <option value="Disparo de Arma de Fogo">Disparo de Arma de Fogo em Via Pública</option>
+                                      <option value="Ameaça / Coação">Ameaça / Coação (Art. 147)</option>
+                                      <option value="Lesão Corporal">Lesão Corporal (Art. 129)</option>
+                                      <option value="Extorsão / Sequestro">Extorsão / Sequestro Relâmpago</option>
+                                      <option value="Organização Criminosa">Organização Criminosa (Lei 12.850)</option>
+                                    </select>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            {suspectOcMode === 'new' && (
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-zinc-850">
+                                <div>
+                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">Data / Hora do Fato</label>
                                   <input
-                                    type="text"
-                                    placeholder="Ex: REDS-2026-00458921-001"
-                                    value={suspectNewOcData.numero_bo}
-                                    onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, numero_bo: e.target.value })}
+                                    type="datetime-local"
+                                    value={suspectNewOcData.data_hora}
+                                    onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, data_hora: e.target.value })}
                                     className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
                                   />
                                 </div>
                                 <div>
-                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
-                                    Tipificação Penal *
-                                  </label>
-                                  <select
-                                    value={suspectNewOcData.tipificacao_penal}
-                                    onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, tipificacao_penal: e.target.value })}
+                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">Armas Utilizadas</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: Pistola Taurus 9mm, Fuzil 5.56"
+                                    value={suspectNewOcData.armas_utilizadas}
+                                    onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, armas_utilizadas: e.target.value })}
                                     className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
-                                  >
-                                    <option value="Roubo a Mão Armada">Roubo a Mão Armada (Art. 157 §2º)</option>
-                                    <option value="Roubo de Carga">Roubo de Carga</option>
-                                    <option value="Tráfico de Drogas">Tráfico Ilícito de Drogas (Art. 33)</option>
-                                    <option value="Associação para o Tráfico">Associação para o Tráfico (Art. 35)</option>
-                                    <option value="Homicídio Tentado">Homicídio Tentado (Art. 121 c/c 14)</option>
-                                    <option value="Homicídio Consumado">Homicídio Consumado (Art. 121)</option>
-                                    <option value="Porte Ilegal de Arma de Fogo">Porte Ilegal de Arma de Fogo (Lei 10.826)</option>
-                                    <option value="Disparo de Arma de Fogo">Disparo de Arma de Fogo em Via Pública</option>
-                                    <option value="Ameaça / Coação">Ameaça / Coação (Art. 147)</option>
-                                    <option value="Lesão Corporal">Lesão Corporal (Art. 129)</option>
-                                    <option value="Extorsão / Sequestro">Extorsão / Sequestro Relâmpago</option>
-                                    <option value="Organização Criminosa">Organização Criminosa (Lei 12.850)</option>
-                                  </select>
+                                  />
                                 </div>
-                              </>
+                                <div>
+                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">Veículo Utilizado</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: Fiat Uno cinza, Moto CB300"
+                                    value={suspectNewOcData.veiculo_utilizado}
+                                    onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, veiculo_utilizado: e.target.value })}
+                                    className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
+                                  />
+                                </div>
+
+                                {/* Coordenadas Geográficas (Lat / Long) */}
+                                <div>
+                                  <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1 mb-1">
+                                    <MapPin className="w-3 h-3 text-cyan-400" /> Latitude (Lat) *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    required
+                                    placeholder="Ex: -19.7712"
+                                    value={suspectNewOcData.lat}
+                                    onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, lat: e.target.value })}
+                                    className="w-full bg-[#0A0A0B] border border-cyan-900/50 rounded p-2 text-xs text-cyan-200 focus:outline-none focus:border-cyan-500 font-mono"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1 mb-1">
+                                    <MapPin className="w-3 h-3 text-cyan-400" /> Longitude (Long) *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    required
+                                    placeholder="Ex: -43.8564"
+                                    value={suspectNewOcData.lng}
+                                    onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, lng: e.target.value })}
+                                    className="w-full bg-[#0A0A0B] border border-cyan-900/50 rounded p-2 text-xs text-cyan-200 focus:outline-none focus:border-cyan-500 font-mono"
+                                  />
+                                </div>
+                                <div className="flex items-end pb-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setSuspectNewOcData({
+                                        ...suspectNewOcData,
+                                        lat: selectedCoords ? selectedCoords.lat.toFixed(5) : '-19.7712',
+                                        lng: selectedCoords ? selectedCoords.lng.toFixed(5) : '-43.8564',
+                                      })
+                                    }
+                                    className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 rounded text-[10px] font-bold uppercase transition flex items-center justify-center gap-1 cursor-pointer"
+                                    title="Carregar coordenadas do 35º BPM / Centro"
+                                  >
+                                    <Crosshair className="w-3 h-3 text-amber-400" /> Ponto 35º BPM / Mapa
+                                  </button>
+                                </div>
+
+                                <div className="sm:col-span-3">
+                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                    Modus Operandi / Resumo do Histórico
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: Abordagem violenta com uso de arma de fogo e fuga em motocicleta"
+                                    value={suspectNewOcData.modus_operandi}
+                                    onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, modus_operandi: e.target.value })}
+                                    className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
+                                  />
+                                </div>
+                                <div className="sm:col-span-3">
+                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                    Narrativa Circunstanciada do Fato (Opcional)
+                                  </label>
+                                  <textarea
+                                    placeholder="Detalhes dos fatos, declarações de testemunhas e atuação do infrator..."
+                                    value={suspectNewOcData.descricao_fato}
+                                    onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, descricao_fato: e.target.value })}
+                                    className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none resize-none h-14"
+                                  />
+                                </div>
+                              </div>
                             )}
-                          </div>
 
-                          {suspectOcMode === 'new' && (
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-zinc-850">
-                              <div>
-                                <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">Data / Hora do Fato</label>
-                                <input
-                                  type="datetime-local"
-                                  value={suspectNewOcData.data_hora}
-                                  onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, data_hora: e.target.value })}
-                                  className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">Armas Utilizadas</label>
-                                <input
-                                  type="text"
-                                  placeholder="Ex: Pistola Taurus 9mm, Fuzil 5.56"
-                                  value={suspectNewOcData.armas_utilizadas}
-                                  onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, armas_utilizadas: e.target.value })}
-                                  className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">Veículo Utilizado</label>
-                                <input
-                                  type="text"
-                                  placeholder="Ex: Fiat Uno cinza, Moto CB300"
-                                  value={suspectNewOcData.veiculo_utilizado}
-                                  onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, veiculo_utilizado: e.target.value })}
-                                  className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
-                                />
-                              </div>
-
-                              {/* Coordenadas Geográficas (Lat / Long) */}
-                              <div>
-                                <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1 mb-1">
-                                  <MapPin className="w-3 h-3 text-cyan-400" /> Latitude (Lat) *
-                                </label>
-                                <input
-                                  type="text"
-                                  required
-                                  placeholder="Ex: -19.7712"
-                                  value={suspectNewOcData.lat}
-                                  onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, lat: e.target.value })}
-                                  className="w-full bg-[#0A0A0B] border border-cyan-900/50 rounded p-2 text-xs text-cyan-200 focus:outline-none focus:border-cyan-500 font-mono"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1 mb-1">
-                                  <MapPin className="w-3 h-3 text-cyan-400" /> Longitude (Long) *
-                                </label>
-                                <input
-                                  type="text"
-                                  required
-                                  placeholder="Ex: -43.8564"
-                                  value={suspectNewOcData.lng}
-                                  onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, lng: e.target.value })}
-                                  className="w-full bg-[#0A0A0B] border border-cyan-900/50 rounded p-2 text-xs text-cyan-200 focus:outline-none focus:border-cyan-500 font-mono"
-                                />
-                              </div>
-                              <div className="flex items-end pb-1">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setSuspectNewOcData({
-                                      ...suspectNewOcData,
-                                      lat: selectedCoords ? selectedCoords.lat.toFixed(5) : '-19.7712',
-                                      lng: selectedCoords ? selectedCoords.lng.toFixed(5) : '-43.8564',
-                                    })
-                                  }
-                                  className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 rounded text-[10px] font-bold uppercase transition flex items-center justify-center gap-1 cursor-pointer"
-                                  title="Carregar coordenadas do 35º BPM / Centro"
-                                >
-                                  <Crosshair className="w-3 h-3 text-amber-400" /> Ponto 35º BPM / Mapa
-                                </button>
-                              </div>
-
-                              <div className="sm:col-span-3">
-                                <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
-                                  Modus Operandi / Resumo do Histórico
-                                </label>
-                                <input
-                                  type="text"
-                                  placeholder="Ex: Abordagem violenta com uso de arma de fogo e fuga em motocicleta"
-                                  value={suspectNewOcData.modus_operandi}
-                                  onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, modus_operandi: e.target.value })}
-                                  className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
-                                />
-                              </div>
-                              <div className="sm:col-span-3">
-                                <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
-                                  Narrativa Circunstanciada do Fato (Opcional)
-                                </label>
-                                <textarea
-                                  placeholder="Detalhes dos fatos, declarações de testemunhas e atuação do infrator..."
-                                  value={suspectNewOcData.descricao_fato}
-                                  onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, descricao_fato: e.target.value })}
-                                  className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none resize-none h-14"
-                                />
-                              </div>
+                            <div className="flex justify-end pt-1">
+                              <button
+                                type="button"
+                                onClick={handleAddOccurrenceToSuspect}
+                                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs rounded transition uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md shadow-amber-500/10"
+                              >
+                                <Plus className="w-4 h-4 stroke-[2.5]" />
+                                <span>Adicionar Esta Ocorrência à Ficha do Infrator</span>
+                              </button>
                             </div>
-                          )}
-
-                          <div className="flex justify-end pt-1">
-                            <button
-                              type="button"
-                              onClick={handleAddOccurrenceToSuspect}
-                              className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs rounded transition uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md shadow-amber-500/10"
-                            >
-                              <Plus className="w-4 h-4 stroke-[2.5]" />
-                              <span>Adicionar Esta Ocorrência à Ficha do Infrator</span>
-                            </button>
                           </div>
-                        </div>
+                        )}
 
                         {/* Display Table / Cards of Linked Occurrences */}
                         {suspectOccurrencesList.length > 0 && (
@@ -3129,11 +3284,11 @@ export default function App() {
                             </div>
 
                             {/* Mode switcher */}
-                            <div className="flex items-center gap-1 bg-[#141418] p-1 rounded border border-zinc-800">
+                            <div className="grid grid-cols-3 gap-1 bg-[#141418] p-1 rounded border border-zinc-800">
                               <button
                                 type="button"
                                 onClick={() => setDirectOcMode('new')}
-                                className={`flex-1 py-1 text-[10px] font-bold rounded cursor-pointer ${
+                                className={`py-1 text-[10px] font-bold rounded cursor-pointer transition ${
                                   directOcMode === 'new'
                                     ? 'bg-amber-500 text-black'
                                     : 'text-zinc-400 hover:text-zinc-200'
@@ -3143,8 +3298,20 @@ export default function App() {
                               </button>
                               <button
                                 type="button"
+                                onClick={() => setDirectOcMode('from_other')}
+                                className={`py-1 text-[10px] font-bold rounded cursor-pointer transition flex items-center justify-center gap-1 ${
+                                  directOcMode === 'from_other'
+                                    ? 'bg-amber-500 text-black'
+                                    : 'text-amber-300/90 hover:text-amber-200 bg-amber-950/30'
+                                }`}
+                              >
+                                <Users className="w-2.5 h-2.5" />
+                                Outro Infrator
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() => setDirectOcMode('existing')}
-                                className={`flex-1 py-1 text-[10px] font-bold rounded cursor-pointer ${
+                                className={`py-1 text-[10px] font-bold rounded cursor-pointer transition ${
                                   directOcMode === 'existing'
                                     ? 'bg-amber-500 text-black'
                                     : 'text-zinc-400 hover:text-zinc-200'
@@ -3154,179 +3321,197 @@ export default function App() {
                               </button>
                             </div>
 
-                            <div>
-                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
-                                Condição / Papel no Crime *
-                              </label>
-                              <select
-                                value={directOcPapel}
-                                onChange={(e) => setDirectOcPapel(e.target.value)}
-                                className="w-full bg-[#121216] border border-amber-500/50 rounded p-1.5 text-xs text-amber-300 font-bold focus:outline-none"
-                              >
-                                <option value="Autor">Autor (Principal)</option>
-                                <option value="Coautor">Coautor</option>
-                                <option value="Suspeito">Suspeito</option>
-                                <option value="Vítima">Vítima</option>
-                                <option value="Notificado">Notificado</option>
-                                <option value="Testemunha / Condutor">Testemunha / Condutor</option>
-                                <option value="Indiciado">Indiciado</option>
-                              </select>
-                            </div>
-
-                            {directOcMode === 'existing' ? (
-                              <div>
-                                <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
-                                  Selecione a Ocorrência Cadastrada *
-                                </label>
-                                <select
-                                  value={directOcExistingId}
-                                  onChange={(e) => setDirectOcExistingId(e.target.value)}
-                                  className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
-                                >
-                                  <option value="">Selecione o B.O....</option>
-                                  {occurrences.map((oc) => (
-                                    <option key={oc.id} value={oc.id}>
-                                      {oc.numero_bo} — {oc.tipificacao_penal}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            ) : (
-                              <div className="space-y-2.5">
-                                <div>
-                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
-                                    Número do B.O. / REDS *
-                                  </label>
-                                  <input
-                                    type="text"
-                                    placeholder="Ex: REDS-2026-00458921-001"
-                                    value={directNewOcData.numero_bo}
-                                    onChange={(e) => setDirectNewOcData({ ...directNewOcData, numero_bo: e.target.value })}
-                                    className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
-                                    Tipificação Penal *
-                                  </label>
-                                  <select
-                                    value={directNewOcData.tipificacao_penal}
-                                    onChange={(e) => setDirectNewOcData({ ...directNewOcData, tipificacao_penal: e.target.value })}
-                                    className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
-                                  >
-                                    <option value="Roubo a Mão Armada">Roubo a Mão Armada</option>
-                                    <option value="Roubo de Carga">Roubo de Carga</option>
-                                    <option value="Tráfico de Drogas">Tráfico de Drogas</option>
-                                    <option value="Associação para o Tráfico">Associação para o Tráfico</option>
-                                    <option value="Homicídio Tentado">Homicídio Tentado</option>
-                                    <option value="Homicídio Consumado">Homicídio Consumado</option>
-                                    <option value="Porte Ilegal de Arma de Fogo">Porte Ilegal de Arma de Fogo</option>
-                                    <option value="Ameaça / Coação">Ameaça / Coação</option>
-                                    <option value="Lesão Corporal">Lesão Corporal</option>
-                                    <option value="Extorsão / Sequestro">Extorsão / Sequestro</option>
-                                  </select>
-                                </div>
-                                
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
-                                      Data / Hora do Fato
-                                    </label>
-                                    <input
-                                      type="datetime-local"
-                                      value={directNewOcData.data_hora}
-                                      onChange={(e) => setDirectNewOcData({ ...directNewOcData, data_hora: e.target.value })}
-                                      className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-[11px] text-zinc-200 focus:outline-none"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
-                                      Armas Utilizadas
-                                    </label>
-                                    <input
-                                      type="text"
-                                      placeholder="Ex: Pistola .380"
-                                      value={directNewOcData.armas_utilizadas}
-                                      onChange={(e) => setDirectNewOcData({ ...directNewOcData, armas_utilizadas: e.target.value })}
-                                      className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
-                                    />
-                                  </div>
-                                </div>
-
-                                {/* Coordenadas Geográficas Parametrizadas (Lat / Long) */}
-                                <div className="p-2 bg-[#09090C] rounded border border-cyan-900/40 space-y-1.5">
-                                  <div className="flex items-center justify-between">
-                                    <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1">
-                                      <MapPin className="w-3 h-3 text-cyan-400" /> Coordenadas Geográficas (Lat / Long) *
-                                    </label>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setDirectNewOcData({
-                                          ...directNewOcData,
-                                          lat: '-19.7712',
-                                          lng: '-43.8564',
-                                        })
-                                      }
-                                      className="text-[9px] text-zinc-400 hover:text-cyan-300 font-mono underline cursor-pointer"
-                                    >
-                                      35º BPM
-                                    </button>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <div>
-                                      <label className="text-[8px] uppercase text-zinc-500 font-bold block">Latitude *</label>
-                                      <input
-                                        type="text"
-                                        placeholder="-19.7712"
-                                        value={directNewOcData.lat}
-                                        onChange={(e) => setDirectNewOcData({ ...directNewOcData, lat: e.target.value })}
-                                        className="w-full bg-[#121216] border border-cyan-900/50 rounded p-1.5 text-xs text-cyan-200 focus:outline-none font-mono"
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="text-[8px] uppercase text-zinc-500 font-bold block">Longitude *</label>
-                                      <input
-                                        type="text"
-                                        placeholder="-43.8564"
-                                        value={directNewOcData.lng}
-                                        onChange={(e) => setDirectNewOcData({ ...directNewOcData, lng: e.target.value })}
-                                        className="w-full bg-[#121216] border border-cyan-900/50 rounded p-1.5 text-xs text-cyan-200 focus:outline-none font-mono"
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div>
-                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
-                                    Modus Operandi / Dinâmica
-                                  </label>
-                                  <input
-                                    type="text"
-                                    placeholder="Ex: Abordagem com emprego de arma de fogo e fuga em veículo"
-                                    value={directNewOcData.modus_operandi}
-                                    onChange={(e) => setDirectNewOcData({ ...directNewOcData, modus_operandi: e.target.value })}
-                                    className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
-                                  />
-                                </div>
-                              </div>
+                            {/* Mode 1: From Other Suspects */}
+                            {directOcMode === 'from_other' && (
+                              <OccurrencePickerFromSuspects
+                                occurrences={occurrences}
+                                suspects={suspects}
+                                currentSuspectName={selectedSuspectDetail.nome_completo}
+                                selectedPapel={directOcPapel}
+                                onChangePapel={(papel) => setDirectOcPapel(papel)}
+                                onLinkOccurrence={handleDirectLinkOccurrenceFromPicker}
+                                onCopyOccurrence={handleDirectCopyOccurrenceToForm}
+                                alreadyLinkedIds={(selectedSuspectDetail.ocorrencias || []).map((o: any) => o.id || o.numero_bo)}
+                              />
                             )}
 
-                            <div className="flex justify-end gap-2 pt-1">
-                              <button
-                                type="button"
-                                onClick={() => setIsLinkingDirectOccurrence(false)}
-                                className="px-2.5 py-1 bg-zinc-850 hover:bg-zinc-800 text-zinc-400 rounded text-[10px] cursor-pointer"
-                              >
-                                Cancelar
-                              </button>
-                              <button
-                                type="submit"
-                                className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-[10px] uppercase cursor-pointer"
-                              >
-                                Salvar Vínculo
-                              </button>
-                            </div>
+                            {directOcMode !== 'from_other' && (
+                              <>
+                                <div>
+                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                    Condição / Papel no Crime *
+                                  </label>
+                                  <select
+                                    value={directOcPapel}
+                                    onChange={(e) => setDirectOcPapel(e.target.value)}
+                                    className="w-full bg-[#121216] border border-amber-500/50 rounded p-1.5 text-xs text-amber-300 font-bold focus:outline-none"
+                                  >
+                                    <option value="Autor">Autor (Principal)</option>
+                                    <option value="Coautor">Coautor</option>
+                                    <option value="Suspeito">Suspeito</option>
+                                    <option value="Vítima">Vítima</option>
+                                    <option value="Notificado">Notificado</option>
+                                    <option value="Testemunha / Condutor">Testemunha / Condutor</option>
+                                    <option value="Indiciado">Indiciado</option>
+                                  </select>
+                                </div>
+
+                                {directOcMode === 'existing' ? (
+                                  <div>
+                                    <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                      Selecione a Ocorrência Cadastrada *
+                                    </label>
+                                    <select
+                                      value={directOcExistingId}
+                                      onChange={(e) => setDirectOcExistingId(e.target.value)}
+                                      className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                    >
+                                      <option value="">Selecione o B.O....</option>
+                                      {occurrences.map((oc) => (
+                                        <option key={oc.id} value={oc.id}>
+                                          {oc.numero_bo} — {oc.tipificacao_penal}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-2.5">
+                                    <div>
+                                      <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
+                                        Número do B.O. / REDS *
+                                      </label>
+                                      <input
+                                        type="text"
+                                        placeholder="Ex: REDS-2026-00458921-001"
+                                        value={directNewOcData.numero_bo}
+                                        onChange={(e) => setDirectNewOcData({ ...directNewOcData, numero_bo: e.target.value })}
+                                        className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
+                                        Tipificação Penal *
+                                      </label>
+                                      <select
+                                        value={directNewOcData.tipificacao_penal}
+                                        onChange={(e) => setDirectNewOcData({ ...directNewOcData, tipificacao_penal: e.target.value })}
+                                        className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                      >
+                                        <option value="Roubo a Mão Armada">Roubo a Mão Armada</option>
+                                        <option value="Roubo de Carga">Roubo de Carga</option>
+                                        <option value="Tráfico de Drogas">Tráfico de Drogas</option>
+                                        <option value="Associação para o Tráfico">Associação para o Tráfico</option>
+                                        <option value="Homicídio Tentado">Homicídio Tentado</option>
+                                        <option value="Homicídio Consumado">Homicídio Consumado</option>
+                                        <option value="Porte Ilegal de Arma de Fogo">Porte Ilegal de Arma de Fogo</option>
+                                        <option value="Ameaça / Coação">Ameaça / Coação</option>
+                                        <option value="Lesão Corporal">Lesão Corporal</option>
+                                        <option value="Extorsão / Sequestro">Extorsão / Sequestro</option>
+                                      </select>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
+                                          Data / Hora do Fato
+                                        </label>
+                                        <input
+                                          type="datetime-local"
+                                          value={directNewOcData.data_hora}
+                                          onChange={(e) => setDirectNewOcData({ ...directNewOcData, data_hora: e.target.value })}
+                                          className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-[11px] text-zinc-200 focus:outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
+                                          Armas Utilizadas
+                                        </label>
+                                        <input
+                                          type="text"
+                                          placeholder="Ex: Pistola .380"
+                                          value={directNewOcData.armas_utilizadas}
+                                          onChange={(e) => setDirectNewOcData({ ...directNewOcData, armas_utilizadas: e.target.value })}
+                                          className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    {/* Coordenadas Geográficas Parametrizadas (Lat / Long) */}
+                                    <div className="p-2 bg-[#09090C] rounded border border-cyan-900/40 space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1">
+                                          <MapPin className="w-3 h-3 text-cyan-400" /> Coordenadas Geográficas (Lat / Long) *
+                                        </label>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setDirectNewOcData({
+                                              ...directNewOcData,
+                                              lat: '-19.7712',
+                                              lng: '-43.8564',
+                                            })
+                                          }
+                                          className="text-[9px] text-zinc-400 hover:text-cyan-300 font-mono underline cursor-pointer"
+                                        >
+                                          35º BPM
+                                        </button>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                          <label className="text-[8px] uppercase text-zinc-500 font-bold block">Latitude *</label>
+                                          <input
+                                            type="text"
+                                            placeholder="-19.7712"
+                                            value={directNewOcData.lat}
+                                            onChange={(e) => setDirectNewOcData({ ...directNewOcData, lat: e.target.value })}
+                                            className="w-full bg-[#121216] border border-cyan-900/50 rounded p-1.5 text-xs text-cyan-200 focus:outline-none font-mono"
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="text-[8px] uppercase text-zinc-500 font-bold block">Longitude *</label>
+                                          <input
+                                            type="text"
+                                            placeholder="-43.8564"
+                                            value={directNewOcData.lng}
+                                            onChange={(e) => setDirectNewOcData({ ...directNewOcData, lng: e.target.value })}
+                                            className="w-full bg-[#121216] border border-cyan-900/50 rounded p-1.5 text-xs text-cyan-200 focus:outline-none font-mono"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
+                                        Modus Operandi / Dinâmica
+                                      </label>
+                                      <input
+                                        type="text"
+                                        placeholder="Ex: Abordagem com emprego de arma de fogo e fuga em veículo"
+                                        value={directNewOcData.modus_operandi}
+                                        onChange={(e) => setDirectNewOcData({ ...directNewOcData, modus_operandi: e.target.value })}
+                                        className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+
+                                <div className="flex justify-end gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsLinkingDirectOccurrence(false)}
+                                    className="px-2.5 py-1 bg-zinc-855 hover:bg-zinc-800 text-zinc-400 rounded text-[10px] cursor-pointer"
+                                  >
+                                    Cancelar
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-[10px] uppercase cursor-pointer"
+                                  >
+                                    Salvar Vínculo
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </form>
                         )}
 
