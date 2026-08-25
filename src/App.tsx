@@ -54,6 +54,7 @@ import {
 } from './types';
 import { db } from './backend/db';
 import { openSuspectDossier } from './utils/dossierGenerator';
+import { analyzeCrimeIntelligenceLocally } from './utils/intelligenceEngine';
 import {
   initFirebaseSync,
   persistSuspectToFirebase,
@@ -313,16 +314,42 @@ export default function App() {
     setParseError(null);
     setParsedReport(null);
     try {
-      const response = await fetch('/api/ai/parse-report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ narrative: narrativeInput }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Erro ao processar narrativa policial.');
+      let data: any = null;
+      try {
+        const response = await fetch('/api/ai/parse-report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ narrative: narrativeInput }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const json = await response.json();
+          if (response.ok && json) {
+            data = json;
+          }
+        }
+      } catch (netErr) {
+        console.warn('Backend parse-report not reachable, using local analyzer:', netErr);
+      }
+
+      if (!data) {
+        const local = analyzeCrimeIntelligenceLocally(narrativeInput, suspects, selectedCoords || undefined);
+        data = {
+          nome_envolvidos: [],
+          vulgos: [],
+          modus_operandi: local.ocorrencia_processada.modus_operandi_resumo,
+          veiculos: local.ocorrencia_processada.caracteristicas_declaradas.armas_veiculos || 'Nenhum',
+          armas: local.ocorrencia_processada.caracteristicas_declaradas.armas_veiculos || 'Nenhuma',
+          endereco: `${local.ocorrencia_processada.logradouro || ''}, ${local.ocorrencia_processada.bairro} - ${local.ocorrencia_processada.municipio}`,
+          lat: selectedCoords?.lat || -19.7712,
+          lng: selectedCoords?.lng || -43.8564,
+          tipificacao: local.ocorrencia_processada.tipificacao
+        };
+      }
+
       setParsedReport(data);
 
-      // Auto update coordinates based on AI geolocation estimation
+      // Auto update coordinates based on geolocation estimation
       if (data.lat && data.lng) {
         setSelectedCoords({ lat: data.lat, lng: data.lng });
       }
@@ -343,19 +370,52 @@ export default function App() {
     setMatchError(null);
     setMatchResults([]);
     try {
-      const response = await fetch('/api/match/suspects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lat: selectedCoords.lat,
-          lng: selectedCoords.lng,
-          buffer_radius_km: searchRadius,
-          description: parsedReport?.modus_operandi || narrativeInput,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Erro ao mapear perfis na área.');
-      setMatchResults(data.matches || []);
+      let data: any = null;
+      try {
+        const response = await fetch('/api/match/suspects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat: selectedCoords.lat,
+            lng: selectedCoords.lng,
+            buffer_radius_km: searchRadius,
+            description: parsedReport?.modus_operandi || narrativeInput,
+          }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const json = await response.json();
+          if (response.ok) {
+            data = json;
+          }
+        }
+      } catch (netErr) {
+        console.warn('Backend match/suspects unreachable:', netErr);
+      }
+
+      if (data && data.matches) {
+        setMatchResults(data.matches);
+      } else {
+        const local = analyzeCrimeIntelligenceLocally(narrativeInput, suspects, selectedCoords || undefined);
+        if (local.cruzamento_suspeitos && local.cruzamento_suspeitos.length > 0) {
+          setMatchResults(local.cruzamento_suspeitos.map((c: any) => ({
+            suspect: c.suspect_details || {
+              id: c.infrator_id,
+              nome_completo: c.nome_completo,
+              vulgo: c.vulgo,
+              gangue_faccao: 'Apurando Vínculo',
+              periculosidade: c.score_compatibilidade > 75 ? 'Alta' : 'Média',
+              foto_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop',
+              status_mandado_prisao: c.score_compatibilidade > 80
+            },
+            score: Math.round(c.score_compatibilidade),
+            justificativa: c.justificativa_analitica,
+            fatores_chave: c.fatores_convergentes || [],
+            fatores_divergentes: c.fatores_divergentes || [],
+            recomendacao_operacional: c.recomendacao_operacional
+          })));
+        }
+      }
     } catch (err: any) {
       setMatchError(err.message);
     } finally {
@@ -372,18 +432,39 @@ export default function App() {
     setIsIntelligenceAnalyzing(true);
     setIntelligenceError(null);
     try {
-      const response = await fetch('/api/ai/intelligence-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          narrative: narrativeInput,
-          lat: selectedCoords?.lat,
-          lng: selectedCoords?.lng,
-          radius_km: searchRadius
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Erro ao processar análise de inteligência.');
+      let data: any = null;
+      try {
+        const response = await fetch('/api/ai/intelligence-analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            narrative: narrativeInput,
+            lat: selectedCoords?.lat,
+            lng: selectedCoords?.lng,
+            radius_km: searchRadius
+          }),
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const json = await response.json();
+          if (response.ok && json && (json.ocorrencia_processada || json.cruzamento_suspeitos)) {
+            data = json;
+          }
+        }
+      } catch (networkOrServerErr) {
+        console.warn('API call failed or returned non-JSON, switching to local intelligence engine fallback:', networkOrServerErr);
+      }
+
+      // If backend was unreachable or returned non-JSON, run the deterministic intelligence engine locally
+      if (!data) {
+        data = analyzeCrimeIntelligenceLocally(
+          narrativeInput,
+          suspects.length > 0 ? suspects : undefined,
+          selectedCoords ? { lat: selectedCoords.lat, lng: selectedCoords.lng } : undefined
+        );
+      }
+
       setIntelligenceResult(data);
 
       // Backwards-compatible sync with parsedReport and matchResults
@@ -396,8 +477,8 @@ export default function App() {
           veiculos: data.ocorrencia_processada.caracteristicas_declaradas?.armas_veiculos || 'Conforme apurado',
           nome_envolvidos: [],
           vulgos: [],
-          lat: selectedCoords?.lat || -23.6141,
-          lng: selectedCoords?.lng || -46.5892
+          lat: selectedCoords?.lat || -19.7712,
+          lng: selectedCoords?.lng || -43.8564
         });
       }
 

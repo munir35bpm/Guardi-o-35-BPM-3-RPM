@@ -3,6 +3,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { db } from './src/backend/db.js';
+import { analyzeCrimeIntelligenceLocally } from './src/utils/intelligenceEngine.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -12,6 +13,31 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+
+// Helper to safely parse JSON from AI model output or strings
+function safeJsonParse(raw: string | undefined): any {
+  if (!raw) return null;
+  let cleaned = raw.trim();
+  // Strip markdown fences
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  }
+  // Find first { or [
+  const firstBrace = cleaned.indexOf('{');
+  const firstBracket = cleaned.indexOf('[');
+  let startIdx = -1;
+  if (firstBrace !== -1 && firstBracket !== -1) {
+    startIdx = Math.min(firstBrace, firstBracket);
+  } else if (firstBrace !== -1) {
+    startIdx = firstBrace;
+  } else if (firstBracket !== -1) {
+    startIdx = firstBracket;
+  }
+  if (startIdx !== -1) {
+    cleaned = cleaned.slice(startIdx);
+  }
+  return JSON.parse(cleaned);
+}
 
 // Lazy-initialization utility for Gemini API client to prevent crashing on boot when key is missing
 let aiClient: GoogleGenAI | null = null;
@@ -628,60 +654,80 @@ Tente geolocalizar o endereço aproximado mencionado na narrativa com coordenada
     const userPrompt = `Analise a seguinte narrativa de Boletim de Ocorrência policial e preencha as informações extraídas:
 Narrativa: "${narrative}"`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
-      contents: userPrompt,
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            nome_envolvidos: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Lista de nomes completos de infratores ou suspeitos identificados na narrativa."
+    let parsedData = null;
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: userPrompt,
+        config: {
+          systemInstruction: systemPrompt,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              nome_envolvidos: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: "Lista de nomes completos de infratores ou suspeitos identificados na narrativa."
+              },
+              vulgos: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: "Apelidos, alcunhas ou vulgos dos infratores citados (ex: 'Careca', 'Neguinho')."
+              },
+              modus_operandi: {
+                type: Type.STRING,
+                description: "Resumo do método utilizado para cometer o crime, táticas, ameaças, ferramentas ou técnicas."
+              },
+              veiculos: {
+                type: Type.STRING,
+                description: "Veículos utilizados na ação (ex: 'Moto Titan preta', 'Sprinter branca'). Caso contrário, 'Nenhum'."
+              },
+              armas: {
+                type: Type.STRING,
+                description: "Armas empregadas (ex: 'Pistola semi-automática 9mm', 'Faca'). Caso contrário, 'Nenhuma'."
+              },
+              endereco: {
+                type: Type.STRING,
+                description: "Logradouro ou ponto de referência estimado onde ocorreu o crime."
+              },
+              lat: {
+                type: Type.NUMBER,
+                description: "Latitude geográfica estimada em São Paulo."
+              },
+              lng: {
+                type: Type.NUMBER,
+                description: "Longitude geográfica estimada em São Paulo."
+              },
+              tipificacao: {
+                type: Type.STRING,
+                description: "Tipificação penal sugerida (ex: 'Roubo de Carga', 'Roubo a Transeunte', 'Tráfico de Entorpecentes', 'Roubo de Veículo')."
+              }
             },
-            vulgos: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Apelidos, alcunhas ou vulgos dos infratores citados (ex: 'Careca', 'Neguinho')."
-            },
-            modus_operandi: {
-              type: Type.STRING,
-              description: "Resumo do método utilizado para cometer o crime, táticas, ameaças, ferramentas ou técnicas."
-            },
-            veiculos: {
-              type: Type.STRING,
-              description: "Veículos utilizados na ação (ex: 'Moto Titan preta', 'Sprinter branca'). Caso contrário, 'Nenhum'."
-            },
-            armas: {
-              type: Type.STRING,
-              description: "Armas empregadas (ex: 'Pistola semi-automática 9mm', 'Faca'). Caso contrário, 'Nenhuma'."
-            },
-            endereco: {
-              type: Type.STRING,
-              description: "Logradouro ou ponto de referência estimado onde ocorreu o crime."
-            },
-            lat: {
-              type: Type.NUMBER,
-              description: "Latitude geográfica estimada em São Paulo."
-            },
-            lng: {
-              type: Type.NUMBER,
-              description: "Longitude geográfica estimada em São Paulo."
-            },
-            tipificacao: {
-              type: Type.STRING,
-              description: "Tipificação penal sugerida (ex: 'Roubo de Carga', 'Roubo a Transeunte', 'Tráfico de Entorpecentes', 'Roubo de Veículo')."
-            }
-          },
-          required: ["nome_envolvidos", "vulgos", "modus_operandi", "veiculos", "armas", "endereco", "lat", "lng", "tipificacao"]
+            required: ["nome_envolvidos", "vulgos", "modus_operandi", "veiculos", "armas", "endereco", "lat", "lng", "tipificacao"]
+          }
         }
-      }
-    });
+      });
+      parsedData = safeJsonParse(response.text);
+    } catch (aiErr) {
+      console.warn('Gemini generateContent in parse-report failed, generating heuristic response:', aiErr);
+    }
 
-    const parsedData = JSON.parse(response.text || '{}');
+    if (!parsedData) {
+      const localResult = analyzeCrimeIntelligenceLocally(narrative);
+      parsedData = {
+        nome_envolvidos: [],
+        vulgos: [],
+        modus_operandi: localResult.ocorrencia_processada.modus_operandi_resumo,
+        veiculos: localResult.ocorrencia_processada.caracteristicas_declaradas.armas_veiculos || 'Nenhum',
+        armas: localResult.ocorrencia_processada.caracteristicas_declaradas.armas_veiculos || 'Nenhuma',
+        endereco: `${localResult.ocorrencia_processada.logradouro || ''}, ${localResult.ocorrencia_processada.bairro} - ${localResult.ocorrencia_processada.municipio}`,
+        lat: -19.7694,
+        lng: -43.8564,
+        tipificacao: localResult.ocorrencia_processada.tipificacao
+      };
+    }
+
     res.json(parsedData);
   } catch (error: any) {
     console.error('Error in parse-report:', error);
@@ -700,14 +746,6 @@ app.post('/api/ai/intelligence-analysis', async (req, res) => {
       return;
     }
 
-    let ai;
-    try {
-      ai = getGeminiClient();
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-      return;
-    }
-
     // 1. Gather all candidates in the system (or filtered by proximity if coordinates provided)
     let candidates = db.infratores.map(i => db.getInfratorFull(i.id)).filter(Boolean);
     if (lat !== undefined && lng !== undefined) {
@@ -723,19 +761,25 @@ app.post('/api/ai/intelligence-analysis', async (req, res) => {
       }
     }
 
-    const formattedCandidates = candidates.map(c => ({
-      infrator_id: c.id,
-      nome_completo: c.nome_completo,
-      vulgo: c.vulgo,
-      gangue_faccao: c.gangue_faccao,
-      periculosidade: c.periculosidade,
-      mandado_ativo: c.status_mandado_prisao,
-      caracteristicas_fisicas: c.fisicas,
-      enderecos: c.enderecos.map((e: any) => `${e.tipo_endereco}: ${e.logradouro}, ${e.bairro} (${e.cidade})`),
-      historico_crimes: c.ocorrencias.map((o: any) => `[${o.numero_bo}] ${o.tipificacao_penal} (Papel: ${o.papel}) - MO: ${o.modus_operandi} - Armas: ${o.armas_utilizadas} - Veículo: ${o.veiculo_utilizado}`)
-    }));
+    let parsedResult: any = null;
 
-    const systemPrompt = `Você é um Analista de Inteligência Policial da Seção de Inteligência do 35º BPM (PMMG - Guardião do Alto Rio das Velhas).
+    // Try executing with Gemini AI if client key is configured
+    try {
+      const ai = getGeminiClient();
+
+      const formattedCandidates = candidates.map(c => ({
+        infrator_id: c.id,
+        nome_completo: c.nome_completo,
+        vulgo: c.vulgo,
+        gangue_faccao: c.gangue_faccao,
+        periculosidade: c.periculosidade,
+        mandado_ativo: c.status_mandado_prisao,
+        caracteristicas_fisicas: c.fisicas,
+        enderecos: c.enderecos.map((e: any) => `${e.tipo_endereco}: ${e.logradouro}, ${e.bairro} (${e.cidade})`),
+        historico_crimes: c.ocorrencias.map((o: any) => `[${o.numero_bo}] ${o.tipificacao_penal} (Papel: ${o.papel}) - MO: ${o.modus_operandi} - Armas: ${o.armas_utilizadas} - Veículo: ${o.veiculo_utilizado}`)
+      }));
+
+      const systemPrompt = `Você é um Analista de Inteligência Policial da Seção de Inteligência do 35º BPM (PMMG - Guardião do Alto Rio das Velhas).
 Sua missão é realizar uma análise rigorosa e estruturada de ocorrências policiais, executando três tarefas integradas:
 1. Extração e processamento da ocorrência (município, bairro, logradouro, tipificação, resumo do modus operandi e características declaradas como pele, vestimentas, sinais particulares/tatuagens e armas/veículos).
 2. Cruzamento analítico com a base de dados de infratores cadastrados, avaliando o score_compatibilidade (0 a 100%), identificando fatores convergentes, fatores divergentes, justificativa analítica técnica e recomendação operacional de campo.
@@ -743,7 +787,7 @@ Sua missão é realizar uma análise rigorosa e estruturada de ocorrências poli
 
 Você DEVE responder estritamente de acordo com o esquema JSON solicitado.`;
 
-    const userPrompt = `NARRATIVA POLICIAL REGISTRADA:
+      const userPrompt = `NARRATIVA POLICIAL REGISTRADA:
 "${narrative}"
 
 BASE DE INFRATORES E SUSPEITOS CADASTRADOS NO SISTEMA:
@@ -751,82 +795,94 @@ ${JSON.stringify(formattedCandidates, null, 2)}
 
 Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibilidade com os infratores cadastrados e gere o alerta de reincidência no perímetro.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
-      contents: userPrompt,
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            ocorrencia_processada: {
-              type: Type.OBJECT,
-              properties: {
-                municipio: { type: Type.STRING },
-                bairro: { type: Type.STRING },
-                logradouro: { type: Type.STRING },
-                tipificacao: { type: Type.STRING },
-                modus_operandi_resumo: { type: Type.STRING },
-                caracteristicas_declaradas: {
-                  type: Type.OBJECT,
-                  properties: {
-                    pele: { type: Type.STRING },
-                    vestimentas: { type: Type.STRING },
-                    sinais_particulares: { type: Type.STRING },
-                    armas_veiculos: { type: Type.STRING }
-                  },
-                  required: ["pele", "sinais_particulares", "armas_veiculos"]
-                }
-              },
-              required: ["municipio", "bairro", "tipificacao", "modus_operandi_resumo", "caracteristicas_declaradas"]
-            },
-            cruzamento_suspeitos: {
-              type: Type.ARRAY,
-              items: {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: userPrompt,
+        config: {
+          systemInstruction: systemPrompt,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              ocorrencia_processada: {
                 type: Type.OBJECT,
                 properties: {
-                  infrator_id: { type: Type.STRING },
-                  nome_completo: { type: Type.STRING },
-                  vulgo: { type: Type.STRING },
-                  score_compatibilidade: { type: Type.NUMBER },
-                  fatores_convergentes: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
-                  },
-                  fatores_divergentes: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
-                  },
-                  justificativa_analitica: { type: Type.STRING },
-                  recomendacao_operacional: { type: Type.STRING }
+                  municipio: { type: Type.STRING },
+                  bairro: { type: Type.STRING },
+                  logradouro: { type: Type.STRING },
+                  tipificacao: { type: Type.STRING },
+                  modus_operandi_resumo: { type: Type.STRING },
+                  caracteristicas_declaradas: {
+                    type: Type.OBJECT,
+                    properties: {
+                      pele: { type: Type.STRING },
+                      vestimentas: { type: Type.STRING },
+                      sinais_particulares: { type: Type.STRING },
+                      armas_veiculos: { type: Type.STRING }
+                    },
+                    required: ["pele", "sinais_particulares", "armas_veiculos"]
+                  }
                 },
-                required: [
-                  "infrator_id",
-                  "nome_completo",
-                  "vulgo",
-                  "score_compatibilidade",
-                  "fatores_convergentes",
-                  "justificativa_analitica",
-                  "recomendacao_operacional"
-                ]
+                required: ["municipio", "bairro", "tipificacao", "modus_operandi_resumo", "caracteristicas_declaradas"]
+              },
+              cruzamento_suspeitos: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    infrator_id: { type: Type.STRING },
+                    nome_completo: { type: Type.STRING },
+                    vulgo: { type: Type.STRING },
+                    score_compatibilidade: { type: Type.NUMBER },
+                    fatores_convergentes: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING }
+                    },
+                    fatores_divergentes: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING }
+                    },
+                    justificativa_analitica: { type: Type.STRING },
+                    recomendacao_operacional: { type: Type.STRING }
+                  },
+                  required: [
+                    "infrator_id",
+                    "nome_completo",
+                    "vulgo",
+                    "score_compatibilidade",
+                    "fatores_convergentes",
+                    "justificativa_analitica",
+                    "recomendacao_operacional"
+                  ]
+                }
+              },
+              alerta_reincidencia_perimetro: {
+                type: Type.OBJECT,
+                properties: {
+                  nivel_alerta: { type: Type.STRING, enum: ["ALTO", "MEDIO", "BAIXO"] },
+                  observacao: { type: Type.STRING }
+                },
+                required: ["nivel_alerta", "observacao"]
               }
             },
-            alerta_reincidencia_perimetro: {
-              type: Type.OBJECT,
-              properties: {
-                nivel_alerta: { type: Type.STRING, enum: ["ALTO", "MEDIO", "BAIXO"] },
-                observacao: { type: Type.STRING }
-              },
-              required: ["nivel_alerta", "observacao"]
-            }
-          },
-          required: ["ocorrencia_processada", "cruzamento_suspeitos", "alerta_reincidencia_perimetro"]
+            required: ["ocorrencia_processada", "cruzamento_suspeitos", "alerta_reincidencia_perimetro"]
+          }
         }
-      }
-    });
+      });
 
-    const parsedResult = JSON.parse(response.text || '{}');
+      parsedResult = safeJsonParse(response.text);
+    } catch (aiError: any) {
+      console.warn('Gemini Intelligence Analysis call failed, falling back to built-in Intelligence Engine:', aiError?.message || aiError);
+    }
+
+    // Fallback: If AI is unavailable or output couldn't be parsed, run deterministic intelligence engine
+    if (!parsedResult || !parsedResult.ocorrencia_processada) {
+      parsedResult = analyzeCrimeIntelligenceLocally(
+        narrative,
+        candidates,
+        lat !== undefined && lng !== undefined ? { lat: Number(lat), lng: Number(lng) } : undefined
+      );
+    }
 
     // Enrich cruzamento_suspeitos with full suspect profiles for frontend rendering
     if (Array.isArray(parsedResult.cruzamento_suspeitos)) {
@@ -842,7 +898,13 @@ Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibili
     res.json(parsedResult);
   } catch (error: any) {
     console.error('Error in intelligence-analysis:', error);
-    res.status(500).json({ error: error.message });
+    // Even on server exception, return a local fallback response rather than breaking the UI
+    try {
+      const fallback = analyzeCrimeIntelligenceLocally(req.body?.narrative || '');
+      res.json(fallback);
+    } catch (fbErr) {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 
