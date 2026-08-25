@@ -840,7 +840,7 @@ export default function App() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold tracking-wider text-[#F3EEE4] uppercase font-display flex items-center gap-1.5">
-                35º BPM<span className="text-[#C4A76E] font-mono">//</span>CrimIntel
+                35º BPM<span className="text-[#C4A76E] font-mono">//</span><span className="text-[#DFC897]">GUARDIÃO</span>
               </h1>
               <span className="px-2 py-0.5 text-[9px] font-mono font-bold bg-[#C4A76E]/15 text-[#DFC897] border border-[#C4A76E]/40 rounded uppercase tracking-wider">
                 PMMG • ALTO RIO DAS VELHAS
