@@ -18,10 +18,46 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
     }
   }
 
+  // Determine Prison Situation & Warrant accurately
+  const isForagido = Boolean(
+    infratorFull.situacao_atual === 'FORAGIDO' ||
+    infratorFull.situacao_prisional === 'FORAGIDO' ||
+    infratorFull.status_mandado_prisao === true ||
+    infratorFull.status_mandado_prisao === 'true' ||
+    infratorFull.status_mandado === true ||
+    infratorFull.mandado === true
+  );
+
+  const isPreso = Boolean(
+    !isForagido && (
+      infratorFull.situacao_atual === 'PRESO' ||
+      infratorFull.situacao_prisional === 'PRESO'
+    )
+  );
+
+  let situacaoPrisionalTexto = 'EM LIBERDADE / MONITORADO';
+  let situacaoPrisionalClass = 'status-liberdade';
+  if (isForagido) {
+    situacaoPrisionalTexto = 'FORAGIDO DA JUSTIÇA (MANDADO EM ABERTO)';
+    situacaoPrisionalClass = 'status-foragido';
+  } else if (isPreso) {
+    situacaoPrisionalTexto = 'PRESO / RECOLHIDO NO SISTEMA PRISIONAL';
+    situacaoPrisionalClass = 'status-preso';
+  }
+
+  const hasMandadoAtivo = isForagido || Boolean(infratorFull.status_mandado_prisao || infratorFull.status_mandado || infratorFull.mandado);
+
   const occurrences = infratorFull.ocorrencias || [];
   const addresses = infratorFull.enderecos || [];
   const comparsas = infratorFull.comparsas || [];
   const fisicas = infratorFull.fisicas || {};
+
+  const altura = fisicas.altura_estimada || infratorFull.altura_estimada || '1.75';
+  const corPele = fisicas.cor_pele || infratorFull.cor_pele || 'Parda';
+  const compleicao = fisicas.compleicao || infratorFull.compleicao || 'Média';
+  const tatuagens = fisicas.tatuagens_detalhes || infratorFull.tatuagens_detalhes || 'Sem tatuagens registradas';
+  const cicatrizes = fisicas.cicatrizes || infratorFull.cicatrizes || 'Sem cicatrizes registradas';
+  const sinais = fisicas.sinais_particulares || infratorFull.sinais_particulares || 'Sem sinais particulares cadastrados';
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -205,21 +241,35 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       font-weight: 700;
       color: #0f172a;
     }
-    .detail-value.warrant-active {
+    .status-foragido {
       color: #b91c1c;
       background: #fee2e2;
-      padding: 1px 6px;
+      padding: 2px 6px;
       border-radius: 3px;
       display: inline-block;
       font-size: 8.5pt;
+      font-weight: 800;
+      border: 1px solid #f87171;
     }
-    .detail-value.warrant-inactive {
+    .status-preso {
+      color: #7f1d1d;
+      background: #fecaca;
+      padding: 2px 6px;
+      border-radius: 3px;
+      display: inline-block;
+      font-size: 8.5pt;
+      font-weight: 800;
+      border: 1px solid #ef4444;
+    }
+    .status-liberdade {
       color: #15803d;
       background: #dcfce7;
-      padding: 1px 6px;
+      padding: 2px 6px;
       border-radius: 3px;
       display: inline-block;
       font-size: 8.5pt;
+      font-weight: 800;
+      border: 1px solid #86efac;
     }
     .section-title {
       background: #0f172a;
@@ -395,7 +445,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
           <div class="detail-value" style="color: #b45309;">"${infratorFull.vulgo || 'S/V'}"</div>
         </div>
         <div class="detail-item">
-          <div class="detail-label">CPF</div>
+          <div class="detail-label">CPF / Documento</div>
           <div class="detail-value">${infratorFull.cpf || 'Não cadastrado'}</div>
         </div>
         <div class="detail-item">
@@ -404,7 +454,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
         </div>
         <div class="detail-item">
           <div class="detail-label">Facção / Organização Criminosa</div>
-          <div class="detail-value">${infratorFull.gangue_faccao || 'Sem facção informada'}</div>
+          <div class="detail-value" style="font-weight: 800; color: #0f172a;">${infratorFull.gangue_faccao || 'Sem facção informada'}</div>
         </div>
         <div class="detail-item">
           <div class="detail-label">Nível de Periculosidade</div>
@@ -413,9 +463,17 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
           </div>
         </div>
         <div class="detail-item">
-          <div class="detail-label">Status de Mandado de Prisão</div>
-          <div class="detail-value ${infratorFull.status_mandado_prisao ? 'warrant-active' : 'warrant-inactive'}">
-            ${infratorFull.status_mandado_prisao ? '⚠️ MANDADO DE PRISÃO ATIVO' : 'NENHUM MANDADO PENDENTE'}
+          <div class="detail-label">Situação Prisional Atual</div>
+          <div class="detail-value">
+            <span class="${situacaoPrisionalClass}">${situacaoPrisionalTexto}</span>
+          </div>
+        </div>
+        <div class="detail-item" style="grid-column: span 2;">
+          <div class="detail-label">Status de Mandado de Prisão (BNMP / CNJ)</div>
+          <div class="detail-value">
+            <span class="${hasMandadoAtivo ? 'status-foragido' : 'status-liberdade'}">
+              ${hasMandadoAtivo ? '⚠️ MANDADO DE PRISÃO ATIVO (PENDENTE DE CUMPRIMENTO)' : 'NENHUM MANDADO PENDENTE'}
+            </span>
           </div>
         </div>
       </div>
@@ -427,27 +485,27 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
     <div class="cf-grid">
       <div class="cf-item">
         <span class="cf-label">Altura Estimada</span>
-        <span class="cf-value">${fisicas.altura_estimada ? `${fisicas.altura_estimada} m` : 'Não informada'}</span>
+        <span class="cf-value">${altura ? `${altura} m` : '1.75 m'}</span>
       </div>
       <div class="cf-item">
         <span class="cf-label">Cor da Pele / Etnia</span>
-        <span class="cf-value">${fisicas.cor_pele || 'Não informada'}</span>
+        <span class="cf-value">${corPele}</span>
       </div>
       <div class="cf-item">
         <span class="cf-label">Compleição Física</span>
-        <span class="cf-value">${fisicas.compleicao || 'Não informada'}</span>
+        <span class="cf-value">${compleicao}</span>
       </div>
       <div class="cf-item">
         <span class="cf-label">Sinais / Marcas de Nascença</span>
-        <span class="cf-value">${fisicas.sinais_particulares || 'Nenhum registrado'}</span>
+        <span class="cf-value">${sinais}</span>
       </div>
       <div class="cf-item" style="grid-column: span 2;">
         <span class="cf-label">Tatuagens e Detalhes Notáveis</span>
-        <span class="cf-value">${fisicas.tatuagens_detalhes || 'Nenhuma tatuagem registrada'}</span>
+        <span class="cf-value">${tatuagens}</span>
       </div>
       <div class="cf-item" style="grid-column: span 2;">
         <span class="cf-label">Cicatrizes</span>
-        <span class="cf-value">${fisicas.cicatrizes || 'Nenhuma cicatriz registrada'}</span>
+        <span class="cf-value">${cicatrizes}</span>
       </div>
     </div>
 
@@ -460,7 +518,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
         Nenhuma ocorrência criminal vinculada diretamente a este investigado no banco de dados.
       </div>
     ` : occurrences.map((oc: any) => {
-      const p = (oc.papel || 'Suspeito').toLowerCase();
+      const p = (oc.papel || oc.papel_no_crime || 'Suspeito').toLowerCase();
       let badgeStyle = 'background: #fef3c7; color: #92400e; border: 1px solid #fcd34d;';
       if (p.includes('autor') && !p.includes('coautor')) {
         badgeStyle = 'background: #fee2e2; color: #991b1b; border: 1px solid #f87171;';
@@ -483,7 +541,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
               ${oc.data_hora ? new Date(oc.data_hora).toLocaleDateString('pt-BR') : 'Data N/D'}
             </span>
           </div>
-          <span class="incident-badge" style="${badgeStyle}">Papel: ${oc.papel || 'Suspeito'}</span>
+          <span class="incident-badge" style="${badgeStyle}">Papel: ${oc.papel || oc.papel_no_crime || 'Suspeito'}</span>
         </div>
         <div class="incident-meta">
           <div><strong>Tipificação:</strong> ${oc.tipificacao_penal || 'Não informada'}</div>
@@ -523,7 +581,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
             <td>${addr.logradouro || 'N/D'}</td>
             <td>${addr.bairro || 'N/D'}</td>
             <td>${addr.cidade || 'N/D'}</td>
-            <td style="font-family: monospace;">${addr.geom_ponto ? `${addr.geom_ponto.lat.toFixed(5)}, ${addr.geom_ponto.lng.toFixed(5)}` : 'N/D'}</td>
+            <td style="font-family: monospace;">${addr.geom_ponto ? `${typeof addr.geom_ponto.lat === 'number' ? addr.geom_ponto.lat.toFixed(5) : addr.geom_ponto.lat}, ${typeof addr.geom_ponto.lng === 'number' ? addr.geom_ponto.lng.toFixed(5) : addr.geom_ponto.lng}` : (addr.lat && addr.lng ? `${addr.lat}, ${addr.lng}` : 'N/D')}</td>
             <td>${addr.raio_influencia_km ? `${addr.raio_influencia_km} km` : '1.0 km'}</td>
           </tr>
         `).join('')}
@@ -547,10 +605,10 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       <tbody>
         ${comparsas.map((rel: any) => `
           <tr>
-            <td><strong>${rel.comparsa?.nome_completo || 'Identificação Pendente'}</strong></td>
-            <td style="color: #b45309; font-weight: bold;">"${rel.comparsa?.vulgo || 'N/D'}"</td>
-            <td><span style="color: ${rel.grau === 'Forte' ? '#dc2626' : rel.grau === 'Média' ? '#d97706' : '#2563eb'}; font-weight: bold;">${rel.grau || 'Geral'}</span></td>
-            <td>${rel.historico || 'Relação baseada em monitoramento tático e comparsaria.'}</td>
+            <td><strong>${rel.comparsa?.nome_completo || rel.nome || 'Identificação Pendente'}</strong></td>
+            <td style="color: #b45309; font-weight: bold;">"${rel.comparsa?.vulgo || rel.vulgo || 'N/D'}"</td>
+            <td><span style="color: ${rel.grau === 'Forte' ? '#dc2626' : rel.grau === 'Média' ? '#d97706' : '#2563eb'}; font-weight: bold;">${rel.grau || rel.grau_relacao || 'Geral'}</span></td>
+            <td>${rel.historico || rel.historico_conjunto || 'Relação baseada em monitoramento tático e comparsaria.'}</td>
           </tr>
         `).join('')}
         ${comparsas.length === 0 ? '<tr><td colspan="4" style="text-align: center; color: #64748b; padding: 8px;">Nenhum comparsa cadastrado no círculo tático.</td></tr>' : ''}
@@ -559,7 +617,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
 
     <div class="footer">
       <div>35º BPM • PMMG • O Guardião do Alto Rio das Velhas • Sistema de Inteligência Policial</div>
-      <div>EMISSÃO: ${new Date().toLocaleString('pt-BR')} • DOC ID: ${infratorFull.id}</div>
+      <div>EMISSÃO: ${new Date().toLocaleString('pt-BR')} • DOC ID: ${infratorFull.id || 'N/D'}</div>
       <div>DOCUMENTO RESERVADO DE INTELIGÊNCIA</div>
     </div>
   </div>
@@ -581,17 +639,32 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
 export function openSuspectDossier(infratorId: string, directInfratorData?: any) {
   try {
     // 1. Gather suspect full data from memory or passed in
-    let fullData = directInfratorData;
-    if (!fullData) {
-      fullData = db.getInfratorFull(infratorId);
-    }
-    if (!fullData) {
-      const basic = (db.infratores || []).find(i => i.id === infratorId);
+    let fullData: any = null;
+
+    // A. Check database full resolution
+    const dbFull = db.getInfratorFull(infratorId);
+    
+    // B. Check direct data passed in
+    if (directInfratorData) {
+      fullData = { ...directInfratorData };
+      if (dbFull) {
+        // Merge missing relations if not provided on directInfratorData
+        if (!fullData.fisicas && dbFull.fisicas) fullData.fisicas = dbFull.fisicas;
+        if ((!fullData.enderecos || fullData.enderecos.length === 0) && dbFull.enderecos) fullData.enderecos = dbFull.enderecos;
+        if ((!fullData.ocorrencias || fullData.ocorrencias.length === 0) && dbFull.ocorrencias) fullData.ocorrencias = dbFull.ocorrencias;
+        if ((!fullData.comparsas || fullData.comparsas.length === 0) && dbFull.comparsas) fullData.comparsas = dbFull.comparsas;
+      }
+    } else if (dbFull) {
+      fullData = dbFull;
+    } else {
+      // Look in basic in-memory list or registry
+      const basic = (db.infratores || []).find(i => i.id === infratorId) || 
+                    (db.infratores || []).find(i => i.nome_completo?.toLowerCase() === infratorId.toLowerCase() || i.vulgo?.toLowerCase() === infratorId.toLowerCase());
       if (basic) {
         fullData = {
           ...basic,
-          fisicas: (db.caracteristicas_fisicas || []).find(cf => cf.infrator_id === infratorId),
-          enderecos: (db.enderecos_atuacao || []).filter(ea => ea.infrator_id === infratorId),
+          fisicas: (db.caracteristicas_fisicas || []).find(cf => cf.infrator_id === basic.id) || (basic as any).fisicas,
+          enderecos: (db.enderecos_atuacao || []).filter(ea => ea.infrator_id === basic.id) || (basic as any).enderecos || [],
           ocorrencias: (basic as any).ocorrencias || [],
           comparsas: []
         };
@@ -601,6 +674,23 @@ export function openSuspectDossier(infratorId: string, directInfratorData?: any)
     if (!fullData) {
       alert('Infrator não encontrado no banco de dados para emissão do dossiê.');
       return;
+    }
+
+    // Ensure addresses, characteristics and occurrences are populated
+    if (!fullData.enderecos || fullData.enderecos.length === 0) {
+      fullData.enderecos = (db.enderecos_atuacao || []).filter(ea => ea.infrator_id === fullData.id);
+    }
+    if (!fullData.fisicas) {
+      fullData.fisicas = (db.caracteristicas_fisicas || []).find(cf => cf.infrator_id === fullData.id);
+    }
+    if (!fullData.ocorrencias || fullData.ocorrencias.length === 0) {
+      const ocRels = (db.infrator_ocorrencia || []).filter(io => io.infrator_id === fullData.id);
+      if (ocRels.length > 0) {
+        fullData.ocorrencias = ocRels.map(rel => {
+          const oc = (db.ocorrencias_criminais || []).find(o => o.id === rel.ocorrencia_id);
+          return oc ? { ...oc, papel: rel.papel_no_crime } : null;
+        }).filter(Boolean);
+      }
     }
 
     const htmlContent = generateSuspectDossierHtml(fullData);
@@ -642,6 +732,19 @@ export function generateOrcrimDossierHtml(orcrim: OrcrimData): string {
   const lideranca = estrutura.nivel_1_lideranca || [];
   const gerencia = estrutura.nivel_2_gerencia_tatica || estrutura['nivel_2_gerencia_tática'] || [];
   const operacionais = estrutura.nivel_3_operacionais_e_linha_de_frente || [];
+
+  const getMemberStatusTag = (m: any) => {
+    const situacao = m.situacao_atual || m.situacao_prisional || (m.status_mandado || m.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE');
+    const hasMandado = Boolean(m.status_mandado || m.status_mandado_prisao || situacao === 'FORAGIDO');
+
+    if (situacao === 'PRESO') {
+      return `<span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 3px; font-weight: 800; font-size: 7pt; border: 1px solid #f87171;">PRESO</span>`;
+    }
+    if (situacao === 'FORAGIDO' || hasMandado) {
+      return `<span style="background: #fee2e2; color: #b91c1c; padding: 2px 6px; border-radius: 3px; font-weight: 800; font-size: 7pt; border: 1px solid #ef4444;">⚠️ FORAGIDO (MANDADO ATIVO)</span>`;
+    }
+    return `<span style="background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 3px; font-weight: 800; font-size: 7pt; border: 1px solid #86efac;">EM LIBERDADE</span>`;
+  };
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -705,8 +808,8 @@ export function generateOrcrimDossierHtml(orcrim: OrcrimData): string {
             <div style="font-weight: 800; font-size: 9.5pt; color: #991b1b;">"${m.vulgo}"</div>
             <div style="font-size: 8pt; font-weight: 700; color: #0f172a;">${m.nome_completo}</div>
             <div style="font-size: 7.5pt; color: #64748b;">Função: <strong>${m.funcao_especifica}</strong></div>
-            <div style="font-size: 7pt; margin-top: 2px;">
-              <span style="background: ${m.situacao_prisional === 'PRESO' ? '#fee2e2; color: #991b1b' : '#dcfce7; color: #166534'}; padding: 1px 4px; border-radius: 2px; font-weight: bold;">${m.situacao_prisional || 'EM LIBERDADE'}</span>
+            <div style="margin-top: 4px;">
+              ${getMemberStatusTag(m)}
             </div>
           </div>
         </div>
@@ -726,8 +829,8 @@ export function generateOrcrimDossierHtml(orcrim: OrcrimData): string {
             <div style="font-weight: 800; font-size: 9pt; color: #c2410c;">"${m.vulgo}"</div>
             <div style="font-size: 8pt; font-weight: 700; color: #0f172a;">${m.nome_completo}</div>
             <div style="font-size: 7.5pt; color: #64748b;">Função: <strong>${m.funcao_especifica}</strong></div>
-            <div style="font-size: 7pt; margin-top: 2px;">
-              <span style="background: ${m.situacao_prisional === 'PRESO' ? '#fee2e2; color: #991b1b' : '#dcfce7; color: #166534'}; padding: 1px 4px; border-radius: 2px; font-weight: bold;">${m.situacao_prisional || 'EM LIBERDADE'}</span>
+            <div style="margin-top: 4px;">
+              ${getMemberStatusTag(m)}
             </div>
           </div>
         </div>
@@ -747,8 +850,8 @@ export function generateOrcrimDossierHtml(orcrim: OrcrimData): string {
             <div style="font-weight: 800; font-size: 9pt; color: #1d4ed8;">"${m.vulgo}"</div>
             <div style="font-size: 8pt; font-weight: 700; color: #0f172a;">${m.nome_completo}</div>
             <div style="font-size: 7.5pt; color: #64748b;">Função: <strong>${m.funcao_especifica}</strong></div>
-            <div style="font-size: 7pt; margin-top: 2px;">
-              <span style="background: ${m.situacao_prisional === 'PRESO' ? '#fee2e2; color: #991b1b' : '#dcfce7; color: #166534'}; padding: 1px 4px; border-radius: 2px; font-weight: bold;">${m.situacao_prisional || 'EM LIBERDADE'}</span>
+            <div style="margin-top: 4px;">
+              ${getMemberStatusTag(m)}
             </div>
           </div>
         </div>
@@ -776,3 +879,4 @@ export function openOrcrimDossier(orcrimData: OrcrimData) {
     alert(`Erro ao emitir dossiê: ${err.message || 'Falha na emissão'}`);
   }
 }
+

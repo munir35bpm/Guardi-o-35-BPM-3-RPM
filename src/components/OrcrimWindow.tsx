@@ -31,7 +31,8 @@ import {
 } from 'lucide-react';
 import { OrcrimData, MembroEstruturaOrcrim, Infrator, SituacaoPrisional } from '../types';
 import { db } from '../backend/db';
-import { openOrcrimDossier } from '../utils/dossierGenerator';
+import { openOrcrimDossier, openSuspectDossier } from '../utils/dossierGenerator';
+import { FileDown } from 'lucide-react';
 
 interface OrcrimWindowProps {
   onSelectSuspect?: (infratorId: string) => void;
@@ -1470,6 +1471,19 @@ const MemberCard: React.FC<MemberCardProps> = ({ membro, level, onSelectSuspect,
         </span>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              openSuspectDossier(membro.infrator_id);
+            }}
+            className="text-xs font-bold text-amber-900 hover:text-black bg-amber-400 hover:bg-amber-300 border border-amber-500/80 flex items-center gap-1 px-2 py-1 rounded-md transition-all cursor-pointer shadow-2xs"
+            title="Extrair Ficha do Infrator em PDF"
+          >
+            <FileDown className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>PDF</span>
+          </button>
+
           <button
             type="button"
             onClick={(e) => {

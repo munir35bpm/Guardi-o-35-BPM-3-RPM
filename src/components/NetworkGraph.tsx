@@ -526,7 +526,7 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
               {selectedNode.type === 'suspect' && (
                 <button
                   type="button"
-                  onClick={() => openSuspectDossier(selectedNode.id)}
+                  onClick={() => openSuspectDossier(selectedNode.id, selectedNode)}
                   className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-xs flex items-center justify-center gap-1.5 transition uppercase shadow-lg shadow-amber-500/20 cursor-pointer"
                 >
                   <FileDown className="w-4 h-4 stroke-[2.5]" /> Extrair Ficha do Infrator em PDF

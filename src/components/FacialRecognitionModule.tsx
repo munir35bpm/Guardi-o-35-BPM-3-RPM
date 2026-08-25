@@ -26,6 +26,8 @@ import {
   SuspectWithDetails
 } from '../types';
 import { db } from '../backend/db';
+import { openSuspectDossier } from '../utils/dossierGenerator';
+import { FileDown } from 'lucide-react';
 
 interface FacialRecognitionModuleProps {
   onSelectSuspectForDetail?: (suspect: SuspectWithDetails) => void;
@@ -652,6 +654,17 @@ export default function FacialRecognitionModule({
 
                       {/* Action Buttons */}
                       <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-zinc-800/80">
+                        {suspectData && (
+                          <button
+                            type="button"
+                            onClick={() => openSuspectDossier(suspectData.id, suspectData)}
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-black text-xs rounded transition flex items-center gap-1.5 font-mono cursor-pointer shadow-sm shadow-amber-500/20"
+                            title="Extrair Ficha do Infrator em PDF"
+                          >
+                            <FileDown className="w-3.5 h-3.5 stroke-[2.5]" /> Extrair PDF
+                          </button>
+                        )}
+
                         {suspectData && onSelectSuspectForDetail && (
                           <button
                             onClick={() => onSelectSuspectForDetail(suspectData)}

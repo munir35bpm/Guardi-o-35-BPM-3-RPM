@@ -2321,7 +2321,7 @@ export default function App() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => openSuspectDossier(item.infrator_id)}
+                                onClick={() => openSuspectDossier(item.infrator_id, suspects.find(s => s.id === item.infrator_id) || item.suspect_details)}
                                 className="px-3 py-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-[10px] rounded transition uppercase flex items-center gap-1 cursor-pointer shadow-sm shadow-amber-500/20"
                                 title="Extrair Ficha do Infrator em PDF com Foto, Dados Pessoais e B.O.s"
                               >
