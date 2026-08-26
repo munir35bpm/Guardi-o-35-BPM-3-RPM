@@ -99,6 +99,8 @@ app.post('/api/infratores', (req, res) => {
       foto_url,
       gangue_faccao,
       status_mandado_prisao,
+      situacao_atual,
+      situacao_prisional,
       periculosidade,
       // Physical characteristics
       altura_estimada,
@@ -116,6 +118,7 @@ app.post('/api/infratores', (req, res) => {
       return;
     }
 
+    const situacaoFinal = situacao_atual || situacao_prisional || (status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE');
     const id = `inf-${Date.now()}`;
     const newInfrator = {
       id,
@@ -125,7 +128,9 @@ app.post('/api/infratores', (req, res) => {
       cpf: cpf || '000.000.000-00',
       foto_url: foto_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop',
       gangue_faccao: gangue_faccao || 'Nenhuma',
-      status_mandado_prisao: !!status_mandado_prisao,
+      status_mandado_prisao: !!status_mandado_prisao || situacaoFinal === 'FORAGIDO',
+      situacao_atual: situacaoFinal,
+      situacao_prisional: situacaoFinal,
       periculosidade: periculosidade || 'Média',
       created_at: new Date().toISOString()
     };
@@ -309,9 +314,11 @@ app.put('/api/infratores/:id', (req, res) => {
 
     const {
       nome_completo, vulgo, data_nascimento, cpf, foto_url, gangue_faccao,
-      status_mandado_prisao, periculosidade,
+      status_mandado_prisao, situacao_atual, situacao_prisional, periculosidade,
       altura_estimada, cor_pele, compleicao, tatuagens_detalhes, cicatrizes, sinais_particulares
     } = req.body;
+
+    const situacaoFinal = situacao_atual || situacao_prisional;
 
     db.infratores[infratorIndex] = {
       ...db.infratores[infratorIndex],
@@ -321,7 +328,9 @@ app.put('/api/infratores/:id', (req, res) => {
       cpf: cpf || db.infratores[infratorIndex].cpf,
       foto_url: foto_url || db.infratores[infratorIndex].foto_url,
       gangue_faccao: gangue_faccao !== undefined ? gangue_faccao : db.infratores[infratorIndex].gangue_faccao,
-      status_mandado_prisao: status_mandado_prisao !== undefined ? !!status_mandado_prisao : db.infratores[infratorIndex].status_mandado_prisao,
+      status_mandado_prisao: status_mandado_prisao !== undefined ? !!status_mandado_prisao : (situacaoFinal === 'FORAGIDO' ? true : db.infratores[infratorIndex].status_mandado_prisao),
+      situacao_atual: situacaoFinal || db.infratores[infratorIndex].situacao_atual,
+      situacao_prisional: situacaoFinal || db.infratores[infratorIndex].situacao_prisional,
       periculosidade: periculosidade || db.infratores[infratorIndex].periculosidade,
     };
 

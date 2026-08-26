@@ -169,6 +169,7 @@ export default function App() {
     cpf: '',
     foto_url: '',
     gangue_faccao: '',
+    situacao_atual: 'EM_LIBERDADE' as 'EM_LIBERDADE' | 'FORAGIDO' | 'PRESO' | 'MORTO',
     status_mandado_prisao: false,
     periculosidade: 'Média',
     altura_estimada: '1.75',
@@ -1011,6 +1012,55 @@ export default function App() {
     setSuspectToDelete({ id, nome, vulgo });
   };
 
+  // Quick update suspect status/situation
+  const handleUpdateSelectedSuspectSituacao = async (newSituacao: 'EM_LIBERDADE' | 'FORAGIDO' | 'PRESO' | 'MORTO') => {
+    if (!selectedSuspectDetail) return;
+    const isMandado = newSituacao === 'FORAGIDO' ? true : (newSituacao === 'MORTO' || newSituacao === 'PRESO' ? false : selectedSuspectDetail.status_mandado_prisao);
+    
+    const updatedData = {
+      ...selectedSuspectDetail,
+      situacao_atual: newSituacao,
+      situacao_prisional: newSituacao,
+      status_mandado_prisao: isMandado
+    };
+
+    // Optimistic update in UI
+    setSelectedSuspectDetail(updatedData as any);
+    setSuspects(prev => prev.map(s => s.id === selectedSuspectDetail.id ? { 
+      ...s, 
+      situacao_atual: newSituacao, 
+      situacao_prisional: newSituacao, 
+      status_mandado_prisao: isMandado 
+    } : s));
+
+    try {
+      try {
+        await fetch(`/api/infratores/${selectedSuspectDetail.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedData),
+        });
+      } catch (e) {
+        console.warn('API error updating situation, using local DB', e);
+      }
+
+      db.updateInfrator(selectedSuspectDetail.id, updatedData);
+      await persistSuspectToFirebase(updatedData);
+      fetchTelemetry();
+      
+      const sitLabels: Record<string, string> = {
+        EM_LIBERDADE: 'EM LIBERDADE',
+        FORAGIDO: 'FORAGIDO DA JUSTIÇA',
+        PRESO: 'PRESO / SISTEMA PENITENCIÁRIO',
+        MORTO: 'MORTO / FALECIDO'
+      };
+      setToastMessage(`Situação de "${selectedSuspectDetail.nome_completo}" atualizada para: ${sitLabels[newSituacao] || newSituacao}`);
+      setTimeout(() => setToastMessage(null), 3500);
+    } catch (err) {
+      console.error('Error updating suspect status:', err);
+    }
+  };
+
   const handleConfirmDeleteSuspect = async () => {
     if (!suspectToDelete) return;
     const { id, nome, vulgo } = suspectToDelete;
@@ -1142,6 +1192,7 @@ export default function App() {
         cpf: '',
         foto_url: '',
         gangue_faccao: '',
+        situacao_atual: 'EM_LIBERDADE',
         status_mandado_prisao: false,
         periculosidade: 'Média',
         altura_estimada: '1.75',
@@ -2523,6 +2574,28 @@ export default function App() {
                           />
                         </div>
                         <div>
+                          <label className="text-[9px] uppercase text-amber-400 font-bold block mb-1">
+                            Situação Prisional / Status Jurídico *
+                          </label>
+                          <select
+                            value={newSuspectForm.situacao_atual || 'EM_LIBERDADE'}
+                            onChange={(e) => {
+                              const val = e.target.value as 'EM_LIBERDADE' | 'FORAGIDO' | 'PRESO' | 'MORTO';
+                              setNewSuspectForm({ 
+                                ...newSuspectForm, 
+                                situacao_atual: val,
+                                status_mandado_prisao: val === 'FORAGIDO' ? true : (val === 'MORTO' || val === 'PRESO' ? false : newSuspectForm.status_mandado_prisao),
+                              });
+                            }}
+                            className="w-full bg-[#0A0A0B] border border-amber-500/60 rounded p-2 text-xs focus:outline-none focus:border-amber-400 text-amber-300 font-bold"
+                          >
+                            <option value="EM_LIBERDADE">🟢 EM LIBERDADE (Na rua / Monitorado)</option>
+                            <option value="FORAGIDO">🔴 FORAGIDO DA JUSTIÇA (Mandado Ativo)</option>
+                            <option value="PRESO">🔒 PRESO / SISTEMA PENITENCIÁRIO</option>
+                            <option value="MORTO">💀 MORTO / FALECIDO (Óbito Confirmado)</option>
+                          </select>
+                        </div>
+                        <div>
                           <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Grau de Perigo</label>
                           <select
                             value={newSuspectForm.periculosidade}
@@ -2540,7 +2613,14 @@ export default function App() {
                             <input
                               type="checkbox"
                               checked={newSuspectForm.status_mandado_prisao}
-                              onChange={(e) => setNewSuspectForm({ ...newSuspectForm, status_mandado_prisao: e.target.checked })}
+                              onChange={(e) => {
+                                const isChecked = e.target.checked;
+                                setNewSuspectForm({ 
+                                  ...newSuspectForm, 
+                                  status_mandado_prisao: isChecked,
+                                  situacao_atual: isChecked ? 'FORAGIDO' : (newSuspectForm.situacao_atual === 'FORAGIDO' ? 'EM_LIBERDADE' : newSuspectForm.situacao_atual),
+                                });
+                              }}
                               className="mr-2 accent-amber-500"
                             /> Mandado de Prisão Ativo?
                           </label>
@@ -3576,12 +3656,14 @@ export default function App() {
                           <th className="p-2.5">Vulgo</th>
                           <th className="p-2.5">Facção</th>
                           <th className="p-2.5">Perigo</th>
-                          <th className="p-2.5">Mandado</th>
+                          <th className="p-2.5">Situação / Status</th>
                           <th className="p-2.5 text-right">Ações</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-850 bg-[#0F0F12]/60">
-                        {filteredSuspects.map((s) => (
+                        {filteredSuspects.map((s) => {
+                          const situacao = s.situacao_atual || (s.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE');
+                          return (
                           <tr key={s.id} className="hover:bg-[#1A1A22] transition">
                             <td className="p-2.5">
                               <img src={s.foto_url} alt={s.vulgo} className="w-8 h-8 rounded object-cover border border-zinc-700" />
@@ -3602,9 +3684,24 @@ export default function App() {
                               </span>
                             </td>
                             <td className="p-2.5">
-                              <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${s.status_mandado_prisao ? 'bg-red-500/20 text-red-400 border border-red-500/40' : 'bg-zinc-800 text-zinc-500'}`}>
-                                {s.status_mandado_prisao ? 'ATIVO' : 'NENHUM'}
-                              </span>
+                              {situacao === 'MORTO' ? (
+                                <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-zinc-800 text-zinc-300 border border-zinc-700">
+                                  💀 MORTO
+                                </span>
+                              ) : situacao === 'PRESO' ? (
+                                <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-950/70 text-red-400 border border-red-800/70">
+                                  🔒 PRESO
+                                </span>
+                              ) : (situacao === 'FORAGIDO' || s.status_mandado_prisao) ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/50">
+                                  <AlertTriangle className="w-2.5 h-2.5 text-amber-400 animate-pulse" />
+                                  FORAGIDO
+                                </span>
+                              ) : (
+                                <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950/40 text-emerald-400 border border-emerald-800/40">
+                                  EM LIBERDADE
+                                </span>
+                              )}
                             </td>
                             <td className="p-2.5 text-right space-x-1.5 whitespace-nowrap">
                               <button
@@ -3633,7 +3730,7 @@ export default function App() {
                               </button>
                             </td>
                           </tr>
-                        ))}
+                        )})}
                       </tbody>
                     </table>
                   </div>
@@ -3683,6 +3780,27 @@ export default function App() {
                             <span className="text-[9px] text-zinc-500 block uppercase font-bold">Periculosidade</span>
                             <span className="text-red-400 font-bold">{selectedSuspectDetail.periculosidade}</span>
                           </div>
+                        </div>
+
+                        {/* Interactive Status Changer / Situação Prisional */}
+                        <div className="bg-[#121216] p-2.5 rounded border border-amber-500/40 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] text-amber-400 uppercase font-bold flex items-center gap-1">
+                              <ShieldAlert className="w-3 h-3 text-amber-400" />
+                              Situação Prisional / Status
+                            </span>
+                            <span className="text-[8px] text-zinc-500 font-mono">Alteração Imediata</span>
+                          </div>
+                          <select
+                            value={selectedSuspectDetail.situacao_atual || (selectedSuspectDetail.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE')}
+                            onChange={(e) => handleUpdateSelectedSuspectSituacao(e.target.value as any)}
+                            className="w-full bg-[#0A0A0B] border border-amber-500/60 rounded p-1.5 text-xs text-amber-300 font-bold focus:outline-none focus:border-amber-400 cursor-pointer"
+                          >
+                            <option value="EM_LIBERDADE">🟢 EM LIBERDADE (Na rua / Monitorado)</option>
+                            <option value="FORAGIDO">🔴 FORAGIDO DA JUSTIÇA (Mandado Ativo)</option>
+                            <option value="PRESO">🔒 PRESO / SISTEMA PENITENCIÁRIO</option>
+                            <option value="MORTO">💀 MORTO / FALECIDO (Óbito Confirmado)</option>
+                          </select>
                         </div>
                       </div>
 

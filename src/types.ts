@@ -1,3 +1,5 @@
+export type SituacaoInfrator = 'EM_LIBERDADE' | 'FORAGIDO' | 'PRESO' | 'MORTO';
+
 export interface Infrator {
   id: string;
   nome_completo: string;
@@ -7,6 +9,8 @@ export interface Infrator {
   foto_url: string;
   gangue_faccao: string;
   status_mandado_prisao: boolean;
+  situacao_atual?: SituacaoInfrator | string;
+  situacao_prisional?: SituacaoInfrator | string;
   periculosidade: 'Baixa' | 'Média' | 'Alta' | 'Extrema';
   created_at: string;
 }
@@ -136,7 +140,7 @@ export interface IntelligenceAnalysisResult {
   alerta_reincidencia_perimetro: AlertaReincidenciaPerimetro;
 }
 
-export type SituacaoPrisional = 'PRESO' | 'FORAGIDO' | 'EM_LIBERDADE';
+export type SituacaoPrisional = 'PRESO' | 'FORAGIDO' | 'EM_LIBERDADE' | 'MORTO';
 
 export interface MembroEstruturaOrcrim {
   infrator_id: string;

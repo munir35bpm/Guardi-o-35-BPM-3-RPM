@@ -19,25 +19,23 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
   }
 
   // Determine Prison Situation & Warrant accurately
-  const isForagido = Boolean(
-    infratorFull.situacao_atual === 'FORAGIDO' ||
-    infratorFull.situacao_prisional === 'FORAGIDO' ||
+  const rawSituacao = String(infratorFull.situacao_atual || infratorFull.situacao_prisional || '').toUpperCase().trim();
+  const isMorto = rawSituacao === 'MORTO' || rawSituacao === 'FALECIDO' || rawSituacao === 'ÓBITO' || rawSituacao === 'OBITO';
+  const isPreso = !isMorto && (rawSituacao === 'PRESO' || rawSituacao === 'RECOLHIDO' || rawSituacao === 'SISTEMA_PRISIONAL');
+  const isForagido = !isMorto && !isPreso && (
+    rawSituacao === 'FORAGIDO' ||
     infratorFull.status_mandado_prisao === true ||
     infratorFull.status_mandado_prisao === 'true' ||
     infratorFull.status_mandado === true ||
     infratorFull.mandado === true
   );
 
-  const isPreso = Boolean(
-    !isForagido && (
-      infratorFull.situacao_atual === 'PRESO' ||
-      infratorFull.situacao_prisional === 'PRESO'
-    )
-  );
-
   let situacaoPrisionalTexto = 'EM LIBERDADE / MONITORADO';
   let situacaoPrisionalClass = 'status-liberdade';
-  if (isForagido) {
+  if (isMorto) {
+    situacaoPrisionalTexto = 'FALECIDO / ÓBITO CONFIRMADO';
+    situacaoPrisionalClass = 'status-morto';
+  } else if (isForagido) {
     situacaoPrisionalTexto = 'FORAGIDO DA JUSTIÇA (MANDADO EM ABERTO)';
     situacaoPrisionalClass = 'status-foragido';
   } else if (isPreso) {
@@ -45,7 +43,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
     situacaoPrisionalClass = 'status-preso';
   }
 
-  const hasMandadoAtivo = isForagido || Boolean(infratorFull.status_mandado_prisao || infratorFull.status_mandado || infratorFull.mandado);
+  const hasMandadoAtivo = !isMorto && (isForagido || Boolean(infratorFull.status_mandado_prisao || infratorFull.status_mandado || infratorFull.mandado));
 
   const occurrences = infratorFull.ocorrencias || [];
   const addresses = infratorFull.enderecos || [];
@@ -271,6 +269,16 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       font-weight: 800;
       border: 1px solid #86efac;
     }
+    .status-morto {
+      color: #334155;
+      background: #e2e8f0;
+      padding: 2px 6px;
+      border-radius: 3px;
+      display: inline-block;
+      font-size: 8.5pt;
+      font-weight: 800;
+      border: 1px solid #94a3b8;
+    }
     .section-title {
       background: #0f172a;
       color: #ffffff;
@@ -471,8 +479,8 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
         <div class="detail-item" style="grid-column: span 2;">
           <div class="detail-label">Status de Mandado de Prisão (BNMP / CNJ)</div>
           <div class="detail-value">
-            <span class="${hasMandadoAtivo ? 'status-foragido' : 'status-liberdade'}">
-              ${hasMandadoAtivo ? '⚠️ MANDADO DE PRISÃO ATIVO (PENDENTE DE CUMPRIMENTO)' : 'NENHUM MANDADO PENDENTE'}
+            <span class="${isMorto ? 'status-morto' : hasMandadoAtivo ? 'status-foragido' : 'status-liberdade'}">
+              ${isMorto ? 'PUNIBILIDADE EXTINTA (ÓBITO CONFIRMADO)' : hasMandadoAtivo ? '⚠️ MANDADO DE PRISÃO ATIVO (PENDENTE DE CUMPRIMENTO)' : 'NENHUM MANDADO PENDENTE'}
             </span>
           </div>
         </div>
@@ -734,13 +742,18 @@ export function generateOrcrimDossierHtml(orcrim: OrcrimData): string {
   const operacionais = estrutura.nivel_3_operacionais_e_linha_de_frente || [];
 
   const getMemberStatusTag = (m: any) => {
-    const situacao = m.situacao_atual || m.situacao_prisional || (m.status_mandado || m.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE');
-    const hasMandado = Boolean(m.status_mandado || m.status_mandado_prisao || situacao === 'FORAGIDO');
+    const rawSituacao = String(m.situacao_atual || m.situacao_prisional || (m.status_mandado || m.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE')).toUpperCase().trim();
+    const isMorto = rawSituacao === 'MORTO' || rawSituacao === 'FALECIDO' || rawSituacao === 'ÓBITO' || rawSituacao === 'OBITO';
+    const isPreso = !isMorto && (rawSituacao === 'PRESO' || rawSituacao === 'RECOLHIDO');
+    const isForagido = !isMorto && !isPreso && (rawSituacao === 'FORAGIDO' || Boolean(m.status_mandado || m.status_mandado_prisao));
 
-    if (situacao === 'PRESO') {
+    if (isMorto) {
+      return `<span style="background: #e2e8f0; color: #334155; padding: 2px 6px; border-radius: 3px; font-weight: 800; font-size: 7pt; border: 1px solid #94a3b8;">💀 MORTO / FALECIDO</span>`;
+    }
+    if (isPreso) {
       return `<span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 3px; font-weight: 800; font-size: 7pt; border: 1px solid #f87171;">PRESO</span>`;
     }
-    if (situacao === 'FORAGIDO' || hasMandado) {
+    if (isForagido) {
       return `<span style="background: #fee2e2; color: #b91c1c; padding: 2px 6px; border-radius: 3px; font-weight: 800; font-size: 7pt; border: 1px solid #ef4444;">⚠️ FORAGIDO (MANDADO ATIVO)</span>`;
     }
     return `<span style="background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 3px; font-weight: 800; font-size: 7pt; border: 1px solid #86efac;">EM LIBERDADE</span>`;

@@ -11,6 +11,8 @@ export interface Infrator {
   foto_url: string;
   gangue_faccao: string;
   status_mandado_prisao: boolean;
+  situacao_atual?: string;
+  situacao_prisional?: string;
   periculosidade: 'Baixa' | 'Média' | 'Alta' | 'Extrema';
   created_at: string;
 }
@@ -158,6 +160,9 @@ class CrimIntelDatabase {
 
   public addInfrator(data: any): any {
     const id = data.id || `inf-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const situacao = data.situacao_atual || data.situacao_prisional || (data.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE');
+    const isMandado = !!data.status_mandado_prisao || situacao === 'FORAGIDO';
+
     const newInfrator: Infrator = {
       id,
       nome_completo: data.nome_completo,
@@ -166,7 +171,9 @@ class CrimIntelDatabase {
       cpf: data.cpf || '000.000.000-00',
       foto_url: data.foto_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop',
       gangue_faccao: data.gangue_faccao || 'Nenhuma',
-      status_mandado_prisao: !!data.status_mandado_prisao,
+      status_mandado_prisao: isMandado,
+      situacao_atual: situacao,
+      situacao_prisional: situacao,
       periculosidade: data.periculosidade || 'Média',
       created_at: new Date().toISOString()
     };
@@ -338,6 +345,42 @@ class CrimIntelDatabase {
     }
 
     return true;
+  }
+
+  public updateInfrator(id: string, data: any): any {
+    const infratorIndex = this.infratores.findIndex(i => i.id === id);
+    if (infratorIndex === -1) return null;
+
+    const situacaoFinal = data.situacao_atual || data.situacao_prisional;
+
+    this.infratores[infratorIndex] = {
+      ...this.infratores[infratorIndex],
+      nome_completo: data.nome_completo || this.infratores[infratorIndex].nome_completo,
+      vulgo: data.vulgo !== undefined ? data.vulgo : this.infratores[infratorIndex].vulgo,
+      data_nascimento: data.data_nascimento || this.infratores[infratorIndex].data_nascimento,
+      cpf: data.cpf || this.infratores[infratorIndex].cpf,
+      foto_url: data.foto_url || this.infratores[infratorIndex].foto_url,
+      gangue_faccao: data.gangue_faccao !== undefined ? data.gangue_faccao : this.infratores[infratorIndex].gangue_faccao,
+      status_mandado_prisao: data.status_mandado_prisao !== undefined ? !!data.status_mandado_prisao : (situacaoFinal === 'FORAGIDO' ? true : this.infratores[infratorIndex].status_mandado_prisao),
+      situacao_atual: situacaoFinal || this.infratores[infratorIndex].situacao_atual,
+      situacao_prisional: situacaoFinal || this.infratores[infratorIndex].situacao_prisional,
+      periculosidade: data.periculosidade || this.infratores[infratorIndex].periculosidade,
+    };
+
+    const fisIndex = this.caracteristicas_fisicas.findIndex(cf => cf.infrator_id === id);
+    if (fisIndex !== -1 && data.fisicas) {
+      this.caracteristicas_fisicas[fisIndex] = {
+        infrator_id: id,
+        altura_estimada: data.fisicas.altura_estimada !== undefined ? Number(data.fisicas.altura_estimada) : this.caracteristicas_fisicas[fisIndex].altura_estimada,
+        cor_pele: data.fisicas.cor_pele || this.caracteristicas_fisicas[fisIndex].cor_pele,
+        compleicao: data.fisicas.compleicao || this.caracteristicas_fisicas[fisIndex].compleicao,
+        tatuagens_detalhes: data.fisicas.tatuagens_detalhes !== undefined ? data.fisicas.tatuagens_detalhes : this.caracteristicas_fisicas[fisIndex].tatuagens_detalhes,
+        cicatrizes: data.fisicas.cicatrizes !== undefined ? data.fisicas.cicatrizes : this.caracteristicas_fisicas[fisIndex].cicatrizes,
+        sinais_particulares: data.fisicas.sinais_particulares !== undefined ? data.fisicas.sinais_particulares : this.caracteristicas_fisicas[fisIndex].sinais_particulares,
+      };
+    }
+
+    return this.getInfratorFull(id);
   }
 
   // ORCRIM Organograms Repository

@@ -124,6 +124,8 @@ export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails):
       foto_url: suspectFull.foto_url || '',
       gangue_faccao: suspectFull.gangue_faccao || 'Sem facção informada',
       status_mandado_prisao: !!suspectFull.status_mandado_prisao,
+      situacao_atual: suspectFull.situacao_atual || suspectFull.situacao_prisional || (suspectFull.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE'),
+      situacao_prisional: suspectFull.situacao_atual || suspectFull.situacao_prisional || (suspectFull.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE'),
       periculosidade: suspectFull.periculosidade || 'Média',
       created_at: suspectFull.created_at || new Date().toISOString(),
     };

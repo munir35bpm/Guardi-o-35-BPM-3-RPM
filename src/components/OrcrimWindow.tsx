@@ -1114,6 +1114,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
                   <option value="EM_LIBERDADE" className="text-slate-900 bg-white font-semibold">EM LIBERDADE (Atuante na rua)</option>
                   <option value="FORAGIDO" className="text-slate-900 bg-white font-semibold">FORAGIDO (Mandado de prisão pendente)</option>
                   <option value="PRESO" className="text-slate-900 bg-white font-semibold">PRESO (Custodiado no sistema penitenciário)</option>
+                  <option value="MORTO" className="text-slate-900 bg-white font-semibold">MORTO / FALECIDO (Óbito confirmado)</option>
                 </select>
               </div>
             </div>
@@ -1375,6 +1376,13 @@ interface MemberCardProps {
 
 const MemberCard: React.FC<MemberCardProps> = ({ membro, level, onSelectSuspect, onInitiateDelete }) => {
   const getStatusBadge = (status: SituacaoPrisional, mandado?: boolean) => {
+    if (status === 'MORTO') {
+      return (
+        <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide bg-slate-200 text-slate-800 border border-slate-300 rounded flex items-center gap-1">
+          💀 FALECIDO
+        </span>
+      );
+    }
     if (status === 'PRESO') {
       return (
         <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide bg-red-100 text-red-800 border border-red-200 rounded">
