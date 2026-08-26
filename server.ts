@@ -4,6 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { db } from './src/backend/db.js';
 import { analyzeCrimeIntelligenceLocally } from './src/utils/intelligenceEngine.js';
+import { analyzeFacialRecognitionLocally } from './src/utils/facialForensicsEngine.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -931,20 +932,22 @@ Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibili
 // ==========================================
 // MODULE A3: AI FACIAL RECOGNITION & BIOMETRIC MATCHING
 // ==========================================
-app.post('/api/ai/facial-recognition-match', async (req, res) => {
+app.post(['/api/ai/facial-recognition-match', '/api/ai/facial-recognition-match/'], async (req, res) => {
+  const { image, additional_context } = req.body || {};
+
+  if (!image) {
+    res.status(400).json({ error: 'A imagem para reconhecimento facial é obrigatória.' });
+    return;
+  }
+
   try {
-    const { image, additional_context } = req.body;
-
-    if (!image) {
-      res.status(400).json({ error: 'A imagem para reconhecimento facial é obrigatória.' });
-      return;
-    }
-
     let ai;
     try {
       ai = getGeminiClient();
     } catch (e: any) {
-      res.status(400).json({ error: e.message });
+      console.warn('Gemini client not initialized, using local forensic facial engine:', e.message);
+      const fallbackResult = analyzeFacialRecognitionLocally(image, additional_context || '');
+      res.json(fallbackResult);
       return;
     }
 
@@ -1013,7 +1016,9 @@ Execute a análise biométrica da foto e confronte os padrões faciais contra ca
             data: base64Data
           }
         },
-        userPrompt
+        {
+          text: userPrompt
+        }
       ],
       config: {
         systemInstruction: systemPrompt,
@@ -1087,7 +1092,7 @@ Execute a análise biométrica da foto e confronte os padrões faciais contra ca
       }
     });
 
-    const parsedResult = JSON.parse(response.text || '{}');
+    const parsedResult = safeJsonParse(response.text) || JSON.parse(response.text || '{}');
 
     // Enrich candidate results with full suspect details (addresses, occurrences, physical features, gang, etc.)
     if (Array.isArray(parsedResult.candidatos_compativeis)) {
@@ -1102,8 +1107,13 @@ Execute a análise biométrica da foto e confronte os padrões faciais contra ca
 
     res.json(parsedResult);
   } catch (error: any) {
-    console.error('Error in facial-recognition-match:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Error in facial-recognition-match, switching to local forensic engine:', error);
+    try {
+      const fallbackResult = analyzeFacialRecognitionLocally(image, additional_context || '');
+      res.json(fallbackResult);
+    } catch (fbErr: any) {
+      res.status(500).json({ error: error.message || 'Falha ao processar biometria facial.' });
+    }
   }
 });
 
