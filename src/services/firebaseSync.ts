@@ -201,6 +201,17 @@ export async function persistOccurrenceToFirebase(occurrence: OcorrenciaCriminal
 }
 
 /**
+ * Removes an occurrence from Firestore.
+ */
+export async function deleteOccurrenceFromFirebase(occurrenceId: string): Promise<void> {
+  try {
+    await removeOcorrencia(occurrenceId);
+  } catch (err) {
+    console.error('Erro ao excluir ocorrência do Firestore:', err);
+  }
+}
+
+/**
  * Saves gang areas to Firestore.
  */
 export async function persistGangAreasToFirebase(gangAreas: GangAreaZone[], replaceAll = false): Promise<void> {

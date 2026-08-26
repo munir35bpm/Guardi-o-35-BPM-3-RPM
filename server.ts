@@ -438,6 +438,20 @@ app.post('/api/ocorrencias', (req, res) => {
   }
 });
 
+app.delete('/api/ocorrencias/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const deleted = db.deleteOcorrencia(id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Ocorrência (B.O.) não encontrada.' });
+      return;
+    }
+    res.json({ success: true, message: 'Ocorrência (B.O.) excluída com sucesso.' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // 3. Endereços de Atuação (Operational Addresses) CRUD
 app.get('/api/enderecos', (req, res) => {
   try {

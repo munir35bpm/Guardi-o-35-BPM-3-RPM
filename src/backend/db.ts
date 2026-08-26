@@ -393,6 +393,10 @@ class CrimIntelDatabase {
     return true;
   }
 
+  public getInfratorOcorrenciaLinks(): InfratorOcorrencia[] {
+    return [...this.infrator_ocorrencia];
+  }
+
   public deleteInfrator(id: string): boolean {
     const index = this.infratores.findIndex(i => i.id === id);
     if (index === -1) return false;
@@ -428,6 +432,23 @@ class CrimIntelDatabase {
         }
       }
     }
+
+    return true;
+  }
+
+  public deleteOcorrencia(id: string): boolean {
+    const oc = this.ocorrencias_criminais.find(o => o.id === id || o.numero_bo === id);
+    if (!oc) return false;
+    const targetId = oc.id;
+    const targetBo = oc.numero_bo;
+
+    // Remove from occurrences table
+    this.ocorrencias_criminais = this.ocorrencias_criminais.filter(o => o.id !== targetId);
+
+    // Remove all suspect linkages to this occurrence
+    this.infrator_ocorrencia = this.infrator_ocorrencia.filter(
+      io => io.ocorrencia_id !== targetId && io.ocorrencia_id !== targetBo
+    );
 
     return true;
   }

@@ -35,6 +35,7 @@ import {
   Users,
   Copy,
   Link2,
+  Unlink,
   RotateCcw,
   Filter,
   ChevronDown,
@@ -68,6 +69,7 @@ import {
   persistAddressToFirebase,
   deleteAddressFromFirebase,
   persistOccurrenceToFirebase,
+  deleteOccurrenceFromFirebase,
 } from './services/firebaseSync';
 
 export default function App() {
@@ -286,6 +288,21 @@ export default function App() {
   // Suspect Deletion Confirmation Modal State
   const [suspectToDelete, setSuspectToDelete] = useState<{ id: string; nome: string; vulgo?: string } | null>(null);
   const [isDeletingSuspect, setIsDeletingSuspect] = useState(false);
+
+  // Occurrence (B.O.) Deletion Confirmation Modal State
+  const [boToDelete, setBoToDelete] = useState<{
+    id: string;
+    numero_bo: string;
+    tipificacao: string;
+    data_hora?: string;
+    envolvidosCount?: number;
+  } | null>(null);
+  const [isDeletingBo, setIsDeletingBo] = useState(false);
+
+  // DB Sub-Tab Selection (Suspects Grid vs B.O.s Grid)
+  const [dbSubTab, setDbSubTab] = useState<'suspects' | 'occurrences'>('suspects');
+  const [occurrenceSearchQuery, setOccurrenceSearchQuery] = useState('');
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // New Incident Form
@@ -1098,6 +1115,58 @@ export default function App() {
     }
   };
 
+  const handleInitiateDeleteBo = (
+    id: string,
+    numero_bo: string,
+    tipificacao: string,
+    data_hora?: string,
+    envolvidosCount?: number
+  ) => {
+    setBoToDelete({ id, numero_bo, tipificacao, data_hora, envolvidosCount });
+  };
+
+  const handleConfirmDeleteBo = async () => {
+    if (!boToDelete) return;
+    const { id, numero_bo, tipificacao } = boToDelete;
+    setIsDeletingBo(true);
+    try {
+      // Optimistic update of local state
+      setOccurrences((prev) => prev.filter((o) => o.id !== id && o.numero_bo !== numero_bo));
+      setTotalIncidents((prev) => Math.max(0, prev - 1));
+
+      // Remove from client-side DB
+      db.deleteOcorrencia(id);
+
+      // Remove from Firestore
+      await deleteOccurrenceFromFirebase(id);
+
+      // Call Express API endpoint
+      await fetch(`/api/ocorrencias/${id}`, {
+        method: 'DELETE',
+      }).catch(() => null);
+
+      // If suspect drawer is open, refresh full suspect info
+      if (selectedSuspectDetail) {
+        const updated = db.getInfratorFull(selectedSuspectDetail.id);
+        if (updated) {
+          setSelectedSuspectDetail(updated);
+        }
+      }
+
+      setToastMessage(`B.O. Nº ${numero_bo} (${tipificacao}) excluído com sucesso do sistema.`);
+      setTimeout(() => setToastMessage(null), 4000);
+      fetchTelemetry();
+    } catch (err) {
+      console.error('Error deleting occurrence:', err);
+      setToastMessage('B.O. excluído do banco de dados.');
+      setTimeout(() => setToastMessage(null), 4000);
+      fetchTelemetry();
+    } finally {
+      setIsDeletingBo(false);
+      setBoToDelete(null);
+    }
+  };
+
   // Create suspect submit
   const handleAddSuspectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1363,6 +1432,60 @@ export default function App() {
       s.gangue_faccao.toLowerCase().includes(suspectSearchQuery.toLowerCase()) ||
       s.cpf.includes(suspectSearchQuery)
   );
+
+  // Filter occurrences in local search
+  const filteredOccurrences = occurrences.filter((oc) => {
+    if (!occurrenceSearchQuery.trim()) return true;
+    const q = occurrenceSearchQuery.toLowerCase();
+    const boMatch = (oc.numero_bo || '').toLowerCase().includes(q);
+    const crimeMatch = (oc.tipificacao_penal || '').toLowerCase().includes(q);
+    const descMatch = (oc.descricao_fato || '').toLowerCase().includes(q);
+    const modusMatch = (oc.modus_operandi || '').toLowerCase().includes(q);
+    const armasMatch = (oc.armas_utilizadas || '').toLowerCase().includes(q);
+    const veicMatch = (oc.veiculo_utilizado || '').toLowerCase().includes(q);
+    const envMatch = (oc as any).envolvidos?.some((e: any) =>
+      (e.nome || '').toLowerCase().includes(q) || (e.vulgo || '').toLowerCase().includes(q)
+    );
+    return boMatch || crimeMatch || descMatch || modusMatch || armasMatch || veicMatch || envMatch;
+  });
+
+  // Helper to find all suspects linked to an occurrence
+  const getLinkedSuspectsForOccurrence = (oc: OcorrenciaCriminal) => {
+    const list: Array<{ id: string; nome: string; vulgo: string; papel: string }> = [];
+    const seen = new Set<string>();
+
+    const links = db.getInfratorOcorrenciaLinks().filter(
+      (l) => l.ocorrencia_id === oc.id || l.ocorrencia_id === oc.numero_bo
+    );
+    links.forEach((l) => {
+      const s = suspects.find((sp) => sp.id === l.infrator_id);
+      if (s && !seen.has(s.id)) {
+        seen.add(s.id);
+        list.push({
+          id: s.id,
+          nome: s.nome_completo,
+          vulgo: s.vulgo,
+          papel: l.papel_no_crime || 'Autor',
+        });
+      }
+    });
+
+    if ((oc as any).envolvidos && Array.isArray((oc as any).envolvidos)) {
+      (oc as any).envolvidos.forEach((env: any) => {
+        if (env.nome && !seen.has(env.nome)) {
+          seen.add(env.nome);
+          list.push({
+            id: env.id || '',
+            nome: env.nome,
+            vulgo: env.vulgo || '',
+            papel: env.papel || 'Autor',
+          });
+        }
+      });
+    }
+
+    return list;
+  };
 
   return (
     <div className="min-h-screen bg-[#0B0D12] bg-tech-grid text-[#F3EEE4] flex flex-col font-sans">
@@ -3060,6 +3183,7 @@ export default function App() {
                             onChangePapel={(papel) => setSuspectOcPapel(papel)}
                             onLinkOccurrence={handleLinkOccurrenceFromPicker}
                             onCopyOccurrence={handleCopyOccurrenceDataToForm}
+                            onDeleteOccurrence={(oc) => handleInitiateDeleteBo(oc.id, oc.numero_bo, oc.tipificacao_penal, oc.data_hora)}
                             alreadyLinkedIds={suspectOccurrencesList.map((item) => item.ocorrencia_id || item.numero_bo)}
                           />
                         )}
@@ -3622,6 +3746,46 @@ export default function App() {
                 </div>
               )}
 
+              {/* Sub-tab Navigation between Infratores and B.O.s */}
+              <div className="flex items-center gap-2 border-b border-zinc-800 pb-3">
+                <button
+                  type="button"
+                  onClick={() => setDbSubTab('suspects')}
+                  className={`px-4 py-2 text-xs font-mono font-bold rounded flex items-center gap-2 transition cursor-pointer ${
+                    dbSubTab === 'suspects'
+                      ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20'
+                      : 'bg-[#121216] text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Infratores Cadastrados</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                    dbSubTab === 'suspects' ? 'bg-black/30 text-black' : 'bg-zinc-800 text-zinc-400'
+                  }`}>
+                    {filteredSuspects.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDbSubTab('occurrences')}
+                  className={`px-4 py-2 text-xs font-mono font-bold rounded flex items-center gap-2 transition cursor-pointer ${
+                    dbSubTab === 'occurrences'
+                      ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20'
+                      : 'bg-[#121216] text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Boletins de Ocorrência (B.O.s / REDS)</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                    dbSubTab === 'occurrences' ? 'bg-black/30 text-black' : 'bg-zinc-800 text-zinc-400'
+                  }`}>
+                    {filteredOccurrences.length}
+                  </span>
+                </button>
+              </div>
+
+              {dbSubTab === 'suspects' ? (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Suspect Database list */}
                 <div className="bg-[#0F0F12] border border-zinc-800 rounded p-5 shadow-2xl lg:col-span-2 tactical-corner">
@@ -3898,6 +4062,7 @@ export default function App() {
                                 onChangePapel={(papel) => setDirectOcPapel(papel)}
                                 onLinkOccurrence={handleDirectLinkOccurrenceFromPicker}
                                 onCopyOccurrence={handleDirectCopyOccurrenceToForm}
+                                onDeleteOccurrence={(oc) => handleInitiateDeleteBo(oc.id, oc.numero_bo, oc.tipificacao_penal, oc.data_hora)}
                                 alreadyLinkedIds={(selectedSuspectDetail.ocorrencias || []).map((o: any) => o.id || o.numero_bo)}
                               />
                             )}
@@ -4090,15 +4255,23 @@ export default function App() {
                                 <div key={oc.id} className="bg-[#0A0A0B] p-2.5 rounded border border-zinc-800 text-[11px] group relative">
                                   <div className="flex items-center justify-between">
                                     <span className="font-bold text-amber-400">{oc.numero_bo}</span>
-                                    <div className="flex items-center gap-1.5">
+                                    <div className="flex items-center gap-1">
                                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${badge.bg}`}>
                                         {badge.label}
                                       </span>
                                       <button
                                         type="button"
                                         onClick={() => handleUnlinkOccurrence(oc.id)}
-                                        className="text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition cursor-pointer p-0.5"
-                                        title="Desvincular ocorrência"
+                                        className="text-zinc-500 hover:text-amber-400 opacity-80 hover:opacity-100 transition cursor-pointer p-1 rounded hover:bg-zinc-800"
+                                        title="Desvincular este B.O. apenas deste infrator"
+                                      >
+                                        <Unlink className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleInitiateDeleteBo(oc.id, oc.numero_bo, oc.tipificacao_penal, oc.data_hora)}
+                                        className="text-zinc-500 hover:text-red-400 opacity-80 hover:opacity-100 transition cursor-pointer p-1 rounded hover:bg-zinc-800"
+                                        title="Excluir este B.O. permanentemente do sistema"
                                       >
                                         <Trash2 className="w-3 h-3" />
                                       </button>
@@ -4348,6 +4521,269 @@ export default function App() {
                   )}
                 </div>
               </div>
+              ) : (
+              /* ========================================================================= */
+              /* SUB-TAB 2: GRID DE BOLETINS DE OCORRÊNCIA (B.O.s / REDS) & GESTÃO COMPLETA */
+              /* ========================================================================= */
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Occurrences Main List Table */}
+                <div className="bg-[#0F0F12] border border-zinc-800 rounded p-5 shadow-2xl lg:col-span-2 tactical-corner">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 border-b border-zinc-800 pb-3">
+                    <div>
+                      <h3 className="text-xs font-bold text-zinc-100 uppercase tracking-widest font-mono flex items-center gap-2">
+                        <FileText className="w-3.5 h-3.5 text-amber-500" />
+                        Grid Geral de Boletins de Ocorrência (B.O. / REDS)
+                      </h3>
+                      <span className="text-[10px] text-zinc-500 font-mono">
+                        {filteredOccurrences.length} registros policiais indexados
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+                      <input
+                        type="text"
+                        placeholder="Buscar por Nº B.O., crime, modus, arma, infrator..."
+                        value={occurrenceSearchQuery}
+                        onChange={(e) => setOccurrenceSearchQuery(e.target.value)}
+                        className="bg-[#0A0A0B] border border-zinc-800 rounded p-2 pl-8 text-xs font-mono focus:outline-none focus:border-amber-500 w-72 text-zinc-200"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto border border-zinc-800/80 rounded">
+                    <table className="w-full text-xs text-left text-zinc-300 font-mono">
+                      <thead className="text-[9px] uppercase bg-[#0A0A0B] border-b border-zinc-800 text-zinc-500 font-bold tracking-wider">
+                        <tr>
+                          <th className="p-2.5">Nº B.O. / Data</th>
+                          <th className="p-2.5">Tipificação Penal & Modus</th>
+                          <th className="p-2.5">Infratores Envolvidos</th>
+                          <th className="p-2.5">Armas / Veículos</th>
+                          <th className="p-2.5 text-right">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-850 bg-[#0F0F12]/60">
+                        {filteredOccurrences.length > 0 ? (
+                          filteredOccurrences.map((oc) => {
+                            const linkedSuspects = getLinkedSuspectsForOccurrence(oc);
+                            return (
+                              <tr key={oc.id} className="hover:bg-[#1A1A22] transition">
+                                <td className="p-2.5 align-top">
+                                  <div className="font-bold text-amber-400 font-mono text-xs flex items-center gap-1.5">
+                                    <span>{oc.numero_bo}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(oc.numero_bo);
+                                        setToastMessage(`Nº do B.O. ${oc.numero_bo} copiado!`);
+                                        setTimeout(() => setToastMessage(null), 2500);
+                                      }}
+                                      className="text-zinc-600 hover:text-amber-300 p-0.5 rounded cursor-pointer"
+                                      title="Copiar Número do B.O."
+                                    >
+                                      <Copy className="w-2.5 h-2.5" />
+                                    </button>
+                                  </div>
+                                  <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                                    {new Date(oc.data_hora).toLocaleString('pt-BR')}
+                                  </div>
+                                  {oc.geom_crime && (
+                                    <div className="text-[9px] text-zinc-600 font-mono mt-0.5">
+                                      📍 {Number(oc.geom_crime.lat).toFixed(4)}, {Number(oc.geom_crime.lng).toFixed(4)}
+                                    </div>
+                                  )}
+                                </td>
+
+                                <td className="p-2.5 align-top max-w-xs">
+                                  <div className="font-bold text-zinc-100 font-sans text-xs">
+                                    {oc.tipificacao_penal}
+                                  </div>
+                                  {oc.modus_operandi && (
+                                    <div className="text-[10px] text-zinc-400 mt-1 italic line-clamp-2">
+                                      {oc.modus_operandi}
+                                    </div>
+                                  )}
+                                  {oc.descricao_fato && oc.descricao_fato !== oc.modus_operandi && (
+                                    <div className="text-[9px] text-zinc-500 mt-0.5 line-clamp-1">
+                                      {oc.descricao_fato}
+                                    </div>
+                                  )}
+                                </td>
+
+                                <td className="p-2.5 align-top">
+                                  {linkedSuspects.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {linkedSuspects.map((ls, idx) => {
+                                        const badge = getPapelBadge(ls.papel);
+                                        return (
+                                          <button
+                                            key={idx}
+                                            type="button"
+                                            onClick={() => {
+                                              if (ls.id) {
+                                                setDbSubTab('suspects');
+                                                handleViewSuspectDetail(ls.id);
+                                              }
+                                            }}
+                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition ${
+                                              ls.id ? 'hover:scale-105 cursor-pointer' : 'cursor-default'
+                                            } ${badge.bg}`}
+                                            title={ls.id ? 'Clique para inspecionar a ficha do infrator' : undefined}
+                                          >
+                                            <span>{ls.nome}</span>
+                                            {ls.vulgo && <span className="opacity-80">"{ls.vulgo}"</span>}
+                                            <span className="opacity-60 text-[8px]">({ls.papel})</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] text-zinc-500 font-mono italic">
+                                      Sem infrator vinculado
+                                    </span>
+                                  )}
+                                </td>
+
+                                <td className="p-2.5 align-top">
+                                  <div className="text-[10px] text-zinc-300 font-mono">
+                                    <span className="text-zinc-500 text-[9px] uppercase font-bold">Armas: </span>
+                                    {oc.armas_utilizadas || 'Não informada'}
+                                  </div>
+                                  <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
+                                    <span className="text-zinc-500 text-[9px] uppercase font-bold">Veículo: </span>
+                                    {oc.veiculo_utilizado || 'Não informado'}
+                                  </div>
+                                </td>
+
+                                <td className="p-2.5 text-right space-x-1.5 whitespace-nowrap align-top">
+                                  {oc.geom_crime && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedCoords({
+                                          lat: Number(oc.geom_crime.lat),
+                                          lng: Number(oc.geom_crime.lng)
+                                        });
+                                        setActiveTab('map');
+                                      }}
+                                      className="px-2 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-amber-400 hover:text-amber-300 rounded text-[10px] font-bold transition inline-flex items-center gap-1 cursor-pointer"
+                                      title="Localizar e focar este B.O. no Mapa Tático"
+                                    >
+                                      <MapPin className="w-3 h-3 text-amber-500" />
+                                      <span>Mapa</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleInitiateDeleteBo(
+                                        oc.id,
+                                        oc.numero_bo,
+                                        oc.tipificacao_penal,
+                                        oc.data_hora,
+                                        linkedSuspects.length
+                                      )
+                                    }
+                                    className="px-2.5 py-1 bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-300 hover:text-white rounded text-[10px] font-bold transition inline-flex items-center gap-1 cursor-pointer shadow-sm shadow-red-950/40"
+                                    title="Excluir este Boletim de Ocorrência permanentemente"
+                                  >
+                                    <Trash2 className="w-3 h-3 stroke-[2.5]" />
+                                    <span>Excluir B.O.</span>
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={5} className="p-8 text-center text-zinc-500 font-mono text-xs italic">
+                              Nenhum Boletim de Ocorrência encontrado com os filtros atuais.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Right Side: B.O. Intelligence & Actions Panel */}
+                <div className="bg-[#0F0F12] border border-zinc-800 rounded p-5 shadow-2xl tactical-corner space-y-4">
+                  <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest border-b border-zinc-800 pb-2.5 font-mono flex items-center justify-between">
+                    <span>Inteligência de Ocorrências</span>
+                    <span className="text-[9px] text-zinc-500 font-mono">B.O. / REDS ENGINE</span>
+                  </h3>
+
+                  <div className="bg-[#0A0A0B] p-3 rounded border border-zinc-800 space-y-2 font-mono">
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500 text-xs">Total de B.O.s Cadastrados:</span>
+                      <span className="text-lg font-bold text-amber-400">{occurrences.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-zinc-850 pt-1.5">
+                      <span className="text-zinc-500 text-[10px]">Infratores Mapeados:</span>
+                      <span className="text-xs font-bold text-zinc-200">{suspects.length}</span>
+                    </div>
+                  </div>
+
+                  {/* Button to open quick B.O. registration */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingOccurrence(true);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded flex items-center justify-center gap-2 transition uppercase tracking-wider shadow-lg shadow-amber-500/20 cursor-pointer text-xs font-mono"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    Registrar Novo B.O. / Ocorrência
+                  </button>
+
+                  {/* Crime types distribution */}
+                  <div className="bg-[#0A0A0B] p-3 rounded border border-zinc-800 space-y-2 font-mono">
+                    <span className="text-[9px] text-zinc-400 block uppercase font-bold flex items-center gap-1">
+                      <Shield className="w-3.5 h-3.5 text-amber-500" />
+                      Distribuição por Natureza Delituosa
+                    </span>
+
+                    {(() => {
+                      const counts: Record<string, number> = {};
+                      occurrences.forEach((oc) => {
+                        const tip = oc.tipificacao_penal || 'Outros';
+                        counts[tip] = (counts[tip] || 0) + 1;
+                      });
+
+                      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+                      return (
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                          {sorted.map(([tip, count]) => (
+                            <div
+                              key={tip}
+                              onClick={() => setOccurrenceSearchQuery(tip)}
+                              className="flex items-center justify-between text-[11px] bg-[#121216] hover:bg-[#1A1A22] p-1.5 rounded border border-zinc-850 cursor-pointer transition"
+                              title={`Filtrar por ${tip}`}
+                            >
+                              <span className="text-zinc-300 font-sans truncate mr-2">{tip}</span>
+                              <span className="text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20 text-[10px] shrink-0">
+                                {count}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Operational instructions box */}
+                  <div className="bg-[#0A0A0B] p-3 rounded border border-zinc-800 text-[11px] text-zinc-400 font-mono space-y-1.5">
+                    <p className="text-amber-400 font-bold flex items-center gap-1 text-[10px] uppercase">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Vínculo e Exclusão Segura
+                    </p>
+                    <p className="text-[10px] text-zinc-500 leading-relaxed">
+                      Ao excluir um B.O., todos os vínculos com os infratores associados serão desfeitos e a ocorrência será removida do mapa tático e do banco em nuvem de forma permanente.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              )}
             </motion.div>
           )}
 
@@ -4415,6 +4851,68 @@ export default function App() {
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>{isDeletingSuspect ? 'Excluindo...' : 'Confirmar Exclusão'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão de B.O. / Ocorrência */}
+      {boToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-[#0F0F12] border border-red-800/80 rounded-lg p-6 max-w-md w-full shadow-2xl space-y-4 font-mono tactical-corner">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-red-950/80 border border-red-800 rounded text-red-400 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-red-400 uppercase tracking-wider">
+                  Confirmar Exclusão de B.O.
+                </h3>
+                <p className="text-xs text-zinc-300">
+                  Deseja realmente excluir o Boletim de Ocorrência <strong className="text-amber-400">{boToDelete.numero_bo}</strong>?
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-[#0A0A0B] p-3 rounded border border-zinc-800 text-[11px] text-zinc-400 space-y-2">
+              <div className="text-zinc-200">
+                <span className="text-zinc-500 font-bold uppercase text-[9px] block">Tipificação Penal:</span>
+                <span className="font-semibold text-amber-300">{boToDelete.tipificacao}</span>
+              </div>
+              {boToDelete.data_hora && (
+                <div className="text-zinc-300">
+                  <span className="text-zinc-500 font-bold uppercase text-[9px] block">Data do Fato:</span>
+                  <span>{new Date(boToDelete.data_hora).toLocaleString('pt-BR')}</span>
+                </div>
+              )}
+              <div className="bg-red-950/30 border border-red-900/40 p-2 rounded text-red-300 text-[10px] space-y-1">
+                <p className="font-bold flex items-center gap-1">
+                  <ShieldAlert className="w-3.5 h-3.5" /> AVISO OPERACIONAL:
+                </p>
+                <p>
+                  Esta ação removerá o B.O. permanentemente do sistema, desvinculando-o de todos os infratores, do mapa tático e de todas as análises de inteligência.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-850">
+              <button
+                type="button"
+                onClick={() => setBoToDelete(null)}
+                disabled={isDeletingBo}
+                className="px-4 py-2 bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 text-xs font-bold rounded cursor-pointer transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteBo}
+                disabled={isDeletingBo}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded cursor-pointer transition flex items-center gap-1.5 shadow-lg shadow-red-600/30"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingBo ? 'Excluindo B.O....' : 'Confirmar Exclusão do B.O.'}</span>
               </button>
             </div>
           </div>

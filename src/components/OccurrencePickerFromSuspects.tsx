@@ -13,7 +13,8 @@ import {
   ChevronUp,
   Sparkles,
   Info,
-  UserCheck
+  UserCheck,
+  Trash2
 } from 'lucide-react';
 import { OcorrenciaCriminal, SuspectWithDetails } from '../types';
 import { db } from '../backend/db';
@@ -27,6 +28,7 @@ interface OccurrencePickerFromSuspectsProps {
   onChangePapel: (papel: string) => void;
   onLinkOccurrence: (occurrence: OcorrenciaCriminal, papel: string) => void;
   onCopyOccurrence: (occurrence: OcorrenciaCriminal) => void;
+  onDeleteOccurrence?: (occurrence: OcorrenciaCriminal) => void;
   alreadyLinkedIds?: string[];
 }
 
@@ -39,6 +41,7 @@ export const OccurrencePickerFromSuspects: React.FC<OccurrencePickerFromSuspects
   onChangePapel,
   onLinkOccurrence,
   onCopyOccurrence,
+  onDeleteOccurrence,
   alreadyLinkedIds = [],
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -400,6 +403,19 @@ export const OccurrencePickerFromSuspects: React.FC<OccurrencePickerFromSuspects
                       <Copy className="w-3 h-3 text-cyan-400" />
                       <span>Copiar Dados</span>
                     </button>
+
+                    {/* Optional Delete B.O. button */}
+                    {onDeleteOccurrence && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteOccurrence(oc)}
+                        className="px-2.5 py-1 text-[10px] font-bold rounded uppercase transition flex items-center justify-center gap-1 cursor-pointer bg-red-950/70 hover:bg-red-900 text-red-300 border border-red-800/80 w-full"
+                        title="Excluir este B.O. permanentemente do sistema"
+                      >
+                        <Trash2 className="w-3 h-3 text-red-400" />
+                        <span>Excluir B.O.</span>
+                      </button>
+                    )}
 
                     {/* Toggle expand */}
                     <button
