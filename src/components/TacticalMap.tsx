@@ -19,11 +19,44 @@ import {
   ChevronUp,
   Info,
   Check,
+  Map as MapIcon,
+  Globe,
+  Radio,
 } from 'lucide-react';
 import { db } from '../backend/db';
 import GangMapImporterModal from './GangMapImporterModal';
 import { isPointInPolygon, DEFAULT_GANG_AREAS_35BPM } from '../utils/kmlGeoJsonParser';
 import { persistGangAreasToFirebase } from '../services/firebaseSync';
+
+// Base map layer providers (100% free, no API key required)
+export type BaseMapStyle = 'tactical_dark' | 'satellite' | 'street' | 'esri_streets';
+
+const BASEMAP_CONFIGS: Record<BaseMapStyle, { name: string; url: string; attribution: string; subdomains?: string[]; maxZoom: number }> = {
+  tactical_dark: {
+    name: 'Noturno Tático (Esri Dark)',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, DeLorme, NAVTEQ | PMMG 35º BPM',
+    maxZoom: 16,
+  },
+  street: {
+    name: 'Ruas & Logradouros (OSM)',
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; OpenStreetMap contributors | PMMG 35º BPM',
+    maxZoom: 19,
+  },
+  satellite: {
+    name: 'Satélite / Ortofoto (Esri)',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri &mdash; Maxar, Earthstar Geographics | PMMG 35º BPM',
+    maxZoom: 19,
+  },
+  esri_streets: {
+    name: 'Topográfico / Vias (Esri)',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, HERE, Garmin | PMMG 35º BPM',
+    maxZoom: 19,
+  },
+};
 
 interface TacticalMapProps {
   selectedCoords?: { lat: number; lng: number } | null;
@@ -39,15 +72,23 @@ export default function TacticalMap({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const clickMarkerRef = useRef<L.Marker | null>(null);
+  const activeTileLayerRef = useRef<L.TileLayer | null>(null);
+
   const [occurrences, setOccurrences] = useState<OcorrenciaCriminal[]>([]);
   const [addresses, setAddresses] = useState<EnderecoAtuacao[]>([]);
   const [gangAreas, setGangAreas] = useState<GangAreaZone[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Basemap selector state (defaults to high-contrast open street map)
+  const [baseMapStyle, setBaseMapStyle] = useState<BaseMapStyle>('street');
+  const [isBaseMapMenuOpen, setIsBaseMapMenuOpen] = useState(false);
+
   // Modals and UI Toggles
   const [isImporterOpen, setIsImporterOpen] = useState(false);
   const [isLayersPanelOpen, setIsLayersPanelOpen] = useState(false);
   const [showAllGangLayers, setShowAllGangLayers] = useState(true);
+  const [showOccurrencesLayer, setShowOccurrencesLayer] = useState(true);
+  const [showAddressesLayer, setShowAddressesLayer] = useState(true);
   const [activeZoneHover, setActiveZoneHover] = useState<GangAreaZone | null>(null);
   const [colorPickerZoneId, setColorPickerZoneId] = useState<string | null>(null);
 
@@ -150,15 +191,33 @@ export default function TacticalMap({
       maxZoom: 19,
     });
 
-    // Dark high contrast basemap for tactical ops
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO | 35º BPM',
-      maxZoom: 19,
+    // Clean, public, reliable tile layers that DO NOT require any API keys
+    const initialConfig = BASEMAP_CONFIGS[baseMapStyle] || BASEMAP_CONFIGS.street;
+    const tileLayer = L.tileLayer(initialConfig.url, {
+      attribution: initialConfig.attribution,
+      maxZoom: initialConfig.maxZoom,
+      subdomains: initialConfig.subdomains || ['a', 'b', 'c', 'd'],
     }).addTo(map);
 
+    activeTileLayerRef.current = tileLayer;
     gangLayersGroupRef.current = L.layerGroup().addTo(map);
     markerLayersGroupRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
+
+    // Force tile recalculation after layout paints
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 150);
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    });
+
+    if (mapContainerRef.current) {
+      resizeObserver.observe(mapContainerRef.current);
+    }
 
     // Map Click Handler to pick target coordinates for GIS queries
     map.on('click', (e: L.LeafletMouseEvent) => {
@@ -171,12 +230,38 @@ export default function TacticalMap({
 
     // Clean up on unmount
     return () => {
+      resizeObserver.disconnect();
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
     };
   }, []);
+
+  // Handle Basemap Layer Switching dynamically
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    const config = BASEMAP_CONFIGS[baseMapStyle];
+    if (!config) return;
+
+    if (activeTileLayerRef.current) {
+      mapRef.current.removeLayer(activeTileLayerRef.current);
+    }
+
+    const newTileLayer = L.tileLayer(config.url, {
+      attribution: config.attribution,
+      maxZoom: config.maxZoom,
+      subdomains: config.subdomains || ['a', 'b', 'c', 'd'],
+    });
+
+    // Add new base tile layer and send to back
+    newTileLayer.addTo(mapRef.current);
+    if (typeof (newTileLayer as any).bringToBack === 'function') {
+      (newTileLayer as any).bringToBack();
+    }
+    activeTileLayerRef.current = newTileLayer;
+  }, [baseMapStyle]);
 
   // Update target marker when selectedCoords props changes externally
   useEffect(() => {
@@ -223,17 +308,18 @@ export default function TacticalMap({
         const polygon = L.polygon(polyCoords as any, {
           color: color,
           weight: strokeW,
-          opacity: 0.9,
+          opacity: 0.95,
           fillColor: color,
           fillOpacity: opacity,
           dashArray: zone.dangerLevel === 'CRÍTICO' ? '4, 4' : undefined,
         });
 
-        // Tooltip on hover
+        // Tooltip on hover showing Gang Name clearly
+        const gangDisplayName = zone.gangName || zone.name;
         polygon.bindTooltip(
-          `<div style="font-family: monospace; font-size: 11px; font-weight: bold; color: ${color};">
-            🛡️ ${zone.gangName || zone.name}
-            ${zone.areaKm2 ? `<span style="color: #94a3b8; font-weight: normal;"> (${zone.areaKm2} km²)</span>` : ''}
+          `<div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 800; color: ${color}; text-shadow: 0 1px 3px rgba(0,0,0,0.8);">
+            🛡️ ${gangDisplayName.toUpperCase()}
+            ${zone.areaKm2 ? `<span style="color: #cbd5e1; font-weight: normal;"> (${zone.areaKm2} km²)</span>` : ''}
           </div>`,
           { sticky: true, className: 'tactical-map-tooltip' }
         );
@@ -273,7 +359,7 @@ export default function TacticalMap({
           <div style="font-size: 12px; font-family: sans-serif; color: #e2e8f0; min-width: 220px; max-width: 280px;">
             <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid ${color}; padding-bottom: 4px; margin-bottom: 6px;">
               <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: ${color};">
-                ${zone.gangName || 'ÁREA DEMARCADA'}
+                ${zone.gangName || 'ÁREA DE GANGUE'}
               </span>
               ${
                 zone.dangerLevel
@@ -311,11 +397,11 @@ export default function TacticalMap({
 
         polygon.bindPopup(popupContent);
 
-        // Hover high-contrast effect
+        // Hover high-contrast effect & HUD update
         polygon.on('mouseover', () => {
           polygon.setStyle({
-            weight: strokeW + 1.5,
-            fillOpacity: Math.min(0.65, opacity + 0.2),
+            weight: strokeW + 2,
+            fillOpacity: Math.min(0.7, opacity + 0.25),
           });
           setActiveZoneHover(zone);
         });
@@ -344,6 +430,8 @@ export default function TacticalMap({
           dashArray: '5, 5',
         });
         polyline.bindTooltip(`📍 ${zone.name}`, { sticky: true });
+        polyline.on('mouseover', () => setActiveZoneHover(zone));
+        polyline.on('mouseout', () => setActiveZoneHover(null));
         gangLayersGroupRef.current?.addLayer(polyline);
         polygonLayersMapRef.current[zone.id] = polyline;
       }
@@ -759,41 +847,118 @@ export default function TacticalMap({
       {/* Top Tactical Command Bar */}
       <div className="absolute top-3 left-3 right-3 z-[1000] flex flex-wrap items-center justify-between gap-2 pointer-events-none">
         
-        {/* Left: Coordinate Target Box */}
-        <div className="bg-slate-900/95 backdrop-blur-md border border-slate-800 p-2 rounded-md shadow-lg pointer-events-auto flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Compass className="w-4 h-4 text-emerald-400 animate-spin" style={{ animationDuration: '10s' }} />
-            <div>
-              <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest font-mono block">
-                35º BPM // Mapeamento Tático
-              </span>
-              {selectedCoords ? (
-                <div className="text-[11px] font-mono text-emerald-400 font-bold flex items-center gap-1">
-                  <Crosshair className="w-3 h-3 text-emerald-400" />
-                  {selectedCoords.lat.toFixed(5)}, {selectedCoords.lng.toFixed(5)}
-                </div>
-              ) : (
-                <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" /> Clique no mapa p/ mira
+        {/* Left: Coordinate Target Box & Hover Zone HUD */}
+        <div className="flex items-center gap-2 pointer-events-auto">
+          <div className="bg-slate-900/95 backdrop-blur-md border border-slate-800 p-2 rounded-md shadow-lg flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Compass className="w-4 h-4 text-emerald-400 animate-spin" style={{ animationDuration: '10s' }} />
+              <div>
+                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest font-mono block">
+                  35º BPM // Mapeamento Tático
                 </span>
-              )}
+                {selectedCoords ? (
+                  <div className="text-[11px] font-mono text-emerald-400 font-bold flex items-center gap-1">
+                    <Crosshair className="w-3 h-3 text-emerald-400" />
+                    {selectedCoords.lat.toFixed(5)}, {selectedCoords.lng.toFixed(5)}
+                  </div>
+                ) : (
+                  <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" /> Clique no mapa p/ mira
+                  </span>
+                )}
+              </div>
             </div>
+
+            <button
+              type="button"
+              onClick={centerOn35BPM}
+              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-mono font-bold rounded border border-slate-700 transition cursor-pointer flex items-center gap-1"
+              title="Centralizar no 35º BPM / Santa Luzia"
+            >
+              <Maximize2 className="w-3 h-3 text-amber-400" />
+              35º BPM
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={centerOn35BPM}
-            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-mono font-bold rounded border border-slate-700 transition cursor-pointer flex items-center gap-1"
-            title="Centralizar no 35º BPM / Santa Luzia"
-          >
-            <Maximize2 className="w-3 h-3 text-amber-400" />
-            35º BPM
-          </button>
+          {/* Active Hover Gang Zone HUD Badge */}
+          {activeZoneHover && (
+            <div
+              className="bg-slate-950/95 backdrop-blur-md border px-3 py-1.5 rounded-md shadow-xl flex items-center gap-2.5 font-mono animate-fade-in pointer-events-auto"
+              style={{ borderColor: activeZoneHover.color || '#ef4444' }}
+            >
+              <div
+                className="w-3 h-3 rounded-full animate-pulse"
+                style={{ backgroundColor: activeZoneHover.color || '#ef4444' }}
+              />
+              <div>
+                <div className="text-[10px] uppercase font-bold tracking-wider" style={{ color: activeZoneHover.color || '#ef4444' }}>
+                  Área em Foco: {activeZoneHover.gangName || activeZoneHover.name}
+                </div>
+                <div className="text-[10px] text-slate-300">
+                  {activeZoneHover.areaKm2 ? `${activeZoneHover.areaKm2} km²` : 'Território delimitado'}
+                  {activeZoneHover.rivalGang ? ` • Rival: ${activeZoneHover.rivalGang}` : ''}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Right: Gang Layer Controls & Importer Button */}
+        {/* Right: Basemap Switcher, Gang Layer Controls & Importer Button */}
         <div className="flex items-center gap-2 pointer-events-auto">
           
+          {/* Basemap Style Switcher Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsBaseMapMenuOpen(!isBaseMapMenuOpen)}
+              className="px-2.5 py-1.5 bg-slate-900/90 hover:bg-slate-800 text-slate-200 text-xs font-mono font-bold rounded border border-slate-700 transition cursor-pointer flex items-center gap-1.5 shadow-md"
+              title="Mudar estilo de camada do mapa (Satélite, Noturno, Ruas)"
+            >
+              <Globe className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{BASEMAP_CONFIGS[baseMapStyle].name.split(' ')[0]}</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
+
+            {isBaseMapMenuOpen && (
+              <div className="absolute right-0 top-9 z-50 w-56 bg-slate-900/98 backdrop-blur-md border border-slate-700 rounded-md shadow-2xl p-1.5 font-mono text-xs space-y-1">
+                <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                  Camada Base do Mapa
+                </div>
+                {(Object.keys(BASEMAP_CONFIGS) as BaseMapStyle[]).map((styleKey) => {
+                  const cfg = BASEMAP_CONFIGS[styleKey];
+                  const isSelected = baseMapStyle === styleKey;
+                  return (
+                    <button
+                      key={styleKey}
+                      type="button"
+                      onClick={() => {
+                        setBaseMapStyle(styleKey);
+                        setIsBaseMapMenuOpen(false);
+                      }}
+                      className={`w-full text-left px-2 py-1.5 rounded flex items-center justify-between text-[11px] transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-cyan-950/70 text-cyan-300 font-bold border border-cyan-800/60'
+                          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {styleKey === 'satellite' ? (
+                          <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : styleKey === 'street' ? (
+                          <MapIcon className="w-3.5 h-3.5 text-amber-400" />
+                        ) : (
+                          <Radio className="w-3.5 h-3.5 text-cyan-400" />
+                        )}
+                        <span>{cfg.name}</span>
+                      </div>
+                      {isSelected && <Check className="w-3.5 h-3.5 text-cyan-400" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Import KML / GeoJSON Button */}
           <button
             type="button"
@@ -802,7 +967,7 @@ export default function TacticalMap({
             title="Importar polígonos e cores do Google My Maps (KML, KMZ, GeoJSON)"
           >
             <Upload className="w-4 h-4 stroke-[2.5]" />
-            <span>Importar Mapa de Gangues</span>
+            <span className="hidden sm:inline">Importar Gangues</span>
           </button>
 
           {/* Toggle Gang Layers Panel */}

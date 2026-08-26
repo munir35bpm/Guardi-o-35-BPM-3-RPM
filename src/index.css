@@ -47,6 +47,19 @@
   border-radius: 4px;
 }
 
+.tactical-map-tooltip {
+  background-color: rgba(11, 13, 18, 0.95) !important;
+  border: 1px solid rgba(196, 167, 110, 0.5) !important;
+  border-radius: 4px !important;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.8), 0 0 10px rgba(196, 167, 110, 0.2) !important;
+  padding: 6px 10px !important;
+  color: #F3EEE4 !important;
+}
+
+.tactical-map-tooltip::before {
+  border-top-color: rgba(196, 167, 110, 0.5) !important;
+}
+
 .leaflet-popup-content-wrapper {
   background: #0E121B !important;
   color: #F3EEE4 !important;

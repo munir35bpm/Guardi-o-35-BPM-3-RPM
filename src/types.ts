@@ -96,7 +96,7 @@ export interface NetworkNode {
 export interface NetworkEdge {
   source: string;
   target: string;
-  type: 'participated' | 'comparsa';
+  type: 'participated' | 'comparsa' | 'coautoria';
   label: string;
   description?: string;
   color: string;

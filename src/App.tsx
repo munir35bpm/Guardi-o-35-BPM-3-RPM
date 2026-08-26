@@ -2192,16 +2192,16 @@ export default function App() {
                                   <span className="text-zinc-200 font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.vestimentas || 'Não declarada'}</span>
                                 </div>
                               </div>
-                              {intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.tatuagens && (
+                              {(intelligenceResult.ocorrencia_processada.caracteristicas_declaradas as any)?.tatuagens && (
                                 <div>
                                   <span className="text-[9px] text-zinc-500 block">Tatuagens Declaradas</span>
-                                  <span className="text-amber-300 text-xs font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas.tatuagens}</span>
+                                  <span className="text-amber-300 text-xs font-semibold">{(intelligenceResult.ocorrencia_processada.caracteristicas_declaradas as any).tatuagens}</span>
                                 </div>
                               )}
-                              {intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.cicatrizes && (
+                              {(intelligenceResult.ocorrencia_processada.caracteristicas_declaradas as any)?.cicatrizes && (
                                 <div>
                                   <span className="text-[9px] text-zinc-500 block">Cicatrizes / Marcas</span>
-                                  <span className="text-amber-300 text-xs font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas.cicatrizes}</span>
+                                  <span className="text-amber-300 text-xs font-semibold">{(intelligenceResult.ocorrencia_processada.caracteristicas_declaradas as any).cicatrizes}</span>
                                 </div>
                               )}
                               <div>
@@ -4242,8 +4242,8 @@ export default function App() {
                               shared.push({
                                 numero_bo: oOther.numero_bo || matchMyOc.numero_bo,
                                 tipificacao: oOther.tipificacao_penal || matchMyOc.tipificacao_penal,
-                                papelOther: oOther.papel || oOther.papel_no_crime || 'Autor',
-                                papelMy: matchMyOc.papel || matchMyOc.papel_no_crime || 'Autor'
+                                papelOther: (oOther as any).papel || (oOther as any).papel_no_crime || 'Autor',
+                                papelMy: (matchMyOc as any).papel || (matchMyOc as any).papel_no_crime || 'Autor'
                               });
                             }
                           });
