@@ -4223,6 +4223,104 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Infratores Vinculados por Registro Policial (B.O.s Compartilhados) */}
+                      {(() => {
+                        const myBos = (selectedSuspectDetail.ocorrencias || []).map((o: any) => o.numero_bo || o.id).filter(Boolean);
+                        
+                        const linkedCoauthors: Array<{ suspect: any; sharedBos: any[] }> = [];
+
+                        suspects.forEach((other) => {
+                          if (other.id === selectedSuspectDetail.id) return;
+                          const otherBos = other.ocorrencias || [];
+                          const shared: any[] = [];
+
+                          otherBos.forEach((oOther: any) => {
+                            const matchMyOc = (selectedSuspectDetail.ocorrencias || []).find(
+                              (oMy: any) => (oMy.id && oMy.id === oOther.id) || (oMy.numero_bo && oMy.numero_bo === oOther.numero_bo)
+                            );
+                            if (matchMyOc) {
+                              shared.push({
+                                numero_bo: oOther.numero_bo || matchMyOc.numero_bo,
+                                tipificacao: oOther.tipificacao_penal || matchMyOc.tipificacao_penal,
+                                papelOther: oOther.papel || oOther.papel_no_crime || 'Autor',
+                                papelMy: matchMyOc.papel || matchMyOc.papel_no_crime || 'Autor'
+                              });
+                            }
+                          });
+
+                          if (shared.length > 0) {
+                            linkedCoauthors.push({ suspect: other, sharedBos: shared });
+                          }
+                        });
+
+                        return (
+                          <div className="border-t border-zinc-800/80 pt-3 space-y-2 font-mono">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] text-amber-400 block uppercase font-bold flex items-center gap-1">
+                                <Users className="w-3.5 h-3.5 text-amber-500" />
+                                Vínculos em B.O. ({linkedCoauthors.length} Infratores)
+                              </span>
+                              <span className="text-[9px] text-zinc-500">
+                                Co-autoria Policial
+                              </span>
+                            </div>
+
+                            {linkedCoauthors.length > 0 ? (
+                              <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                                {linkedCoauthors.map(({ suspect: coauthor, sharedBos }) => {
+                                  const rawSit = String(coauthor.situacao_atual || coauthor.situacao_prisional || '').toUpperCase();
+                                  const isMorto = rawSit === 'MORTO' || rawSit === 'FALECIDO' || rawSit === 'ÓBITO' || rawSit === 'OBITO';
+                                  const isPreso = !isMorto && (rawSit === 'PRESO' || rawSit === 'RECOLHIDO');
+                                  const isForagido = !isMorto && !isPreso && (rawSit === 'FORAGIDO' || coauthor.status_mandado_prisao);
+
+                                  return (
+                                    <div
+                                      key={coauthor.id}
+                                      onClick={() => handleViewSuspectDetail(coauthor.id)}
+                                      className="p-2 bg-[#0A0A0B] hover:bg-zinc-900 border border-amber-950/60 hover:border-amber-500/50 rounded flex items-center justify-between gap-2 cursor-pointer transition"
+                                      title="Clique para inspecionar este infrator vinculado"
+                                    >
+                                      <div className="flex items-center gap-2 overflow-hidden">
+                                        <img
+                                          src={coauthor.foto_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=60&h=60&fit=crop'}
+                                          alt={coauthor.vulgo}
+                                          className="w-8 h-8 rounded-full object-cover border border-zinc-700 flex-shrink-0"
+                                        />
+                                        <div className="truncate">
+                                          <div className="flex items-center gap-1.5 truncate">
+                                            <span className="text-[11px] font-bold text-zinc-200 truncate">{coauthor.nome_completo}</span>
+                                            <span className="text-[10px] text-amber-400 font-bold">"{coauthor.vulgo}"</span>
+                                          </div>
+                                          <div className="flex items-center gap-1.5 mt-0.5">
+                                            {isMorto ? (
+                                              <span className="text-[8px] bg-zinc-800 text-zinc-300 px-1 py-0.2 rounded font-bold">💀 MORTO</span>
+                                            ) : isForagido ? (
+                                              <span className="text-[8px] bg-red-950 text-red-300 border border-red-800 px-1 py-0.2 rounded font-bold">🔴 FORAGIDO</span>
+                                            ) : isPreso ? (
+                                              <span className="text-[8px] bg-red-950/60 text-red-200 border border-red-800/60 px-1 py-0.2 rounded font-bold">🔒 PRESO</span>
+                                            ) : (
+                                              <span className="text-[8px] bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 px-1 py-0.2 rounded font-bold">LIBERDADE</span>
+                                            )}
+                                            <span className="text-[9px] text-amber-400/90 font-mono">
+                                              • {sharedBos.length} B.O.(s) compartilhado(s)
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <span className="text-[10px] text-zinc-500 hover:text-amber-300 flex-shrink-0">Ver ➔</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <p className="text-[10px] text-zinc-500 font-mono italic">
+                                Nenhum outro infrator cadastrado compartilha os mesmos B.O.s deste investigado.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       <div className="border-t border-zinc-800/80 pt-3 font-mono space-y-2">
                         <button
                           type="button"

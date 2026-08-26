@@ -1234,58 +1234,8 @@ Por favor, faça a análise comparativa de inteligência para cada suspeito list
 // ==========================================
 app.get('/api/network-graph', (req, res) => {
   try {
-    const nodes: any[] = [];
-    const edges: any[] = [];
-
-    // Add Suspect Nodes
-    db.infratores.forEach(i => {
-      nodes.push({
-        id: i.id,
-        label: `${i.nome_completo} (${i.vulgo})`,
-        type: 'suspect',
-        gang: i.gangue_faccao,
-        periculosidade: i.periculosidade,
-        mandado: i.status_mandado_prisao,
-        foto_url: i.foto_url
-      });
-    });
-
-    // Add Crime Incident Nodes (so we can see linkages via crimes as well)
-    db.ocorrencias_criminais.forEach(o => {
-      nodes.push({
-        id: o.id,
-        label: `${o.numero_bo} - ${o.tipificacao_penal}`,
-        type: 'incident',
-        tipificacao: o.tipificacao_penal,
-        data: o.data_hora
-      });
-    });
-
-    // Add Edges from infrator_ocorrencia (shared crimes)
-    db.infrator_ocorrencia.forEach(io => {
-      edges.push({
-        source: io.infrator_id,
-        target: io.ocorrencia_id,
-        type: 'participated',
-        label: io.papel_no_crime,
-        color: '#dc2626'
-      });
-    });
-
-    // Add Edges from vinculos_comparsas (direct relationships)
-    db.vinculos_comparsas.forEach(v => {
-      edges.push({
-        source: v.infrator_origem_id,
-        target: v.infrator_destino_id,
-        type: 'comparsa',
-        label: `Grau: ${v.grau_relacao}`,
-        description: v.historico_conjunto,
-        color: '#2563eb',
-        width: v.grau_relacao === 'Forte' ? 3 : v.grau_relacao === 'Média' ? 2 : 1
-      });
-    });
-
-    res.json({ nodes, edges });
+    const graphData = db.getNetworkGraph();
+    res.json(graphData);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

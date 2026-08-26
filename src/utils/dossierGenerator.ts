@@ -598,30 +598,96 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
     </table>
 
     <div class="section-title">
-      <span>Rede de Comparsas e Vínculos Criminais Conhecidos</span>
-      <span class="count">${comparsas.length} Comparsas</span>
+      <span>Rede de Comparsas e Vínculos Criminais Cruzados (Co-autores em B.O.s & Inteligência)</span>
+      <span class="count">${comparsas.length} Vínculo(s) Detectado(s)</span>
     </div>
-    <table>
+    ${comparsas.length === 0 ? `
+      <div style="padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; text-align: center; color: #64748b; font-size: 8.5pt; border-radius: 4px; margin-bottom: 10px;">
+        Nenhum comparsa ou vínculo direto em registro policial (B.O.) identificado até o momento.
+      </div>
+    ` : `
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
       <thead>
         <tr>
-          <th>Nome do Comparsa</th>
-          <th>Vulgo</th>
-          <th>Grau de Relação</th>
-          <th>Histórico e Modus Operandi Compartilhado</th>
+          <th style="width: 50px; text-align: center;">Foto</th>
+          <th>Identificação do Comparsa / Co-autor</th>
+          <th>Situação Prisional</th>
+          <th>Facção</th>
+          <th>Tipo do Vínculo & B.O.s em Comum</th>
         </tr>
       </thead>
       <tbody>
-        ${comparsas.map((rel: any) => `
+        ${comparsas.map((rel: any) => {
+          const comp = rel.comparsa || {};
+          const nomeComp = comp.nome_completo || rel.nome || 'Identificação Pendente';
+          const vulgoComp = comp.vulgo || rel.vulgo || 'S/V';
+          const fotoComp = comp.foto_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop';
+          const faccaoComp = comp.gangue_faccao || 'Nenhuma';
+          
+          const rawSitComp = String(comp.situacao_atual || comp.situacao_prisional || '').toUpperCase();
+          const isCompMorto = rawSitComp === 'MORTO' || rawSitComp === 'FALECIDO' || rawSitComp === 'ÓBITO' || rawSitComp === 'OBITO';
+          const isCompPreso = !isCompMorto && (rawSitComp === 'PRESO' || rawSitComp === 'RECOLHIDO');
+          const isCompForagido = !isCompMorto && !isCompPreso && (rawSitComp === 'FORAGIDO' || comp.status_mandado_prisao);
+
+          let sitBadgeHtml = '<span style="font-size: 7pt; padding: 2px 5px; border-radius: 3px; font-weight: 800; background: #dcfce7; color: #15803d; border: 1px solid #86efac;">EM LIBERDADE</span>';
+          if (isCompMorto) {
+            sitBadgeHtml = '<span style="font-size: 7pt; padding: 2px 5px; border-radius: 3px; font-weight: 800; background: #e2e8f0; color: #334155; border: 1px solid #94a3b8;">💀 MORTO</span>';
+          } else if (isCompForagido) {
+            sitBadgeHtml = '<span style="font-size: 7pt; padding: 2px 5px; border-radius: 3px; font-weight: 800; background: #fee2e2; color: #b91c1c; border: 1px solid #f87171;">🔴 FORAGIDO</span>';
+          } else if (isCompPreso) {
+            sitBadgeHtml = '<span style="font-size: 7pt; padding: 2px 5px; border-radius: 3px; font-weight: 800; background: #fecaca; color: #7f1d1d; border: 1px solid #ef4444;">🔒 PRESO</span>';
+          }
+
+          const hasSharedBos = Array.isArray(rel.shared_bos) && rel.shared_bos.length > 0;
+          const isRegistroPolicial = rel.tipo_vinculo === 'REGISTRO_POLICIAL' || hasSharedBos;
+
+          return `
           <tr>
-            <td><strong>${rel.comparsa?.nome_completo || rel.nome || 'Identificação Pendente'}</strong></td>
-            <td style="color: #b45309; font-weight: bold;">"${rel.comparsa?.vulgo || rel.vulgo || 'N/D'}"</td>
-            <td><span style="color: ${rel.grau === 'Forte' ? '#dc2626' : rel.grau === 'Média' ? '#d97706' : '#2563eb'}; font-weight: bold;">${rel.grau || rel.grau_relacao || 'Geral'}</span></td>
-            <td>${rel.historico || rel.historico_conjunto || 'Relação baseada em monitoramento tático e comparsaria.'}</td>
+            <td style="text-align: center; vertical-align: middle; padding: 4px;">
+              <img src="${fotoComp}" alt="${vulgoComp}" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid #0f172a;" />
+            </td>
+            <td style="vertical-align: top;">
+              <strong style="color: #0f172a; font-size: 8.5pt;">${nomeComp}</strong><br/>
+              <span style="color: #b45309; font-weight: 800; font-size: 8pt;">"${vulgoComp}"</span>
+            </td>
+            <td style="vertical-align: top;">
+              ${sitBadgeHtml}
+            </td>
+            <td style="vertical-align: top; font-size: 8pt; color: #334155; font-weight: 600;">
+              ${faccaoComp}
+            </td>
+            <td style="vertical-align: top; font-size: 8pt;">
+              <div style="margin-bottom: 2px;">
+                <span style="font-size: 7pt; font-weight: 800; text-transform: uppercase; padding: 1px 4px; border-radius: 2px; ${isRegistroPolicial ? 'background: #fef3c7; color: #92400e; border: 1px solid #fcd34d;' : 'background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd;'}">
+                  ${isRegistroPolicial ? '📋 VÍNCULO EM REGISTRO POLICIAL (B.O.)' : '🔗 VÍNCULO DE INTELIGÊNCIA TÁTICA'}
+                </span>
+                <span style="font-weight: bold; color: ${rel.grau === 'Forte' ? '#dc2626' : '#d97706'}; font-size: 7.5pt; margin-left: 4px;">
+                  [${rel.grau || 'Geral'}]
+                </span>
+              </div>
+              
+              ${hasSharedBos ? `
+                <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px; padding: 4px 6px; margin-top: 3px; font-size: 7.5pt;">
+                  <strong style="color: #92400e; text-transform: uppercase; font-size: 7pt;">B.O.s Compartilhados em Co-autoria:</strong>
+                  ${rel.shared_bos.map((b: any) => `
+                    <div style="margin-top: 2px; color: #1e293b;">
+                      • <strong>B.O. Nº ${b.numero_bo}</strong> (${b.tipificacao_penal}): 
+                      <span style="color: #475569;">Investigado: <strong>${b.papel_infrator || 'Autor'}</strong> / Comparsa: <strong>${b.papel_comparsa || 'Autor'}</strong></span>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+
+              <div style="color: #475569; font-size: 7.5pt; margin-top: 2px; line-height: 1.2;">
+                ${rel.historico || rel.historico_conjunto || 'Relação baseada em monitoramento tático e comparsaria.'}
+              </div>
+            </td>
           </tr>
-        `).join('')}
-        ${comparsas.length === 0 ? '<tr><td colspan="4" style="text-align: center; color: #64748b; padding: 8px;">Nenhum comparsa cadastrado no círculo tático.</td></tr>' : ''}
+          `;
+        }).join('')}
       </tbody>
     </table>
+    `}
 
     <div class="footer">
       <div>35º BPM • PMMG • O Guardião do Alto Rio das Velhas • Sistema de Inteligência Policial</div>

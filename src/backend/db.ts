@@ -142,19 +142,104 @@ class CrimIntelDatabase {
 
     const comparsasOrigem = this.vinculos_comparsas.filter(v => v.infrator_origem_id === id).map(v => {
       const comp = this.infratores.find(i => i.id === v.infrator_destino_id);
-      return { comparsa: comp, grau: v.grau_relacao, historico: v.historico_conjunto };
+      return { comparsa: comp, grau: v.grau_relacao, historico: v.historico_conjunto, tipo_vinculo: 'MANUAL' };
     });
     const comparsasDestino = this.vinculos_comparsas.filter(v => v.infrator_destino_id === id).map(v => {
       const comp = this.infratores.find(i => i.id === v.infrator_origem_id);
-      return { comparsa: comp, grau: v.grau_relacao, historico: v.historico_conjunto };
+      return { comparsa: comp, grau: v.grau_relacao, historico: v.historico_conjunto, tipo_vinculo: 'MANUAL' };
     });
+
+    // Detect suspect linkages via shared police records (B.O.s)
+    const boMap = new Map<string, any>();
+    
+    // Check through all occurrences of this suspect
+    ocorrencias.forEach((oc: any) => {
+      if (!oc) return;
+      const ocId = oc.id;
+      const ocBo = oc.numero_bo;
+      const myPapel = oc.papel || 'Autor';
+
+      // Find other suspects linked to this same occurrence or matching BO number
+      this.infrator_ocorrencia.forEach(io => {
+        if (io.infrator_id !== id) {
+          const matchByOcId = ocId && (io.ocorrencia_id === ocId);
+          let matchByBo = false;
+          if (!matchByOcId && ocBo) {
+            const targetOc = this.ocorrencias_criminais.find(o => o.id === io.ocorrencia_id);
+            if (targetOc && targetOc.numero_bo === ocBo) {
+              matchByBo = true;
+            }
+          }
+
+          if (matchByOcId || matchByBo) {
+            const otherSuspect = this.infratores.find(i => i.id === io.infrator_id);
+            if (otherSuspect) {
+              const existing = boMap.get(otherSuspect.id) || {
+                comparsa: otherSuspect,
+                grau: 'Forte (Co-autoria)',
+                tipo_vinculo: 'REGISTRO_POLICIAL',
+                shared_bos: []
+              };
+
+              // Avoid duplicate BO entry
+              if (!existing.shared_bos.some((b: any) => b.numero_bo === oc.numero_bo)) {
+                existing.shared_bos.push({
+                  numero_bo: oc.numero_bo || 'S/N',
+                  tipificacao_penal: oc.tipificacao_penal || 'Não informada',
+                  data_hora: oc.data_hora,
+                  papel_infrator: myPapel,
+                  papel_comparsa: io.papel_no_crime || 'Autor',
+                  modus_operandi: oc.modus_operandi || 'Padrão conjunto'
+                });
+              }
+
+              existing.historico = `Co-envolvido(s) em ${existing.shared_bos.length} B.O.(s): ` + 
+                existing.shared_bos.map((b: any) => `B.O. ${b.numero_bo} (${b.tipificacao_penal} - ${b.papel_comparsa})`).join('; ');
+
+              boMap.set(otherSuspect.id, existing);
+            }
+          }
+        }
+      });
+    });
+
+    // Merge manual and shared-BO comparsas deduplicated
+    const mergedComparsasMap = new Map<string, any>();
+
+    // Add manual comparsas
+    [...comparsasOrigem, ...comparsasDestino].forEach(c => {
+      if (c && c.comparsa && c.comparsa.id) {
+        mergedComparsasMap.set(c.comparsa.id, c);
+      }
+    });
+
+    // Merge shared-BO comparsas
+    Array.from(boMap.values()).forEach(boComp => {
+      if (boComp && boComp.comparsa && boComp.comparsa.id) {
+        const prev = mergedComparsasMap.get(boComp.comparsa.id);
+        if (prev) {
+          mergedComparsasMap.set(boComp.comparsa.id, {
+            ...prev,
+            ...boComp,
+            grau: 'Forte (Co-autoria & Vínculo)',
+            historico: `${prev.historico ? prev.historico + ' | ' : ''}${boComp.historico}`
+          });
+        } else {
+          mergedComparsasMap.set(boComp.comparsa.id, boComp);
+        }
+      }
+    });
+
+    const comparsas = Array.from(mergedComparsasMap.values());
+    const vinculos_policiais_cruzados = Array.from(boMap.values());
 
     return {
       ...infrator,
       fisicas,
       enderecos,
       ocorrencias,
-      comparsas: [...comparsasOrigem, ...comparsasDestino]
+      comparsas,
+      vinculos_policiais_cruzados
     };
   }
 
@@ -468,6 +553,80 @@ class CrimIntelDatabase {
         description: v.historico_conjunto,
         color: '#2563eb',
         width: v.grau_relacao === 'Forte' ? 3 : v.grau_relacao === 'Média' ? 2 : 1
+      });
+    });
+
+    // Detect and Add direct suspect-to-suspect Co-autoria / Shared Police Record (B.O.) Edges
+    const coAutoriaPairMap = new Map<string, { suspectA: string; suspectB: string; sharedBos: any[] }>();
+
+    // Group infrator_ocorrencia by ocorrencia_id or matching B.O. number
+    const ocToSuspects = new Map<string, { infrator_id: string; papel: string; bo: any }[]>();
+
+    this.infrator_ocorrencia.forEach(io => {
+      const oc = this.ocorrencias_criminais.find(o => o.id === io.ocorrencia_id);
+      const boKey = oc?.numero_bo || io.ocorrencia_id;
+      if (!ocToSuspects.has(boKey)) {
+        ocToSuspects.set(boKey, []);
+      }
+      ocToSuspects.get(boKey)!.push({
+        infrator_id: io.infrator_id,
+        papel: io.papel_no_crime,
+        bo: oc || { numero_bo: boKey, tipificacao_penal: 'Ocorrência Criminal' }
+      });
+    });
+
+    ocToSuspects.forEach((suspectList) => {
+      if (suspectList.length > 1) {
+        for (let i = 0; i < suspectList.length; i++) {
+          for (let j = i + 1; j < suspectList.length; j++) {
+            const s1 = suspectList[i];
+            const s2 = suspectList[j];
+            if (s1.infrator_id === s2.infrator_id) continue;
+
+            const pairKey = [s1.infrator_id, s2.infrator_id].sort().join('___');
+            if (!coAutoriaPairMap.has(pairKey)) {
+              coAutoriaPairMap.set(pairKey, {
+                suspectA: s1.infrator_id,
+                suspectB: s2.infrator_id,
+                sharedBos: []
+              });
+            }
+
+            const pairObj = coAutoriaPairMap.get(pairKey)!;
+            const alreadyHasBo = pairObj.sharedBos.some(b => b.numero_bo === s1.bo.numero_bo);
+            if (!alreadyHasBo) {
+              pairObj.sharedBos.push({
+                numero_bo: s1.bo.numero_bo,
+                tipificacao_penal: s1.bo.tipificacao_penal,
+                data_hora: s1.bo.data_hora,
+                papelA: s1.papel,
+                papelB: s2.papel
+              });
+            }
+          }
+        }
+      }
+    });
+
+    // Add high-visibility golden-amber Co-autoria edges
+    coAutoriaPairMap.forEach(({ suspectA, suspectB, sharedBos }) => {
+      const boCount = sharedBos.length;
+      const infA = this.infratores.find(i => i.id === suspectA);
+      const infB = this.infratores.find(i => i.id === suspectB);
+
+      const boDescriptions = sharedBos.map(b => 
+        `• B.O. Nº ${b.numero_bo} (${b.tipificacao_penal}): ${infA?.vulgo || 'Suspeito A'} [${b.papelA}] e ${infB?.vulgo || 'Suspeito B'} [${b.papelB}]`
+      ).join('\n');
+
+      edges.push({
+        source: suspectA,
+        target: suspectB,
+        type: 'coautoria',
+        label: `B.O. Compartilhado (${boCount})`,
+        description: `Vínculo em Registro Policial (${boCount} B.O.s compartilhados):\n${boDescriptions}`,
+        color: '#f59e0b',
+        width: boCount > 1 ? 4 : 3,
+        shared_bos: sharedBos
       });
     });
 

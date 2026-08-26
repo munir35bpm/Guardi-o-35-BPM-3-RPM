@@ -248,14 +248,27 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
       {/* Network Graph Stage */}
       <div className="lg:col-span-3 bg-slate-950 border border-slate-800 rounded-lg overflow-hidden relative flex flex-col shadow-inner">
         {/* Graph Header */}
-        <div className="p-4 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between">
+        <div className="p-4 bg-slate-900/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Share2 className="text-amber-500 w-5 h-5" />
-            <h3 className="font-semibold text-slate-100">Vínculos de Comparsaria & Participações</h3>
+            <h3 className="font-semibold text-slate-100">Grafo de Vínculos & Inteligência Policial</h3>
           </div>
-          <span className="text-xs text-slate-400 bg-slate-800 px-2 py-1 rounded">
-            Arraste os nós para ajustar a visualização física
-          </span>
+          
+          {/* Legend */}
+          <div className="flex items-center flex-wrap gap-3 text-xs text-slate-300">
+            <span className="flex items-center gap-1.5 bg-slate-950/70 px-2 py-0.5 rounded border border-slate-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-400 border border-slate-200"></span> Infrator
+            </span>
+            <span className="flex items-center gap-1.5 bg-slate-950/70 px-2 py-0.5 rounded border border-slate-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-600"></span> Fato Delituoso (B.O.)
+            </span>
+            <span className="flex items-center gap-1.5 bg-slate-950/70 px-2 py-0.5 rounded border border-amber-900/50 text-amber-300">
+              <span className="w-3 h-1 bg-amber-500 rounded"></span> B.O. Compartilhado (Co-autoria)
+            </span>
+            <span className="flex items-center gap-1.5 bg-slate-950/70 px-2 py-0.5 rounded border border-blue-900/50 text-blue-300">
+              <span className="w-3 h-1 bg-blue-500 rounded"></span> Vínculo de Inteligência
+            </span>
+          </div>
         </div>
 
         {/* Graph SVG canvas */}
@@ -505,6 +518,55 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
                       {selectedNode.mandado ? 'CONSTATADO ATIVO' : 'NENHUM REGISTRO'}
                     </span>
                   </div>
+
+                  {/* Connected Suspects / Co-authors */}
+                  {(() => {
+                    const connectedEdges = edges.filter(
+                      (e) => (e.source === selectedNode.id || e.target === selectedNode.id) && (e.type === 'coautoria' || e.type === 'comparsa')
+                    );
+
+                    if (connectedEdges.length === 0) return null;
+
+                    return (
+                      <div className="mt-4 pt-3 border-t border-slate-800">
+                        <span className="text-xs font-bold text-amber-400 uppercase block mb-2">
+                          Infratores Vinculados ({connectedEdges.length}):
+                        </span>
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                          {connectedEdges.map((e, idx) => {
+                            const otherId = e.source === selectedNode.id ? e.target : e.source;
+                            const otherNode = nodes.find((n) => n.id === otherId);
+                            if (!otherNode) return null;
+
+                            return (
+                              <div
+                                key={idx}
+                                onClick={() => handleNodeClick(otherNode)}
+                                className="p-2 bg-slate-950/80 hover:bg-slate-800 border border-slate-800 rounded flex items-center justify-between gap-2 cursor-pointer transition"
+                              >
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                  {otherNode.foto_url ? (
+                                    <img src={otherNode.foto_url} alt={otherNode.label} className="w-7 h-7 rounded-full object-cover border border-slate-700 flex-shrink-0" />
+                                  ) : (
+                                    <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-slate-300 text-xs flex-shrink-0">
+                                      <Users className="w-3.5 h-3.5" />
+                                    </div>
+                                  )}
+                                  <div className="truncate">
+                                    <p className="text-xs font-semibold text-slate-200 truncate">{otherNode.label}</p>
+                                    <span className="text-[10px] text-amber-400 font-mono block">
+                                      {e.type === 'coautoria' ? '📋 ' + e.label : '🔗 Comparsa'}
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className="text-[10px] text-slate-400 hover:text-amber-300">Ver ➔</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="space-y-3 text-sm">
@@ -538,20 +600,22 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
           <div className="space-y-4 text-sm">
             <div className="flex items-center gap-2 mb-2">
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: selectedEdge.color }}></div>
-              <h4 className="font-bold text-slate-100 text-base capitalize">{selectedEdge.type === 'comparsa' ? 'Elo de Comparsaria' : 'Ligação Delitiva'}</h4>
+              <h4 className="font-bold text-slate-100 text-base capitalize">
+                {selectedEdge.type === 'coautoria' ? 'Co-autoria em Registro Policial' : selectedEdge.type === 'comparsa' ? 'Elo de Comparsaria' : 'Ligação Delitiva'}
+              </h4>
             </div>
 
             <div>
-              <span className="text-xs font-semibold text-slate-400 block uppercase">Grau da Ligação:</span>
+              <span className="text-xs font-semibold text-slate-400 block uppercase">Grau / Vínculo:</span>
               <span className="text-slate-200 font-medium">{selectedEdge.label}</span>
             </div>
 
             {selectedEdge.description && (
               <div>
-                <span className="text-xs font-semibold text-slate-400 block uppercase">Relatório de Inteligência:</span>
-                <p className="text-slate-300 text-xs mt-1 bg-slate-950 p-2.5 rounded border border-slate-800 leading-relaxed">
+                <span className="text-xs font-semibold text-slate-400 block uppercase">Relatório de Inteligência & B.O.s:</span>
+                <div className="text-slate-300 text-xs mt-1 bg-slate-950 p-2.5 rounded border border-slate-800 leading-relaxed whitespace-pre-line font-sans">
                   {selectedEdge.description}
-                </p>
+                </div>
               </div>
             )}
           </div>
