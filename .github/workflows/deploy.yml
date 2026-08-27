@@ -5,6 +5,7 @@ on:
     branches: ["main", "master"]
   workflow_dispatch:
 
+# Permissões necessárias para publicar no GitHub Pages
 permissions:
   contents: read
   pages: write
@@ -50,4 +51,5 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
 
