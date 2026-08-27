@@ -64,6 +64,29 @@ interface TacticalMapProps {
   highlightedSuspectId?: string | null;
 }
 
+// Helper to deduplicate addresses for clean tactical map rendering
+function deduplicateAddressList(list: EnderecoAtuacao[]): EnderecoAtuacao[] {
+  const seen = new Set<string>();
+  const result: EnderecoAtuacao[] = [];
+
+  for (const ea of list) {
+    if (!ea || !ea.geom_ponto) continue;
+    const lat = Number(ea.geom_ponto.lat || 0).toFixed(4);
+    const lng = Number(ea.geom_ponto.lng || 0).toFixed(4);
+    const logr = (ea.logradouro || '').toLowerCase().trim();
+    const tipo = (ea.tipo_endereco || 'Residência').toLowerCase().trim();
+    const infId = ea.infrator_id || '';
+    const key = `${infId}|${tipo}|${logr}|${lat}|${lng}`;
+
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(ea);
+    }
+  }
+
+  return result;
+}
+
 // Helper to accurately resolve suspect name and nickname (alcunha/vulgo)
 function getSuspectInfoForAddress(addr: EnderecoAtuacao) {
   let nome = addr.infrator_nome?.trim();
@@ -155,7 +178,7 @@ export default function TacticalMap({
             infrator_vulgo: ea.infrator_vulgo || inf?.vulgo,
           };
         });
-        setAddresses(enriched);
+        setAddresses(deduplicateAddressList(enriched));
       } else {
         const enriched = (db.enderecos_atuacao || []).map((ea: EnderecoAtuacao) => {
           const inf = db.infratores?.find((i) => i.id === ea.infrator_id) || db.getInfratorFull?.(ea.infrator_id);
@@ -165,7 +188,7 @@ export default function TacticalMap({
             infrator_vulgo: ea.infrator_vulgo || inf?.vulgo,
           };
         });
-        setAddresses(enriched);
+        setAddresses(deduplicateAddressList(enriched));
       }
 
       if (resGang && resGang.ok) {

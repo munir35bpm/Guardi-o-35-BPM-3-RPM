@@ -280,8 +280,13 @@ class CrimIntelDatabase {
 
     // Process attached addresses (multiple addresses supported)
     if (Array.isArray(data.enderecos) && data.enderecos.length > 0) {
+      const seenLogr = new Set<string>();
       for (const end of data.enderecos) {
         if (end.logradouro && end.logradouro.trim()) {
+          const key = `${(end.tipo_endereco || 'Residência').toLowerCase()}|${end.logradouro.trim().toLowerCase()}`;
+          if (seenLogr.has(key)) continue;
+          seenLogr.add(key);
+
           this.addEndereco({
             infrator_id: id,
             tipo_endereco: end.tipo_endereco || 'Residência',
@@ -355,6 +360,17 @@ class CrimIntelDatabase {
   }
 
   public addEndereco(data: any): EnderecoAtuacao {
+    const logrNorm = (data.logradouro || '').trim().toLowerCase();
+    const tipoNorm = (data.tipo_endereco || 'Residência').trim().toLowerCase();
+    const existing = this.enderecos_atuacao.find(
+      ea => ea.infrator_id === data.infrator_id &&
+            (ea.tipo_endereco || '').trim().toLowerCase() === tipoNorm &&
+            (ea.logradouro || '').trim().toLowerCase() === logrNorm
+    );
+    if (existing) {
+      return existing;
+    }
+
     const id = data.id || `end-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const inf = this.infratores.find(i => i.id === data.infrator_id);
     const newEnd: EnderecoAtuacao = {

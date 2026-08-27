@@ -27,6 +27,38 @@ import {
   SuspectWithDetails
 } from '../types';
 
+/**
+ * Helper to deduplicate addresses and return unique list plus redundant IDs to clean up in Firestore
+ */
+export function deduplicateAddresses(list: EnderecoAtuacao[]): { unique: EnderecoAtuacao[]; duplicatesToDelete: string[] } {
+  const seen = new Map<string, string>();
+  const unique: EnderecoAtuacao[] = [];
+  const duplicatesToDelete: string[] = [];
+
+  for (const addr of list) {
+    if (!addr) continue;
+    const lat = Number(addr.geom_ponto?.lat || 0).toFixed(4);
+    const lng = Number(addr.geom_ponto?.lng || 0).toFixed(4);
+    const logr = (addr.logradouro || '').toLowerCase().trim();
+    const tipo = (addr.tipo_endereco || 'Residência').toLowerCase().trim();
+    const infId = addr.infrator_id || '';
+    const key = `${infId}|${tipo}|${logr}|${lat}|${lng}`;
+
+    if (seen.has(key)) {
+      if (addr.id) {
+        duplicatesToDelete.push(addr.id);
+      }
+    } else {
+      if (addr.id) {
+        seen.set(key, addr.id);
+      }
+      unique.push(addr);
+    }
+  }
+
+  return { unique, duplicatesToDelete };
+}
+
 let isInitialized = false;
 
 /**
@@ -56,7 +88,14 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
         .map((i: any) => i.fisicas);
     }
     if (enderecos.length > 0) {
-      db.enderecos_atuacao = enderecos;
+      const { unique, duplicatesToDelete } = deduplicateAddresses(enderecos);
+      db.enderecos_atuacao = unique;
+      if (duplicatesToDelete.length > 0) {
+        // Clean up redundant duplicate records in Firestore
+        for (const dupId of duplicatesToDelete) {
+          removeEndereco(dupId).catch(() => null);
+        }
+      }
     }
     if (ocorrencias.length > 0) {
       db.ocorrencias_criminais = ocorrencias;
@@ -85,7 +124,13 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
       },
       onEnderecosChange: (list) => {
         if (list) {
-          db.enderecos_atuacao = list;
+          const { unique, duplicatesToDelete } = deduplicateAddresses(list);
+          db.enderecos_atuacao = unique;
+          if (duplicatesToDelete.length > 0) {
+            for (const dupId of duplicatesToDelete) {
+              removeEndereco(dupId).catch(() => null);
+            }
+          }
           if (onDataChange) onDataChange();
         }
       },

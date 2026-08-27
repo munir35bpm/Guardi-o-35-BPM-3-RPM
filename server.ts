@@ -151,14 +151,21 @@ app.post('/api/infratores', (req, res) => {
 
     // Process attached addresses during suspect registration
     if (Array.isArray(enderecos) && enderecos.length > 0) {
+      const seenAddr = new Set<string>();
       for (const end of enderecos) {
         if (end.logradouro && end.logradouro.trim()) {
+          const logrTrim = end.logradouro.trim();
+          const tipoTrim = end.tipo_endereco || 'Residência';
+          const key = `${tipoTrim.toLowerCase()}|${logrTrim.toLowerCase()}`;
+          if (seenAddr.has(key)) continue;
+          seenAddr.add(key);
+
           const endId = `end-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
           db.enderecos_atuacao.push({
             id: endId,
             infrator_id: id,
-            tipo_endereco: end.tipo_endereco || 'Residência',
-            logradouro: end.logradouro.trim(),
+            tipo_endereco: tipoTrim,
+            logradouro: logrTrim,
             bairro: end.bairro || 'Centro',
             cidade: end.cidade || 'Santa Luzia',
             raio_influencia_km: Number(end.raio_influencia_km) || 2.5,
@@ -478,12 +485,26 @@ app.post('/api/enderecos', (req, res) => {
       return;
     }
 
+    const tipo = tipo_endereco || 'Área de Atuação';
+    const logr = logradouro.trim();
+
+    // Prevent duplicate insertion
+    const existing = db.enderecos_atuacao.find(
+      ea => ea.infrator_id === infrator_id &&
+            ea.tipo_endereco?.toLowerCase() === tipo.toLowerCase() &&
+            ea.logradouro?.toLowerCase() === logr.toLowerCase()
+    );
+    if (existing) {
+      res.status(200).json(existing);
+      return;
+    }
+
     const id = `ea-${Date.now()}`;
     const newEndereco = {
       id,
       infrator_id,
-      tipo_endereco: tipo_endereco || 'Área de Atuação',
-      logradouro,
+      tipo_endereco: tipo,
+      logradouro: logr,
       bairro: bairro || '',
       cidade: cidade || 'São Paulo',
       geom_ponto: { lat: Number(lat), lng: Number(lng) },

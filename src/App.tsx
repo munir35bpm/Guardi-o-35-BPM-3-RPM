@@ -70,6 +70,7 @@ import {
   deleteAddressFromFirebase,
   persistOccurrenceToFirebase,
   deleteOccurrenceFromFirebase,
+  deduplicateAddresses,
 } from './services/firebaseSync';
 
 export default function App() {
@@ -344,9 +345,11 @@ export default function App() {
         const listO = await resO.json();
         const listA = await resA.json();
 
+        const { unique: uniqueA } = deduplicateAddresses(listA);
+
         setSuspects(listS);
         setOccurrences(listO);
-        setAddresses(listA);
+        setAddresses(uniqueA);
 
         // Stats calculation
         setTotalSuspects(listS.length);
@@ -362,10 +365,11 @@ export default function App() {
     const listS = db.infratores;
     const listO = db.ocorrencias_criminais;
     const listA = db.enderecos_atuacao;
+    const { unique: uniqueA } = deduplicateAddresses(listA);
 
     setSuspects([...listS]);
     setOccurrences([...listO]);
-    setAddresses([...listA]);
+    setAddresses(uniqueA);
 
     setTotalSuspects(listS.length);
     setActiveWarrants(listS.filter((s: any) => s.status_mandado_prisao).length);
@@ -720,6 +724,19 @@ export default function App() {
       alert('Informe o Logradouro / Endereço (Rua, Avenida, Beco, etc.).');
       return;
     }
+    const logrNorm = suspectNewAddrData.logradouro.trim().toLowerCase();
+    const tipoNorm = (suspectNewAddrData.tipo_endereco || 'Residência').toLowerCase();
+    const isDuplicate = suspectAddressesList.some(
+      (a) =>
+        (a.tipo_endereco || 'Residência').toLowerCase() === tipoNorm &&
+        a.logradouro.trim().toLowerCase() === logrNorm
+    );
+    if (isDuplicate) {
+      setToastMessage('Este endereço já foi adicionado à lista.');
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
+
     setSuspectAddressesList((prev) => [
       ...prev,
       {
@@ -742,6 +759,8 @@ export default function App() {
       lat: '-19.7712',
       lng: '-43.8564',
     });
+    setToastMessage('Endereço adicionado com sucesso.');
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
   const handleRemoveAddressFromSuspect = (tempId: string) => {
@@ -756,6 +775,21 @@ export default function App() {
       alert('Informe o Logradouro / Endereço.');
       return;
     }
+    const logrNorm = directNewAddrData.logradouro.trim().toLowerCase();
+    const tipoNorm = (directNewAddrData.tipo_endereco || 'Residência').toLowerCase();
+    const existing = db.enderecos_atuacao.find(
+      (ea) =>
+        ea.infrator_id === selectedSuspectDetail.id &&
+        (ea.tipo_endereco || 'Residência').toLowerCase() === tipoNorm &&
+        (ea.logradouro || '').trim().toLowerCase() === logrNorm
+    );
+    if (existing) {
+      setToastMessage('Este endereço já está cadastrado para este infrator.');
+      setTimeout(() => setToastMessage(null), 3500);
+      setIsAddingDirectAddress(false);
+      return;
+    }
+
     try {
       const payload = {
         infrator_id: selectedSuspectDetail.id,
@@ -768,37 +802,40 @@ export default function App() {
         lng: directNewAddrData.lng,
       };
 
-      let created = false;
+      let createdAddr: any = null;
       try {
         const res = await fetch('/api/enderecos', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        if (res.ok) created = true;
+        if (res.ok) {
+          createdAddr = await res.json();
+        }
       } catch (err) {
         console.warn('Backend API unavailable, saving to local in-memory DB', err);
       }
 
-      let createdAddr: any = null;
-      if (!created) {
+      if (!createdAddr) {
         createdAddr = db.addEndereco(payload);
       }
 
       // Persist to Firebase Firestore
-      await persistAddressToFirebase({
-        id: createdAddr?.id || `addr-${Date.now()}`,
-        infrator_id: selectedSuspectDetail.id,
-        tipo_endereco: directNewAddrData.tipo_endereco as any,
-        logradouro: directNewAddrData.logradouro.trim(),
-        bairro: directNewAddrData.bairro.trim() || 'Centro',
-        cidade: directNewAddrData.cidade.trim() || 'Santa Luzia',
-        geom_ponto: {
-          lat: Number(directNewAddrData.lat),
-          lng: Number(directNewAddrData.lng)
-        },
-        raio_influencia_km: Number(directNewAddrData.raio_influencia_km) || 2.5
-      });
+      if (createdAddr && createdAddr.id) {
+        await persistAddressToFirebase({
+          id: createdAddr.id,
+          infrator_id: selectedSuspectDetail.id,
+          tipo_endereco: (createdAddr.tipo_endereco || directNewAddrData.tipo_endereco) as any,
+          logradouro: createdAddr.logradouro || directNewAddrData.logradouro.trim(),
+          bairro: createdAddr.bairro || directNewAddrData.bairro.trim() || 'Centro',
+          cidade: createdAddr.cidade || directNewAddrData.cidade.trim() || 'Santa Luzia',
+          geom_ponto: {
+            lat: Number(directNewAddrData.lat),
+            lng: Number(directNewAddrData.lng)
+          },
+          raio_influencia_km: Number(directNewAddrData.raio_influencia_km) || 2.5
+        });
+      }
 
       // Refresh suspect detail
       const updated = db.getInfratorFull(selectedSuspectDetail.id);
@@ -1167,47 +1204,67 @@ export default function App() {
     }
   };
 
+  // State to prevent multiple clicks during suspect creation
+  const [isSubmittingSuspect, setIsSubmittingSuspect] = useState(false);
+
   // Create suspect submit
   const handleAddSuspectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingSuspect) return;
     if (!newSuspectForm.nome_completo.trim()) {
       alert('Preencha o Nome Completo do infrator.');
       return;
     }
 
+    setIsSubmittingSuspect(true);
     try {
       // Collect all occurrences to link including any unadded draft in the input fields
       const occurrencesToLink = [...suspectOccurrencesList];
       if (suspectNewOcData.numero_bo.trim() && suspectNewOcData.tipificacao_penal.trim()) {
-        occurrencesToLink.push({
-          tempId: `tmp-${Date.now()}`,
-          isNew: true,
-          numero_bo: suspectNewOcData.numero_bo.trim(),
-          tipificacao_penal: suspectNewOcData.tipificacao_penal.trim(),
-          papel_no_crime: suspectOcPapel || 'Autor',
-          data_hora: suspectNewOcData.data_hora || new Date().toISOString(),
-          descricao_fato: suspectNewOcData.descricao_fato || suspectNewOcData.modus_operandi || '',
-          modus_operandi: suspectNewOcData.modus_operandi || '',
-          armas_utilizadas: suspectNewOcData.armas_utilizadas || '',
-          veiculo_utilizado: suspectNewOcData.veiculo_utilizado || '',
-          lat: suspectNewOcData.lat,
-          lng: suspectNewOcData.lng,
-        });
+        const boNorm = suspectNewOcData.numero_bo.trim().toLowerCase();
+        const exists = occurrencesToLink.some(
+          (o) => (o.numero_bo || '').trim().toLowerCase() === boNorm
+        );
+        if (!exists) {
+          occurrencesToLink.push({
+            tempId: `tmp-${Date.now()}`,
+            isNew: true,
+            numero_bo: suspectNewOcData.numero_bo.trim(),
+            tipificacao_penal: suspectNewOcData.tipificacao_penal.trim(),
+            papel_no_crime: suspectOcPapel || 'Autor',
+            data_hora: suspectNewOcData.data_hora || new Date().toISOString(),
+            descricao_fato: suspectNewOcData.descricao_fato || suspectNewOcData.modus_operandi || '',
+            modus_operandi: suspectNewOcData.modus_operandi || '',
+            armas_utilizadas: suspectNewOcData.armas_utilizadas || '',
+            veiculo_utilizado: suspectNewOcData.veiculo_utilizado || '',
+            lat: suspectNewOcData.lat,
+            lng: suspectNewOcData.lng,
+          });
+        }
       }
 
-      // Collect all operational addresses to attach (Multiple Addresses Support)
+      // Collect all operational addresses to attach (Multiple Addresses Support with deduplication)
       const addressesToAttach = [...suspectAddressesList];
       if (suspectNewAddrData.logradouro.trim()) {
-        addressesToAttach.push({
-          tempId: `tmp-addr-${Date.now()}`,
-          tipo_endereco: suspectNewAddrData.tipo_endereco,
-          logradouro: suspectNewAddrData.logradouro.trim(),
-          bairro: suspectNewAddrData.bairro.trim() || 'Centro',
-          cidade: suspectNewAddrData.cidade.trim() || 'Santa Luzia',
-          raio_influencia_km: suspectNewAddrData.raio_influencia_km || '2.5',
-          lat: suspectNewAddrData.lat,
-          lng: suspectNewAddrData.lng,
-        });
+        const logrNorm = suspectNewAddrData.logradouro.trim().toLowerCase();
+        const tipoNorm = (suspectNewAddrData.tipo_endereco || 'Residência').toLowerCase();
+        const exists = addressesToAttach.some(
+          (a) =>
+            (a.tipo_endereco || 'Residência').toLowerCase() === tipoNorm &&
+            a.logradouro.trim().toLowerCase() === logrNorm
+        );
+        if (!exists) {
+          addressesToAttach.push({
+            tempId: `tmp-addr-${Date.now()}`,
+            tipo_endereco: suspectNewAddrData.tipo_endereco,
+            logradouro: suspectNewAddrData.logradouro.trim(),
+            bairro: suspectNewAddrData.bairro.trim() || 'Centro',
+            cidade: suspectNewAddrData.cidade.trim() || 'Santa Luzia',
+            raio_influencia_km: suspectNewAddrData.raio_influencia_km || '2.5',
+            lat: suspectNewAddrData.lat,
+            lng: suspectNewAddrData.lng,
+          });
+        }
       }
 
       let createdSuspect: any = null;
@@ -1301,6 +1358,8 @@ export default function App() {
     } catch (err) {
       console.error('Error adding suspect:', err);
       alert('Ocorreu um erro ao salvar o infrator.');
+    } finally {
+      setIsSubmittingSuspect(false);
     }
   };
 
