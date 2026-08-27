@@ -64,6 +64,37 @@ interface TacticalMapProps {
   highlightedSuspectId?: string | null;
 }
 
+// Helper to accurately resolve suspect name and nickname (alcunha/vulgo)
+function getSuspectInfoForAddress(addr: EnderecoAtuacao) {
+  let nome = addr.infrator_nome?.trim();
+  let vulgo = addr.infrator_vulgo?.trim();
+
+  // Search in memory database if missing or placeholder
+  if (!nome || nome.toLowerCase() === 'infrator' || nome.toLowerCase() === 'novo infrator' || nome === '') {
+    if (addr.infrator_id) {
+      const inf = db.infratores?.find((i) => i.id === addr.infrator_id) || db.getInfratorFull?.(addr.infrator_id);
+      if (inf) {
+        if (inf.nome_completo) nome = inf.nome_completo.trim();
+        if (inf.vulgo) vulgo = inf.vulgo.trim();
+      }
+    }
+  }
+
+  // Filter out placeholder vulgos
+  const isCleanVulgo =
+    vulgo &&
+    vulgo.trim() !== '' &&
+    vulgo.toUpperCase() !== 'S/V' &&
+    vulgo.toLowerCase() !== 'sem vulgo' &&
+    vulgo.toLowerCase() !== 'não informado' &&
+    vulgo.toLowerCase() !== 'nenhum';
+
+  return {
+    nome: nome || 'Infrator Cadastrado',
+    vulgo: isCleanVulgo ? vulgo : null,
+  };
+}
+
 export default function TacticalMap({
   selectedCoords,
   onSelectCoords,
@@ -116,9 +147,25 @@ export default function TacticalMap({
 
       if (resAdd && resAdd.ok) {
         const dataAdd = await resAdd.json();
-        setAddresses(dataAdd);
+        const enriched = (Array.isArray(dataAdd) ? dataAdd : []).map((ea: EnderecoAtuacao) => {
+          const inf = db.infratores?.find((i) => i.id === ea.infrator_id) || db.getInfratorFull?.(ea.infrator_id);
+          return {
+            ...ea,
+            infrator_nome: ea.infrator_nome || inf?.nome_completo,
+            infrator_vulgo: ea.infrator_vulgo || inf?.vulgo,
+          };
+        });
+        setAddresses(enriched);
       } else {
-        setAddresses(db.enderecos_atuacao);
+        const enriched = (db.enderecos_atuacao || []).map((ea: EnderecoAtuacao) => {
+          const inf = db.infratores?.find((i) => i.id === ea.infrator_id) || db.getInfratorFull?.(ea.infrator_id);
+          return {
+            ...ea,
+            infrator_nome: ea.infrator_nome || inf?.nome_completo,
+            infrator_vulgo: ea.infrator_vulgo || inf?.vulgo,
+          };
+        });
+        setAddresses(enriched);
       }
 
       if (resGang && resGang.ok) {
@@ -331,15 +378,17 @@ export default function TacticalMap({
                 <div style="font-size: 10px; font-weight: bold; text-transform: uppercase; color: #f59e0b; margin-bottom: 3px;">
                   ⚠️ ${suspectsInside.length} Infrator(es) Mapeado(s) neste Território:
                 </div>
-                <div style="max-height: 90px; overflow-y: auto; font-size: 11px;">
+                <div style="max-height: 110px; overflow-y: auto; font-size: 11px;">
                   ${suspectsInside
                     .map(
-                      (s) =>
-                        `<div style="padding: 2px 0; border-bottom: 1px dashed #1e293b;">
-                          <strong style="color: #f1f5f9;">${s.infrator_nome || 'Infrator'}</strong> 
-                          <span style="color: #94a3b8;">(${s.infrator_vulgo || 'S/V'})</span>
-                          <span style="color: #64748b; font-size: 10px; display: block;">${s.tipo_endereco}: ${s.logradouro}</span>
-                        </div>`
+                      (s) => {
+                        const sInfo = getSuspectInfoForAddress(s);
+                        return `<div style="padding: 3px 0; border-bottom: 1px dashed #334155;">
+                          <strong style="color: #f1f5f9; font-size: 11px;">${sInfo.nome}</strong> 
+                          ${sInfo.vulgo ? `<span style="color: #DFC897; font-weight: 600;">("${sInfo.vulgo}")</span>` : ''}
+                          <span style="color: #94a3b8; font-size: 10px; display: block; margin-top: 1px;">📍 ${s.tipo_endereco}: ${s.logradouro}</span>
+                        </div>`;
+                      }
                     )
                     .join('')}
                 </div>
@@ -496,13 +545,18 @@ export default function TacticalMap({
         dashArray: '3, 4',
       });
 
+      const suspectInfo = getSuspectInfoForAddress(addr);
+
       marker.bindPopup(`
-        <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace, sans-serif; color: #F3EEE4; min-width: 250px;">
-          <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(196, 167, 110, 0.4); padding-bottom: 5px; margin-bottom: 6px;">
-            <h4 style="margin: 0; color: #F59E0B; font-weight: 700; font-size: 13px; text-transform: uppercase;">
-              ${addr.infrator_nome || 'Infrator'} ${addr.infrator_vulgo ? `<span style="color: #DFC897;">("${addr.infrator_vulgo}")</span>` : ''}
-            </h4>
-            <span style="font-size: 9px; font-weight: 800; background: ${color}; color: #ffffff; padding: 2px 6px; border-radius: 2px; text-transform: uppercase; letter-spacing: 0.5px;">
+        <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace, sans-serif; color: #F3EEE4; min-width: 260px;">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border-bottom: 1px solid rgba(196, 167, 110, 0.4); padding-bottom: 6px; margin-bottom: 6px;">
+            <div style="min-width: 0;">
+              <h4 style="margin: 0; color: #F59E0B; font-weight: 700; font-size: 13px; text-transform: uppercase; line-height: 1.25;">
+                ${suspectInfo.nome}
+              </h4>
+              ${suspectInfo.vulgo ? `<div style="color: #DFC897; font-size: 11px; font-weight: 600; margin-top: 2px;">Alcunha: "${suspectInfo.vulgo}"</div>` : ''}
+            </div>
+            <span style="font-size: 9px; font-weight: 800; background: ${color}; color: #ffffff; padding: 2px 6px; border-radius: 2px; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; flex-shrink: 0;">
               ${addr.tipo_endereco || 'Endereço'}
             </span>
           </div>

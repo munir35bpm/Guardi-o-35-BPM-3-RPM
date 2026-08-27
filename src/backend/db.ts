@@ -36,6 +36,8 @@ export interface EnderecoAtuacao {
   cidade: string;
   geom_ponto: { lat: number; lng: number }; // point representation
   raio_influencia_km: number;
+  infrator_nome?: string;
+  infrator_vulgo?: string;
 }
 
 export interface OcorrenciaCriminal {
@@ -354,6 +356,7 @@ class CrimIntelDatabase {
 
   public addEndereco(data: any): EnderecoAtuacao {
     const id = data.id || `end-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const inf = this.infratores.find(i => i.id === data.infrator_id);
     const newEnd: EnderecoAtuacao = {
       id,
       infrator_id: data.infrator_id,
@@ -365,7 +368,9 @@ class CrimIntelDatabase {
       geom_ponto: {
         lat: data.lat !== undefined && !isNaN(Number(data.lat)) ? Number(data.lat) : (data.geom_ponto?.lat ?? -19.7712),
         lng: data.lng !== undefined && !isNaN(Number(data.lng)) ? Number(data.lng) : (data.geom_ponto?.lng ?? -43.8564)
-      }
+      },
+      infrator_nome: data.infrator_nome || inf?.nome_completo,
+      infrator_vulgo: data.infrator_vulgo || inf?.vulgo
     };
     this.enderecos_atuacao.unshift(newEnd);
     return newEnd;

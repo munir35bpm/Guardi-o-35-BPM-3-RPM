@@ -135,7 +135,11 @@ export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails):
     // 2. Save associated addresses
     if (suspectFull.enderecos && suspectFull.enderecos.length > 0) {
       for (const addr of suspectFull.enderecos) {
-        await saveEndereco(addr);
+        await saveEndereco({
+          ...addr,
+          infrator_nome: addr.infrator_nome || suspectFull.nome_completo,
+          infrator_vulgo: addr.infrator_vulgo || suspectFull.vulgo
+        });
       }
     }
 
