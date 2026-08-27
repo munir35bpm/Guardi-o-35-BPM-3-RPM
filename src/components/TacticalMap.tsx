@@ -497,13 +497,20 @@ export default function TacticalMap({
       });
 
       marker.bindPopup(`
-        <div style="font-size: 13px; font-family: sans-serif; color: #1e293b;">
-          <h4 style="margin: 0 0 5px 0; color: #0f172a; font-weight: 700; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
-            ${addr.infrator_nome || 'Infrator'} ${addr.infrator_vulgo ? `(${addr.infrator_vulgo})` : ''}
-          </h4>
-          <p style="margin: 3px 0;"><strong>Tipo:</strong> ${addr.tipo_endereco}</p>
-          <p style="margin: 3px 0;"><strong>Endereço:</strong> ${addr.logradouro}, ${addr.bairro || 'Centro'}</p>
-          <p style="margin: 3px 0;"><strong>Raio de Atuação:</strong> ${addr.raio_influencia_km || 2.5} km</p>
+        <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace, sans-serif; color: #F3EEE4; min-width: 250px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(196, 167, 110, 0.4); padding-bottom: 5px; margin-bottom: 6px;">
+            <h4 style="margin: 0; color: #F59E0B; font-weight: 700; font-size: 13px; text-transform: uppercase;">
+              ${addr.infrator_nome || 'Infrator'} ${addr.infrator_vulgo ? `<span style="color: #DFC897;">("${addr.infrator_vulgo}")</span>` : ''}
+            </h4>
+            <span style="font-size: 9px; font-weight: 800; background: ${color}; color: #ffffff; padding: 2px 6px; border-radius: 2px; text-transform: uppercase; letter-spacing: 0.5px;">
+              ${addr.tipo_endereco || 'Endereço'}
+            </span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px; margin-top: 4px;">
+            <div><strong style="color: #DFC897;">Tipo:</strong> <span style="color: #FFFFFF; font-weight: 600;">${addr.tipo_endereco}</span></div>
+            <div><strong style="color: #DFC897;">Endereço:</strong> <span style="color: #F3EEE4;">${addr.logradouro}, ${addr.bairro || 'Centro'}</span></div>
+            <div><strong style="color: #DFC897;">Raio de Atuação:</strong> <span style="color: #38BDF8; font-weight: bold;">${addr.raio_influencia_km || 2.5} km</span></div>
+          </div>
         </div>
       `);
 
