@@ -98,6 +98,7 @@ app.post('/api/infratores', (req, res) => {
       data_nascimento,
       cpf,
       foto_url,
+      galeria_fotos,
       gangue_faccao,
       status_mandado_prisao,
       situacao_atual,
@@ -120,14 +121,44 @@ app.post('/api/infratores', (req, res) => {
     }
 
     const situacaoFinal = situacao_atual || situacao_prisional || (status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE');
-    const id = `inf-${Date.now()}`;
+    const id = req.body.id || `inf-${Date.now()}`;
+
+    let parsedGaleria: any[] = [];
+    if (Array.isArray(galeria_fotos) && galeria_fotos.length > 0) {
+      parsedGaleria = galeria_fotos.map((f: any, idx: number) => ({
+        id: f.id || `foto-${Date.now()}-${idx}`,
+        url: f.url || f,
+        tipo: f.tipo || 'ROSTO',
+        descricao: f.descricao || '',
+        principal: !!f.principal,
+        data_inclusao: f.data_inclusao || new Date().toISOString()
+      }));
+    } else if (foto_url) {
+      parsedGaleria = [{
+        id: `foto-${Date.now()}-main`,
+        url: foto_url,
+        tipo: 'ROSTO',
+        descricao: 'Foto Principal',
+        principal: true,
+        data_inclusao: new Date().toISOString()
+      }];
+    }
+
+    if (parsedGaleria.length > 0 && !parsedGaleria.some(f => f.principal)) {
+      parsedGaleria[0].principal = true;
+    }
+
+    const mainPhoto = parsedGaleria.find(f => f.principal) || parsedGaleria[0];
+    const finalPhotoUrl = foto_url || mainPhoto?.url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop';
+
     const newInfrator = {
       id,
       nome_completo,
       vulgo: vulgo || 'S/V',
       data_nascimento: data_nascimento || '1990-01-01',
       cpf: cpf || '000.000.000-00',
-      foto_url: foto_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop',
+      foto_url: finalPhotoUrl,
+      galeria_fotos: parsedGaleria,
       gangue_faccao: gangue_faccao || 'Nenhuma',
       status_mandado_prisao: !!status_mandado_prisao || situacaoFinal === 'FORAGIDO',
       situacao_atual: situacaoFinal,
@@ -321,12 +352,24 @@ app.put('/api/infratores/:id', (req, res) => {
     }
 
     const {
-      nome_completo, vulgo, data_nascimento, cpf, foto_url, gangue_faccao,
+      nome_completo, vulgo, data_nascimento, cpf, foto_url, galeria_fotos, gangue_faccao,
       status_mandado_prisao, situacao_atual, situacao_prisional, periculosidade,
       altura_estimada, cor_pele, compleicao, tatuagens_detalhes, cicatrizes, sinais_particulares
     } = req.body;
 
     const situacaoFinal = situacao_atual || situacao_prisional;
+
+    let updatedGaleria = galeria_fotos !== undefined ? galeria_fotos : db.infratores[infratorIndex].galeria_fotos;
+    let mainPhotoUrl = foto_url || db.infratores[infratorIndex].foto_url;
+
+    if (Array.isArray(updatedGaleria) && updatedGaleria.length > 0) {
+      const principal = updatedGaleria.find((f: any) => f.principal);
+      if (principal && principal.url) {
+        mainPhotoUrl = principal.url;
+      } else if (!mainPhotoUrl && updatedGaleria[0]?.url) {
+        mainPhotoUrl = updatedGaleria[0].url;
+      }
+    }
 
     db.infratores[infratorIndex] = {
       ...db.infratores[infratorIndex],
@@ -334,7 +377,8 @@ app.put('/api/infratores/:id', (req, res) => {
       vulgo: vulgo !== undefined ? vulgo : db.infratores[infratorIndex].vulgo,
       data_nascimento: data_nascimento || db.infratores[infratorIndex].data_nascimento,
       cpf: cpf || db.infratores[infratorIndex].cpf,
-      foto_url: foto_url || db.infratores[infratorIndex].foto_url,
+      foto_url: mainPhotoUrl,
+      galeria_fotos: updatedGaleria,
       gangue_faccao: gangue_faccao !== undefined ? gangue_faccao : db.infratores[infratorIndex].gangue_faccao,
       status_mandado_prisao: status_mandado_prisao !== undefined ? !!status_mandado_prisao : (situacaoFinal === 'FORAGIDO' ? true : db.infratores[infratorIndex].status_mandado_prisao),
       situacao_atual: situacaoFinal || db.infratores[infratorIndex].situacao_atual,
@@ -356,6 +400,54 @@ app.put('/api/infratores/:id', (req, res) => {
     }
 
     res.json(db.getInfratorFull(id));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Photo Management Endpoints
+app.post('/api/infratores/:id/fotos', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { url, tipo, descricao, principal } = req.body;
+    if (!url) {
+      res.status(400).json({ error: 'URL/Imagem da foto é obrigatória.' });
+      return;
+    }
+    const updated = db.addPhotoToInfrator(id, { url, tipo, descricao, principal });
+    if (!updated) {
+      res.status(404).json({ error: 'Infrator não encontrado.' });
+      return;
+    }
+    res.json(updated);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/infratores/:id/fotos/:foto_id/principal', (req, res) => {
+  try {
+    const { id, foto_id } = req.params;
+    const updated = db.setPrimaryPhotoInfrator(id, foto_id);
+    if (!updated) {
+      res.status(404).json({ error: 'Infrator ou foto não encontrada.' });
+      return;
+    }
+    res.json(updated);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/infratores/:id/fotos/:foto_id', (req, res) => {
+  try {
+    const { id, foto_id } = req.params;
+    const updated = db.removePhotoFromInfrator(id, foto_id);
+    if (!updated) {
+      res.status(404).json({ error: 'Infrator não encontrado.' });
+      return;
+    }
+    res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -998,7 +1090,7 @@ app.post(['/api/ai/facial-recognition-match', '/api/ai/facial-recognition-match/
       }
     }
 
-    // Gather all registered suspects with their physical characteristics
+    // Gather all registered suspects with their physical characteristics and full photo gallery
     const candidates = db.infratores.map(i => {
       const full = db.getInfratorFull(i.id);
       return {
@@ -1009,6 +1101,11 @@ app.post(['/api/ai/facial-recognition-match', '/api/ai/facial-recognition-match/
         periculosidade: i.periculosidade,
         mandado_ativo: i.status_mandado_prisao,
         foto_url: i.foto_url,
+        galeria_fotos: (i.galeria_fotos || []).map(f => ({
+          tipo: f.tipo,
+          descricao: f.descricao,
+          principal: f.principal
+        })),
         caracteristicas_fisicas: full?.fisicas || {
           pele: 'Parda',
           altura_estimada: '1.75m',

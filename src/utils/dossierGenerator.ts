@@ -1131,6 +1131,37 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
     </table>
     `}
 
+    ${Array.isArray(infratorFull.galeria_fotos) && infratorFull.galeria_fotos.length > 0 ? `
+    <div class="section-title">
+      <span>Acervo Fotográfico de Inteligência • Tatuagens, Cicatrizes, Perfil e Sinais</span>
+      <span class="count">${infratorFull.galeria_fotos.length} Foto(s) Registrada(s)</span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px;">
+      ${infratorFull.galeria_fotos.map((foto: any, idx: number) => {
+        const fotoTipo = foto.tipo || 'ROSTO';
+        const isPrincipal = !!foto.principal;
+        let tipoLabel = 'Foto Facial';
+        if (fotoTipo === 'TATUAGEM') tipoLabel = 'Tatuagem';
+        else if (fotoTipo === 'CICATRIZ') tipoLabel = 'Cicatriz / Marca';
+        else if (fotoTipo === 'SINAL') tipoLabel = 'Sinal Particular';
+        else if (fotoTipo === 'PERFIL') tipoLabel = 'Perfil / Ângulo';
+        else if (fotoTipo === 'CORPO') tipoLabel = 'Corpo Inteiro';
+        else if (fotoTipo === 'TATICA') tipoLabel = 'Registro Tático';
+
+        return `
+          <div style="border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px; background: #fff; text-align: center;">
+            <div style="position: relative; width: 100%; height: 110px; background: #f1f5f9; border-radius: 3px; overflow: hidden; margin-bottom: 4px;">
+              <img src="${foto.url}" alt="${tipoLabel}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop'" />
+              ${isPrincipal ? `<span style="position: absolute; top: 2px; right: 2px; background: #0284c7; color: #fff; font-size: 6pt; font-weight: 800; padding: 1px 3px; border-radius: 2px;">★ PRINCIPAL</span>` : ''}
+            </div>
+            <div style="font-size: 7pt; font-weight: 800; color: #0f172a; text-transform: uppercase;">${tipoLabel}</div>
+            ${foto.descricao ? `<div style="font-size: 6.5pt; color: #64748b; line-height: 1.1; margin-top: 1px; max-height: 24px; overflow: hidden;">${foto.descricao}</div>` : ''}
+          </div>
+        `;
+      }).join('')}
+    </div>
+    ` : ''}
+
     <div class="footer">
       <div>35º BPM • PMMG • O Guardião do Alto Rio das Velhas • Sistema de Inteligência Policial</div>
       <div>EMISSÃO: ${new Date().toLocaleString('pt-BR')} • DOC ID: ${infratorFull.id || 'N/D'}</div>

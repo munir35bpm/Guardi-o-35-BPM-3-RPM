@@ -1,4 +1,4 @@
-import { GangAreaZone } from '../types';
+import { GangAreaZone, FotoInfrator, TipoFotoInfrator } from '../types';
 import { DEFAULT_GANG_AREAS_35BPM } from '../utils/kmlGeoJsonParser';
 
 // Types representing the database schema
@@ -9,6 +9,7 @@ export interface Infrator {
   data_nascimento: string;
   cpf: string;
   foto_url: string;
+  galeria_fotos?: FotoInfrator[];
   gangue_faccao: string;
   status_mandado_prisao: boolean;
   situacao_atual?: string;
@@ -235,8 +236,21 @@ class CrimIntelDatabase {
     const comparsas = Array.from(mergedComparsasMap.values());
     const vinculos_policiais_cruzados = Array.from(boMap.values());
 
+    const galeria_fotos = infrator.galeria_fotos && infrator.galeria_fotos.length > 0
+      ? infrator.galeria_fotos
+      : (infrator.foto_url ? [{
+          id: `foto-${infrator.id}-main`,
+          url: infrator.foto_url,
+          tipo: 'ROSTO',
+          descricao: 'Foto Principal',
+          principal: true,
+          data_inclusao: infrator.created_at
+        }] : []);
+
     return {
       ...infrator,
+      foto_url: infrator.foto_url || (galeria_fotos.find(f => f.principal)?.url || galeria_fotos[0]?.url) || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop',
+      galeria_fotos,
       fisicas,
       enderecos,
       ocorrencias,
@@ -250,13 +264,43 @@ class CrimIntelDatabase {
     const situacao = data.situacao_atual || data.situacao_prisional || (data.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE');
     const isMandado = !!data.status_mandado_prisao || situacao === 'FORAGIDO';
 
+    let galeria_fotos: FotoInfrator[] = [];
+    if (Array.isArray(data.galeria_fotos) && data.galeria_fotos.length > 0) {
+      galeria_fotos = data.galeria_fotos.map((f: any, idx: number) => ({
+        id: f.id || `foto-${Date.now()}-${idx}`,
+        url: f.url || f,
+        tipo: f.tipo || 'ROSTO',
+        descricao: f.descricao || '',
+        principal: !!f.principal,
+        data_inclusao: f.data_inclusao || new Date().toISOString()
+      }));
+    } else if (data.foto_url) {
+      galeria_fotos = [{
+        id: `foto-${Date.now()}-main`,
+        url: data.foto_url,
+        tipo: 'ROSTO',
+        descricao: 'Foto Principal',
+        principal: true,
+        data_inclusao: new Date().toISOString()
+      }];
+    }
+
+    // Ensure at least one photo is marked as principal if any exist
+    if (galeria_fotos.length > 0 && !galeria_fotos.some(f => f.principal)) {
+      galeria_fotos[0].principal = true;
+    }
+
+    const principalPhoto = galeria_fotos.find(f => f.principal) || galeria_fotos[0];
+    const mainPhotoUrl = data.foto_url || principalPhoto?.url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop';
+
     const newInfrator: Infrator = {
       id,
       nome_completo: data.nome_completo,
       vulgo: data.vulgo || 'S/V',
       data_nascimento: data.data_nascimento || '1990-01-01',
       cpf: data.cpf || '000.000.000-00',
-      foto_url: data.foto_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop',
+      foto_url: mainPhotoUrl,
+      galeria_fotos,
       gangue_faccao: data.gangue_faccao || 'Nenhuma',
       status_mandado_prisao: isMandado,
       situacao_atual: situacao,
@@ -480,13 +524,26 @@ class CrimIntelDatabase {
 
     const situacaoFinal = data.situacao_atual || data.situacao_prisional;
 
+    let updatedGaleria = data.galeria_fotos !== undefined ? data.galeria_fotos : this.infratores[infratorIndex].galeria_fotos;
+    let mainPhotoUrl = data.foto_url || this.infratores[infratorIndex].foto_url;
+
+    if (Array.isArray(updatedGaleria) && updatedGaleria.length > 0) {
+      const principal = updatedGaleria.find((f: any) => f.principal);
+      if (principal && principal.url) {
+        mainPhotoUrl = principal.url;
+      } else if (!mainPhotoUrl && updatedGaleria[0]?.url) {
+        mainPhotoUrl = updatedGaleria[0].url;
+      }
+    }
+
     this.infratores[infratorIndex] = {
       ...this.infratores[infratorIndex],
       nome_completo: data.nome_completo || this.infratores[infratorIndex].nome_completo,
       vulgo: data.vulgo !== undefined ? data.vulgo : this.infratores[infratorIndex].vulgo,
       data_nascimento: data.data_nascimento || this.infratores[infratorIndex].data_nascimento,
       cpf: data.cpf || this.infratores[infratorIndex].cpf,
-      foto_url: data.foto_url || this.infratores[infratorIndex].foto_url,
+      foto_url: mainPhotoUrl,
+      galeria_fotos: updatedGaleria,
       gangue_faccao: data.gangue_faccao !== undefined ? data.gangue_faccao : this.infratores[infratorIndex].gangue_faccao,
       status_mandado_prisao: data.status_mandado_prisao !== undefined ? !!data.status_mandado_prisao : (situacaoFinal === 'FORAGIDO' ? true : this.infratores[infratorIndex].status_mandado_prisao),
       situacao_atual: situacaoFinal || this.infratores[infratorIndex].situacao_atual,
@@ -508,6 +565,79 @@ class CrimIntelDatabase {
     }
 
     return this.getInfratorFull(id);
+  }
+
+  public addPhotoToInfrator(infratorId: string, photo: Partial<FotoInfrator>): any {
+    const infrator = this.infratores.find(i => i.id === infratorId);
+    if (!infrator) return null;
+
+    if (!infrator.galeria_fotos) {
+      infrator.galeria_fotos = infrator.foto_url ? [{
+        id: `foto-${infrator.id}-main`,
+        url: infrator.foto_url,
+        tipo: 'ROSTO',
+        descricao: 'Foto Principal',
+        principal: true,
+        data_inclusao: infrator.created_at
+      }] : [];
+    }
+
+    const newPhoto: FotoInfrator = {
+      id: photo.id || `foto-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      url: photo.url || '',
+      tipo: photo.tipo || 'ROSTO',
+      descricao: photo.descricao || '',
+      principal: !!photo.principal || infrator.galeria_fotos.length === 0,
+      data_inclusao: photo.data_inclusao || new Date().toISOString()
+    };
+
+    if (newPhoto.principal) {
+      infrator.galeria_fotos.forEach(f => { f.principal = false; });
+      infrator.foto_url = newPhoto.url;
+    }
+
+    infrator.galeria_fotos.push(newPhoto);
+    return this.getInfratorFull(infratorId);
+  }
+
+  public setPrimaryPhotoInfrator(infratorId: string, photoId: string): any {
+    const infrator = this.infratores.find(i => i.id === infratorId);
+    if (!infrator || !infrator.galeria_fotos) return null;
+
+    let targetFound = false;
+    infrator.galeria_fotos.forEach(f => {
+      if (f.id === photoId || f.url === photoId) {
+        f.principal = true;
+        infrator.foto_url = f.url;
+        targetFound = true;
+      } else {
+        f.principal = false;
+      }
+    });
+
+    if (!targetFound && infrator.galeria_fotos.length > 0) {
+      infrator.galeria_fotos[0].principal = true;
+      infrator.foto_url = infrator.galeria_fotos[0].url;
+    }
+
+    return this.getInfratorFull(infratorId);
+  }
+
+  public removePhotoFromInfrator(infratorId: string, photoId: string): any {
+    const infrator = this.infratores.find(i => i.id === infratorId);
+    if (!infrator || !infrator.galeria_fotos) return null;
+
+    const removedWasPrincipal = infrator.galeria_fotos.some(f => (f.id === photoId || f.url === photoId) && f.principal);
+    infrator.galeria_fotos = infrator.galeria_fotos.filter(f => f.id !== photoId && f.url !== photoId);
+
+    if (removedWasPrincipal && infrator.galeria_fotos.length > 0) {
+      infrator.galeria_fotos[0].principal = true;
+      infrator.foto_url = infrator.galeria_fotos[0].url;
+    } else if (infrator.galeria_fotos.length === 0) {
+      infrator.foto_url = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop';
+    }
+
+    return this.getInfratorFull(infratorId);
   }
 
   // ORCRIM Organograms Repository

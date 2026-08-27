@@ -41,7 +41,10 @@ import {
   ChevronDown,
   ChevronUp,
   Car,
-  Fingerprint
+  Fingerprint,
+  Star,
+  Eye,
+  Maximize2
 } from 'lucide-react';
 import TacticalMap from './components/TacticalMap';
 import NetworkGraph from './components/NetworkGraph';
@@ -54,6 +57,7 @@ import {
   OcorrenciaCriminal,
   EnderecoAtuacao,
   Infrator,
+  FotoInfrator,
   IntelligenceAnalysisResult,
   OcorrenciaProcessada,
   CruzamentoSuspeito,
@@ -240,6 +244,30 @@ export default function App() {
     lat: '-19.7712',
     lng: '-43.8564',
   });
+
+  // Photo Gallery for New Suspect Registration (Unlimited Photos)
+  const [suspectPhotosList, setSuspectPhotosList] = useState<FotoInfrator[]>([]);
+  const [newPhotoManualUrl, setNewPhotoManualUrl] = useState('');
+  const [newPhotoManualTipo, setNewPhotoManualTipo] = useState<'ROSTO' | 'TATUAGEM' | 'CICATRIZ' | 'SINAL' | 'PERFIL' | 'CORPO' | 'TATICA'>('ROSTO');
+  const [newPhotoManualDesc, setNewPhotoManualDesc] = useState('');
+
+  // Direct Photo Management in Suspect Detail Drawer
+  const [isAddingDirectPhoto, setIsAddingDirectPhoto] = useState(false);
+  const [directPhotoDraft, setDirectPhotoDraft] = useState({
+    url: '',
+    tipo: 'TATUAGEM' as 'ROSTO' | 'TATUAGEM' | 'CICATRIZ' | 'SINAL' | 'PERFIL' | 'CORPO' | 'TATICA',
+    descricao: '',
+    principal: false,
+  });
+
+  // Photo Lightbox Zoom
+  const [inspectingPhoto, setInspectingPhoto] = useState<{
+    url: string;
+    tipo?: string;
+    descricao?: string;
+    principal?: boolean;
+    suspectName?: string;
+  } | null>(null);
 
   // Helper for role badge display
   const getPapelBadge = (papel: string) => {
@@ -885,6 +913,283 @@ export default function App() {
     }
   };
 
+  // Photo handlers for Registration Form (Unlimited photos)
+  const handleAddFilesToRegistration = (files: FileList | File[]) => {
+    Array.from(files).forEach((file) => {
+      if (!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string;
+        setSuspectPhotosList((prev) => {
+          const isFirst = prev.length === 0;
+          const newPhoto: FotoInfrator = {
+            id: `foto-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            url: dataUrl,
+            tipo: isFirst ? 'ROSTO' : 'TATUAGEM',
+            descricao: isFirst ? 'Foto Facial Principal' : '',
+            principal: isFirst,
+            created_at: new Date().toISOString(),
+          };
+          if (isFirst) {
+            setNewSuspectForm((f) => ({ ...f, foto_url: dataUrl }));
+          }
+          return [...prev, newPhoto];
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleSetRegistrationPrimaryPhoto = (index: number) => {
+    setSuspectPhotosList((prev) => {
+      const target = prev[index];
+      if (target) {
+        setNewSuspectForm((f) => ({ ...f, foto_url: target.url }));
+      }
+      return prev.map((p, i) => ({
+        ...p,
+        principal: i === index,
+      }));
+    });
+    setToastMessage('Foto principal definida para o cadastro!');
+    setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  const handleUpdateRegistrationPhoto = (index: number, updates: Partial<FotoInfrator>) => {
+    setSuspectPhotosList((prev) =>
+      prev.map((p, i) => (i === index ? { ...p, ...updates } : p))
+    );
+  };
+
+  const handleRemoveRegistrationPhoto = (index: number) => {
+    setSuspectPhotosList((prev) => {
+      const removing = prev[index];
+      const nextList = prev.filter((_, i) => i !== index);
+      if (removing.principal && nextList.length > 0) {
+        nextList[0].principal = true;
+        setNewSuspectForm((f) => ({ ...f, foto_url: nextList[0].url }));
+      } else if (nextList.length === 0) {
+        setNewSuspectForm((f) => ({ ...f, foto_url: '' }));
+      }
+      return nextList;
+    });
+  };
+
+  // Direct Photo Handlers for Suspect Detail Drawer
+  const handleUploadDirectPhotoFiles = async (files: FileList | File[]) => {
+    if (!selectedSuspectDetail) return;
+    const suspectId = selectedSuspectDetail.id;
+    const fileList = Array.from(files);
+
+    for (const file of fileList) {
+      if (!file.type.startsWith('image/')) continue;
+      await new Promise<void>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const dataUrl = reader.result as string;
+          try {
+            const isFirst = (!selectedSuspectDetail.galeria_fotos || selectedSuspectDetail.galeria_fotos.length === 0);
+            const photoPayload = {
+              url: dataUrl,
+              tipo: isFirst ? 'ROSTO' : 'TATUAGEM',
+              descricao: isFirst ? 'Foto Principal' : 'Registro Fotográfico Complementar',
+              principal: isFirst,
+            };
+
+            let updated: any = null;
+            try {
+              const res = await fetch(`/api/infratores/${suspectId}/fotos`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(photoPayload),
+              });
+              if (res.ok) {
+                updated = await res.json();
+              }
+            } catch (err) {
+              console.warn('API direct photo upload failed, using local DB', err);
+            }
+
+            if (!updated) {
+              updated = db.addPhotoToInfrator(suspectId, photoPayload);
+            }
+
+            if (updated) {
+              await persistSuspectToFirebase(updated);
+              setSelectedSuspectDetail(updated);
+              setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
+            }
+          } catch (e) {
+            console.error('Error uploading photo:', e);
+          }
+          resolve();
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    fetchTelemetry();
+    setToastMessage('Foto(s) adicionada(s) ao acervo do infrator com sucesso!');
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleAddDirectPhoto = async (photo: { url: string; tipo: any; descricao: string; principal?: boolean }) => {
+    if (!selectedSuspectDetail) return;
+    const suspectId = selectedSuspectDetail.id;
+    try {
+      let updated: any = null;
+      try {
+        const res = await fetch(`/api/infratores/${suspectId}/fotos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(photo),
+        });
+        if (res.ok) {
+          updated = await res.json();
+        }
+      } catch (err) {
+        console.warn('API error, adding direct photo locally:', err);
+      }
+
+      if (!updated) {
+        updated = db.addPhotoToInfrator(suspectId, photo);
+      }
+
+      if (updated) {
+        await persistSuspectToFirebase(updated);
+        setSelectedSuspectDetail(updated);
+        setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
+      }
+
+      setIsAddingDirectPhoto(false);
+      fetchTelemetry();
+      setToastMessage('Foto adicionada ao acervo!');
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (e) {
+      console.error('Error adding direct photo:', e);
+    }
+  };
+
+  const handleSaveDirectPhotoForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSuspectDetail || !directPhotoDraft.url.trim()) {
+      alert('Informe a URL da foto ou selecione uma imagem.');
+      return;
+    }
+    const suspectId = selectedSuspectDetail.id;
+    try {
+      let updated: any = null;
+      try {
+        const res = await fetch(`/api/infratores/${suspectId}/fotos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(directPhotoDraft),
+        });
+        if (res.ok) {
+          updated = await res.json();
+        }
+      } catch (err) {
+        console.warn('API error, saving photo locally:', err);
+      }
+
+      if (!updated) {
+        updated = db.addPhotoToInfrator(suspectId, directPhotoDraft);
+      }
+
+      if (updated) {
+        await persistSuspectToFirebase(updated);
+        setSelectedSuspectDetail(updated);
+        setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
+      }
+
+      setIsAddingDirectPhoto(false);
+      setDirectPhotoDraft({
+        url: '',
+        tipo: 'TATUAGEM',
+        descricao: '',
+        principal: false,
+      });
+      fetchTelemetry();
+      setToastMessage('Foto registrada com sucesso!');
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (err) {
+      console.error('Error saving direct photo:', err);
+      alert('Erro ao salvar foto.');
+    }
+  };
+
+  const handleAddDirectPhotoSubmit = handleSaveDirectPhotoForm;
+
+  const handleSetDirectPrimaryPhoto = async (fotoId: string) => {
+    if (!selectedSuspectDetail) return;
+    const suspectId = selectedSuspectDetail.id;
+    try {
+      let updated: any = null;
+      try {
+        const res = await fetch(`/api/infratores/${suspectId}/fotos/${fotoId}/principal`, {
+          method: 'PUT',
+        });
+        if (res.ok) {
+          updated = await res.json();
+        }
+      } catch (err) {
+        console.warn('API error setting primary photo:', err);
+      }
+
+      if (!updated) {
+        updated = db.setPrimaryPhotoInfrator(suspectId, fotoId);
+      }
+
+      if (updated) {
+        await persistSuspectToFirebase(updated);
+        setSelectedSuspectDetail(updated);
+        setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
+      }
+
+      fetchTelemetry();
+      setToastMessage('Foto principal do infrator atualizada!');
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (err) {
+      console.error('Error setting primary photo:', err);
+    }
+  };
+
+  const handleDeleteDirectPhoto = async (fotoId: string) => {
+    if (!selectedSuspectDetail) return;
+    const suspectId = selectedSuspectDetail.id;
+    try {
+      let updated: any = null;
+      try {
+        const res = await fetch(`/api/infratores/${suspectId}/fotos/${fotoId}`, {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          updated = await res.json();
+        }
+      } catch (err) {
+        console.warn('API error deleting photo:', err);
+      }
+
+      if (!updated) {
+        updated = db.removePhotoFromInfrator(suspectId, fotoId);
+      }
+
+      if (updated) {
+        await persistSuspectToFirebase(updated);
+        setSelectedSuspectDetail(updated);
+        setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
+      }
+
+      fetchTelemetry();
+      setToastMessage('Foto removida da galeria.');
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (err) {
+      console.error('Error deleting photo:', err);
+    }
+  };
+
+  const handleRemoveDirectPhoto = handleDeleteDirectPhoto;
+
   // Direct linkage from suspect detail drawer
   const handleLinkOccurrenceDirectly = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1269,16 +1574,31 @@ export default function App() {
 
       let createdSuspect: any = null;
 
+      // Determine primary photo from gallery or fallback
+      let primaryUrl = newSuspectForm.foto_url;
+      if (suspectPhotosList.length > 0) {
+        const primaryObj = suspectPhotosList.find((p) => p.principal);
+        if (primaryObj && primaryObj.url) {
+          primaryUrl = primaryObj.url;
+        } else {
+          primaryUrl = suspectPhotosList[0].url;
+        }
+      }
+
+      const suspectPayload = {
+        ...newSuspectForm,
+        foto_url: primaryUrl,
+        galeria_fotos: suspectPhotosList,
+        enderecos: addressesToAttach,
+        ocorrencias: occurrencesToLink,
+      };
+
       // Try server API first
       try {
         const res = await fetch('/api/infratores', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...newSuspectForm,
-            enderecos: addressesToAttach,
-            ocorrencias: occurrencesToLink,
-          }),
+          body: JSON.stringify(suspectPayload),
         });
         if (res.ok) {
           createdSuspect = await res.json();
@@ -1289,11 +1609,7 @@ export default function App() {
 
       // Local DB fallback for GitHub Pages or offline/standalone preview
       if (!createdSuspect) {
-        createdSuspect = db.addInfrator({
-          ...newSuspectForm,
-          enderecos: addressesToAttach,
-          ocorrencias: occurrencesToLink,
-        });
+        createdSuspect = db.addInfrator(suspectPayload);
       }
 
       // Persist to Firebase Firestore
@@ -1304,6 +1620,9 @@ export default function App() {
       setIsAddingSuspect(false);
       setSuspectOccurrencesList([]);
       setSuspectAddressesList([]);
+      setSuspectPhotosList([]);
+      setNewPhotoManualUrl('');
+      setNewPhotoManualDesc('');
       fetchTelemetry();
       
       if (createdSuspect) {
@@ -2809,129 +3128,293 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Dedicated Photo Upload & Management Section */}
-                      <div className="bg-[#0A0A0B] p-4 rounded border border-zinc-800 space-y-3 tactical-corner">
-                        <div className="flex items-center justify-between border-b border-zinc-850 pb-2">
+                      {/* Dedicated Unlimited Photo Upload & Gallery Management Section */}
+                      <div className="bg-[#0A0A0B] p-4 rounded border border-zinc-800 space-y-3.5 tactical-corner">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-850 pb-2">
                           <label className="text-[10px] uppercase text-amber-400 font-bold flex items-center gap-1.5 tracking-widest font-mono">
                             <Camera className="w-3.5 h-3.5" />
-                            Registro Fotográfico do Infrator / Foto Tática
+                            Acervo Fotográfico & Biometria Tática (Capacidade Ilimitada)
                           </label>
-                          <span className="text-[9px] text-zinc-500 font-mono">JPG, PNG, WEBP ou Link</span>
+                          <span className="text-[9px] bg-amber-950/40 border border-amber-800/60 text-amber-400 px-2 py-0.5 rounded font-mono font-bold">
+                            {suspectPhotosList.length} FOTO(S) CADASTRADA(S)
+                          </span>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row items-center gap-4">
-                          {/* Photo Thumbnail / Preview Box */}
-                          <div className="relative w-28 h-28 rounded bg-zinc-900 border-2 border-dashed border-zinc-700 flex-shrink-0 flex items-center justify-center overflow-hidden group">
-                            {newSuspectForm.foto_url ? (
-                              <>
-                                <img
-                                  src={newSuspectForm.foto_url}
-                                  alt="Preview Infrator"
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop';
-                                  }}
-                                />
-                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => setNewSuspectForm({ ...newSuspectForm, foto_url: '' })}
-                                    className="p-1.5 bg-red-600 hover:bg-red-500 text-white rounded-full text-xs shadow transition cursor-pointer"
-                                    title="Remover Foto"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </>
-                            ) : (
-                              <div className="text-center p-2 text-zinc-500 flex flex-col items-center">
-                                <ImageIcon className="w-7 h-7 mb-1 text-zinc-600" />
-                                <span className="text-[9px] font-mono leading-tight">Sem Foto</span>
-                              </div>
-                            )}
-                          </div>
+                        {/* Top Action Bar for Photo Upload */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {/* Multi-file Upload Button */}
+                          <label className="flex items-center gap-2 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs rounded transition uppercase tracking-wider font-mono cursor-pointer shadow-md shadow-amber-500/10">
+                            <Upload className="w-4 h-4 stroke-[2.5]" />
+                            <span>Carregar Fotos (Múltiplas / Ilimitadas)</span>
+                            <input
+                              type="file"
+                              multiple
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files.length > 0) {
+                                  handleAddFilesToRegistration(e.target.files);
+                                }
+                              }}
+                            />
+                          </label>
 
-                          {/* Action Controls */}
-                          <div className="flex-1 w-full space-y-2.5 font-mono">
-                            <div className="flex flex-wrap items-center gap-2">
-                              {/* Primary File Upload Button */}
-                              <label className="flex items-center gap-2 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs rounded transition uppercase tracking-wider font-mono cursor-pointer shadow-md shadow-amber-500/10">
-                                <Upload className="w-4 h-4 stroke-[2.5]" />
-                                <span>Carregar Foto do Computador</span>
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  className="hidden"
-                                  onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) {
-                                      const reader = new FileReader();
-                                      reader.onloadend = () => {
-                                        setNewSuspectForm((prev) => ({
-                                          ...prev,
-                                          foto_url: reader.result as string,
-                                        }));
-                                      };
-                                      reader.readAsDataURL(file);
-                                    }
-                                  }}
-                                />
-                              </label>
+                          {/* Quick Sample Pack */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const samplePack: FotoInfrator[] = [
+                                {
+                                  id: `foto-${Date.now()}-face`,
+                                  url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop',
+                                  tipo: 'ROSTO',
+                                  descricao: 'Foto Facial Frontal - Identificação Tática',
+                                  principal: suspectPhotosList.length === 0,
+                                  created_at: new Date().toISOString(),
+                                },
+                                {
+                                  id: `foto-${Date.now()}-tat`,
+                                  url: 'https://images.unsplash.com/photo-1598371839696-5c5bb00bdc28?w=400&h=400&fit=crop',
+                                  tipo: 'TATUAGEM',
+                                  descricao: 'Tatuagem no antebraço direito (Carpa/Desenho tribal)',
+                                  principal: false,
+                                  created_at: new Date().toISOString(),
+                                },
+                                {
+                                  id: `foto-${Date.now()}-cic`,
+                                  url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&h=400&fit=crop',
+                                  tipo: 'CICATRIZ',
+                                  descricao: 'Cicatriz no supercílio esquerdo',
+                                  principal: false,
+                                  created_at: new Date().toISOString(),
+                                }
+                              ];
+                              setSuspectPhotosList((prev) => {
+                                const next = [...prev, ...samplePack];
+                                if (prev.length === 0) {
+                                  setNewSuspectForm((f) => ({ ...f, foto_url: samplePack[0].url }));
+                                }
+                                return next;
+                              });
+                            }}
+                            className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded transition flex items-center gap-1.5 cursor-pointer font-mono"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                            <span>+ Adicionar Fotos Exemplo (Rosto + Tatuagem)</span>
+                          </button>
 
-                              {/* Sample preset mugshots */}
+                          {suspectPhotosList.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSuspectPhotosList([]);
+                                setNewSuspectForm((f) => ({ ...f, foto_url: '' }));
+                              }}
+                              className="px-2.5 py-2 bg-red-950/60 hover:bg-red-900/60 border border-red-800 text-red-300 text-xs rounded transition flex items-center gap-1 cursor-pointer font-mono ml-auto"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Limpar Acervo</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Manual Link Input */}
+                        <div className="bg-[#0F0F12] p-2.5 rounded border border-zinc-800 space-y-2">
+                          <span className="text-[9px] uppercase text-zinc-400 font-bold block font-mono">
+                            Ou Adicionar Foto via Link/URL com Classificação:
+                          </span>
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                            <div className="md:col-span-6">
+                              <input
+                                type="text"
+                                placeholder="Link da foto (https://...)"
+                                value={newPhotoManualUrl}
+                                onChange={(e) => setNewPhotoManualUrl(e.target.value)}
+                                className="w-full bg-[#0A0A0B] border border-zinc-700 rounded p-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500 font-mono"
+                              />
+                            </div>
+                            <div className="md:col-span-3">
+                              <select
+                                value={newPhotoManualTipo}
+                                onChange={(e) => setNewPhotoManualTipo(e.target.value as any)}
+                                className="w-full bg-[#0A0A0B] border border-zinc-700 rounded p-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500 font-mono"
+                              >
+                                <option value="ROSTO">👤 Rosto / Face</option>
+                                <option value="TATUAGEM">🎨 Tatuagem</option>
+                                <option value="CICATRIZ">⚡ Cicatriz</option>
+                                <option value="SINAL">🔍 Sinal Particular</option>
+                                <option value="PERFIL">📐 Perfil / Lateral</option>
+                                <option value="CORPO">🧍 Corpo Inteiro</option>
+                                <option value="TATICA">🛡️ Foto Tática / Abordagem</option>
+                              </select>
+                            </div>
+                            <div className="md:col-span-3 flex gap-1.5">
+                              <input
+                                type="text"
+                                placeholder="Descrição (ex: Carpa no braço)"
+                                value={newPhotoManualDesc}
+                                onChange={(e) => setNewPhotoManualDesc(e.target.value)}
+                                className="flex-1 bg-[#0A0A0B] border border-zinc-700 rounded p-1.5 text-xs text-zinc-200 focus:outline-none font-mono"
+                              />
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const presets = [
-                                    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&h=300&fit=crop',
-                                    'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&h=300&fit=crop',
-                                    'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=300&h=300&fit=crop',
-                                    'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&h=300&fit=crop',
-                                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&h=300&fit=crop',
-                                  ];
-                                  const random = presets[Math.floor(Math.random() * presets.length)];
-                                  setNewSuspectForm({ ...newSuspectForm, foto_url: random });
+                                  if (!newPhotoManualUrl.trim()) return;
+                                  const isFirst = suspectPhotosList.length === 0;
+                                  const newPhoto: FotoInfrator = {
+                                    id: `foto-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                                    url: newPhotoManualUrl.trim(),
+                                    tipo: newPhotoManualTipo,
+                                    descricao: newPhotoManualDesc.trim() || `${newPhotoManualTipo} do infrator`,
+                                    principal: isFirst,
+                                    created_at: new Date().toISOString(),
+                                  };
+                                  setSuspectPhotosList((prev) => [...prev, newPhoto]);
+                                  if (isFirst) {
+                                    setNewSuspectForm((f) => ({ ...f, foto_url: newPhotoManualUrl.trim() }));
+                                  }
+                                  setNewPhotoManualUrl('');
+                                  setNewPhotoManualDesc('');
                                 }}
-                                className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded transition flex items-center gap-1.5 cursor-pointer"
+                                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs rounded transition uppercase font-mono cursor-pointer flex items-center gap-1"
                               >
-                                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                                <span>Foto de Exemplo</span>
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Adicionar</span>
                               </button>
-
-                              {newSuspectForm.foto_url && (
-                                <button
-                                  type="button"
-                                  onClick={() => setNewSuspectForm({ ...newSuspectForm, foto_url: '' })}
-                                  className="px-2.5 py-2 bg-red-950/60 hover:bg-red-900/60 border border-red-800 text-red-300 text-xs rounded transition flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  <span>Remover</span>
-                                </button>
-                              )}
                             </div>
-
-                            {/* URL Input */}
-                            <div>
-                              <input
-                                type="text"
-                                placeholder="Ou insira o link/URL direto da imagem (https://...)"
-                                value={newSuspectForm.foto_url}
-                                onChange={(e) => setNewSuspectForm({ ...newSuspectForm, foto_url: e.target.value })}
-                                className="w-full bg-[#0F0F12] border border-zinc-800 rounded p-2 text-xs focus:outline-none focus:border-amber-500 text-zinc-200"
-                              />
-                            </div>
-
-                            <p className="text-[10px] text-zinc-500">
-                              {newSuspectForm.foto_url ? (
-                                <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                                  <CheckCircle className="w-3 h-3" /> Imagem vinculada com sucesso à ficha.
-                                </span>
-                              ) : (
-                                'Clique em "Carregar Foto do Computador" para selecionar um arquivo local ou digite uma URL.'
-                              )}
-                            </p>
                           </div>
                         </div>
+
+                        {/* Interactive Gallery Grid */}
+                        {suspectPhotosList.length > 0 ? (
+                          <div className="space-y-2 pt-1 font-mono">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] text-zinc-400 uppercase font-bold flex items-center gap-1">
+                                <Sparkles className="w-3 h-3 text-amber-400" />
+                                Galeria de Fotos ({suspectPhotosList.length}) — Clique na estrela ⭐ para definir a Foto Principal do Cadastro:
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                              {suspectPhotosList.map((foto, idx) => {
+                                const isPrimary = foto.principal;
+                                return (
+                                  <div
+                                    key={foto.id || idx}
+                                    className={`relative rounded bg-[#0A0A0B] border overflow-hidden transition group ${
+                                      isPrimary
+                                        ? 'border-amber-400 ring-2 ring-amber-500/30 shadow-lg shadow-amber-500/10'
+                                        : 'border-zinc-800 hover:border-zinc-700'
+                                    }`}
+                                  >
+                                    {/* Image Viewport */}
+                                    <div className="aspect-square relative overflow-hidden bg-black flex items-center justify-center">
+                                      <img
+                                        src={foto.url}
+                                        alt={foto.descricao || 'Foto do infrator'}
+                                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300 cursor-pointer"
+                                        onClick={() =>
+                                          setInspectingPhoto({
+                                            url: foto.url,
+                                            tipo: foto.tipo,
+                                            descricao: foto.descricao,
+                                            principal: foto.principal,
+                                            suspectName: newSuspectForm.nome_completo || 'Novo Cadastro'
+                                          })
+                                        }
+                                        onError={(e) => {
+                                          (e.target as HTMLImageElement).src =
+                                            'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop';
+                                        }}
+                                      />
+
+                                      {/* Top Badge: Primary or Category */}
+                                      <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+                                        {isPrimary ? (
+                                          <span className="bg-amber-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded shadow flex items-center gap-1 uppercase tracking-wider">
+                                            <Star className="w-2.5 h-2.5 fill-black" /> PRINCIPAL
+                                          </span>
+                                        ) : (
+                                          <span className="bg-black/75 text-zinc-300 text-[8px] font-bold px-1.5 py-0.5 rounded border border-zinc-700/80 uppercase">
+                                            {foto.tipo || 'FOTO'}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {/* Hover Action Overlay */}
+                                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-1.5 p-1">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setInspectingPhoto({
+                                              url: foto.url,
+                                              tipo: foto.tipo,
+                                              descricao: foto.descricao,
+                                              principal: foto.principal,
+                                              suspectName: newSuspectForm.nome_completo || 'Novo Cadastro'
+                                            })
+                                          }
+                                          className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded text-[10px] cursor-pointer shadow"
+                                          title="Ampliar Foto"
+                                        >
+                                          <Eye className="w-3.5 h-3.5" />
+                                        </button>
+
+                                        {!isPrimary && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSetRegistrationPrimaryPhoto(idx)}
+                                            className="p-1.5 bg-amber-500 hover:bg-amber-400 text-black rounded text-[10px] font-bold cursor-pointer shadow"
+                                            title="Definir como Foto Principal do Cadastro"
+                                          >
+                                            <Star className="w-3.5 h-3.5 fill-current" />
+                                          </button>
+                                        )}
+
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveRegistrationPhoto(idx)}
+                                          className="p-1.5 bg-red-600 hover:bg-red-500 text-white rounded text-[10px] cursor-pointer shadow"
+                                          title="Remover Foto"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {/* Bottom Info & Inline Editing */}
+                                    <div className="p-1.5 bg-[#0D0D10] border-t border-zinc-850 space-y-1">
+                                      <select
+                                        value={foto.tipo || 'ROSTO'}
+                                        onChange={(e) => handleUpdateRegistrationPhoto(idx, { tipo: e.target.value as any })}
+                                        className="w-full bg-[#050507] border border-zinc-800 text-zinc-300 text-[9px] px-1 py-0.5 rounded focus:outline-none"
+                                      >
+                                        <option value="ROSTO">Rosto / Face</option>
+                                        <option value="TATUAGEM">Tatuagem</option>
+                                        <option value="CICATRIZ">Cicatriz</option>
+                                        <option value="SINAL">Sinal Particular</option>
+                                        <option value="PERFIL">Perfil Lateral</option>
+                                        <option value="CORPO">Corpo Inteiro</option>
+                                        <option value="TATICA">Foto Tática</option>
+                                      </select>
+                                      <input
+                                        type="text"
+                                        placeholder="Descrição do detalhe..."
+                                        value={foto.descricao || ''}
+                                        onChange={(e) => handleUpdateRegistrationPhoto(idx, { descricao: e.target.value })}
+                                        className="w-full bg-[#050507] border border-zinc-800 text-zinc-300 text-[9px] px-1 py-0.5 rounded focus:outline-none"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-zinc-950/60 rounded border border-dashed border-zinc-800 text-center font-mono text-xs text-zinc-500">
+                            Nenhuma foto carregada ainda. Clique em "Carregar Fotos" para enviar fotos de rosto, tatuagens, cicatrizes e sinais físicos sem limite de quantidade.
+                          </div>
+                        )}
                       </div>
 
                       <h4 className="text-[10px] font-bold text-amber-400 uppercase tracking-widest mt-4">Características Físicas</h4>
@@ -3889,7 +4372,26 @@ export default function App() {
                           return (
                           <tr key={s.id} className="hover:bg-[#1A1A22] transition">
                             <td className="p-2.5">
-                              <img src={s.foto_url} alt={s.vulgo} className="w-8 h-8 rounded object-cover border border-zinc-700" />
+                              <div
+                                className="relative w-9 h-9 rounded overflow-hidden border border-zinc-700 cursor-pointer group"
+                                onClick={() => handleViewSuspectDetail(s.id)}
+                                title="Ver ficha e galeria de fotos"
+                              >
+                                <img
+                                  src={s.foto_url}
+                                  alt={s.vulgo}
+                                  className="w-full h-full object-cover group-hover:scale-110 transition duration-200"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src =
+                                      'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop';
+                                  }}
+                                />
+                                {s.galeria_fotos && s.galeria_fotos.length > 1 && (
+                                  <span className="absolute bottom-0 right-0 bg-black/85 text-amber-400 text-[8px] font-bold px-1 rounded-tl font-mono border-t border-l border-zinc-700">
+                                    +{s.galeria_fotos.length}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="p-2.5">
                               <div className="font-bold text-zinc-100 font-sans text-xs">{s.nome_completo}</div>
@@ -4040,6 +4542,257 @@ export default function App() {
                         <div>
                           <span className="text-[10px] text-zinc-400 font-mono block">Sinais Particulares:</span>
                           <p className="text-zinc-300 mt-0.5 text-xs">{selectedSuspectDetail.fisicas?.sinais_particulares || 'Nenhum'}</p>
+                        </div>
+                      </div>
+
+                      {/* Acervo Fotográfico & Biometria Tática */}
+                      <div className="border-t border-zinc-800/80 pt-3 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] text-zinc-400 block uppercase font-bold font-mono flex items-center gap-1.5">
+                            <Camera className="w-3.5 h-3.5 text-amber-400" />
+                            Acervo Fotográfico & Biometria ({selectedSuspectDetail.galeria_fotos?.length || 1})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setIsAddingDirectPhoto(!isAddingDirectPhoto)}
+                            className="px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded text-[9px] font-mono font-bold flex items-center gap-1 transition cursor-pointer"
+                          >
+                            <Plus className="w-2.5 h-2.5" />
+                            <span>{isAddingDirectPhoto ? 'Cancelar' : '+ Adicionar Foto'}</span>
+                          </button>
+                        </div>
+
+                        {/* Inline Form to add photo to suspect */}
+                        {isAddingDirectPhoto && (
+                          <div className="bg-[#0A0A0B] p-3 rounded border border-amber-500/40 space-y-2.5 font-mono text-xs">
+                            <span className="text-[10px] text-amber-400 font-bold uppercase block flex items-center gap-1">
+                              <Upload className="w-3 h-3 text-amber-400" /> Carregar Nova Foto / Detalhe Físico
+                            </span>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <label className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-[10px] rounded transition uppercase cursor-pointer shadow">
+                                <Upload className="w-3.5 h-3.5" />
+                                <span>Do Computador</span>
+                                <input
+                                  type="file"
+                                  multiple
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    if (e.target.files && e.target.files.length > 0) {
+                                      handleUploadDirectPhotoFiles(e.target.files);
+                                    }
+                                  }}
+                                />
+                              </label>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const sampleTattoos = [
+                                    {
+                                      url: 'https://images.unsplash.com/photo-1598371839696-5c5bb00bdc28?w=400&h=400&fit=crop',
+                                      tipo: 'TATUAGEM' as const,
+                                      descricao: 'Tatuagem no braço (Identificação de facção)',
+                                    },
+                                    {
+                                      url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&h=400&fit=crop',
+                                      tipo: 'CICATRIZ' as const,
+                                      descricao: 'Cicatriz facial no supercílio',
+                                    }
+                                  ];
+                                  const item = sampleTattoos[Math.floor(Math.random() * sampleTattoos.length)];
+                                  handleAddDirectPhoto(item);
+                                }}
+                                className="px-2.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 rounded text-[10px] cursor-pointer flex items-center gap-1"
+                              >
+                                <Sparkles className="w-3 h-3 text-amber-400" />
+                                <span>Foto Exemplo</span>
+                              </button>
+                            </div>
+
+                            {/* Manual URL Form */}
+                            <form onSubmit={handleAddDirectPhotoSubmit} className="space-y-2 pt-1 border-t border-zinc-850">
+                              <div>
+                                <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">Link / URL da Imagem</label>
+                                <input
+                                  type="text"
+                                  placeholder="https://..."
+                                  value={directPhotoDraft.url}
+                                  onChange={(e) => setDirectPhotoDraft({ ...directPhotoDraft, url: e.target.value })}
+                                  className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                />
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">Classificação</label>
+                                  <select
+                                    value={directPhotoDraft.tipo}
+                                    onChange={(e) => setDirectPhotoDraft({ ...directPhotoDraft, tipo: e.target.value as any })}
+                                    className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                  >
+                                    <option value="ROSTO">👤 Rosto / Face</option>
+                                    <option value="TATUAGEM">🎨 Tatuagem</option>
+                                    <option value="CICATRIZ">⚡ Cicatriz</option>
+                                    <option value="SINAL">🔍 Sinal Particular</option>
+                                    <option value="PERFIL">📐 Perfil Lateral</option>
+                                    <option value="CORPO">🧍 Corpo Inteiro</option>
+                                    <option value="TATICA">🛡️ Foto Tática</option>
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">Descrição</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: Tatuagem no pescoço"
+                                    value={directPhotoDraft.descricao}
+                                    onChange={(e) => setDirectPhotoDraft({ ...directPhotoDraft, descricao: e.target.value })}
+                                    className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                  />
+                                </div>
+                              </div>
+
+                              <label className="flex items-center gap-1.5 text-[10px] text-amber-300 font-bold cursor-pointer py-1">
+                                <input
+                                  type="checkbox"
+                                  checked={directPhotoDraft.principal}
+                                  onChange={(e) => setDirectPhotoDraft({ ...directPhotoDraft, principal: e.target.checked })}
+                                  className="accent-amber-500 rounded"
+                                />
+                                <span>Definir esta imagem como Foto Principal do Infrator</span>
+                              </label>
+
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setIsAddingDirectPhoto(false)}
+                                  className="px-2.5 py-1 bg-zinc-850 hover:bg-zinc-800 text-zinc-400 rounded text-[10px] cursor-pointer"
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  type="submit"
+                                  className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-[10px] uppercase cursor-pointer"
+                                >
+                                  Salvar Imagem
+                                </button>
+                              </div>
+                            </form>
+                          </div>
+                        )}
+
+                        {/* Gallery Thumbnails List */}
+                        <div className="grid grid-cols-3 gap-2 font-mono">
+                          {(() => {
+                            const photos = selectedSuspectDetail.galeria_fotos && selectedSuspectDetail.galeria_fotos.length > 0
+                              ? selectedSuspectDetail.galeria_fotos
+                              : [
+                                  {
+                                    id: 'photo-default',
+                                    url: selectedSuspectDetail.foto_url,
+                                    tipo: 'ROSTO' as const,
+                                    descricao: 'Foto Cadastral Principal',
+                                    principal: true,
+                                  }
+                                ];
+
+                            return photos.map((foto, idx) => {
+                              const isPrimary = foto.principal || foto.url === selectedSuspectDetail.foto_url;
+                              return (
+                                <div
+                                  key={foto.id || idx}
+                                  className={`relative rounded bg-[#0A0A0B] border overflow-hidden transition group ${
+                                    isPrimary
+                                      ? 'border-amber-400 ring-2 ring-amber-500/30'
+                                      : 'border-zinc-800 hover:border-zinc-700'
+                                  }`}
+                                >
+                                  <div className="aspect-square relative overflow-hidden bg-black flex items-center justify-center">
+                                    <img
+                                      src={foto.url}
+                                      alt={foto.descricao || 'Foto'}
+                                      className="w-full h-full object-cover group-hover:scale-105 transition duration-200 cursor-pointer"
+                                      onClick={() =>
+                                        setInspectingPhoto({
+                                          url: foto.url,
+                                          tipo: foto.tipo,
+                                          descricao: foto.descricao,
+                                          principal: isPrimary,
+                                          suspectName: selectedSuspectDetail.nome_completo,
+                                        })
+                                      }
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).src =
+                                          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop';
+                                      }}
+                                    />
+
+                                    {/* Primary indicator badge */}
+                                    <div className="absolute top-1 left-1 pointer-events-none">
+                                      {isPrimary ? (
+                                        <span className="bg-amber-500 text-black text-[7px] font-black px-1 py-0.5 rounded shadow uppercase">
+                                          ★ PRINCIPAL
+                                        </span>
+                                      ) : (
+                                        <span className="bg-black/80 text-zinc-300 text-[7px] font-bold px-1 py-0.5 rounded border border-zinc-700 uppercase">
+                                          {foto.tipo || 'FOTO'}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Hover overlay actions */}
+                                    <div className="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-1 p-1">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setInspectingPhoto({
+                                            url: foto.url,
+                                            tipo: foto.tipo,
+                                            descricao: foto.descricao,
+                                            principal: isPrimary,
+                                            suspectName: selectedSuspectDetail.nome_completo,
+                                          })
+                                        }
+                                        className="p-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded text-[9px] cursor-pointer"
+                                        title="Ampliar"
+                                      >
+                                        <Eye className="w-3 h-3" />
+                                      </button>
+
+                                      {!isPrimary && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSetDirectPrimaryPhoto(foto.id)}
+                                          className="p-1 bg-amber-500 hover:bg-amber-400 text-black rounded text-[9px] font-bold cursor-pointer"
+                                          title="Tornar Foto Principal"
+                                        >
+                                          <Star className="w-3 h-3 fill-current" />
+                                        </button>
+                                      )}
+
+                                      {photos.length > 1 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveDirectPhoto(foto.id)}
+                                          className="p-1 bg-red-600 hover:bg-red-500 text-white rounded text-[9px] cursor-pointer"
+                                          title="Remover Foto"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Caption */}
+                                  <div className="p-1 bg-[#0D0D10] text-[8px] text-zinc-400 truncate text-center border-t border-zinc-850" title={foto.descricao}>
+                                    {foto.descricao || foto.tipo || 'Foto cadastral'}
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
                         </div>
                       </div>
 
@@ -4867,6 +5620,75 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* Lightbox / Visualizador de Alta Resolução de Foto Tática */}
+      {inspectingPhoto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-200 font-mono">
+          <div className="bg-[#0F0F12] border border-zinc-700 rounded-lg max-w-3xl w-full shadow-2xl overflow-hidden tactical-corner">
+            {/* Header */}
+            <div className="flex items-center justify-between p-3.5 bg-[#09090C] border-b border-zinc-800">
+              <div className="flex items-center gap-2">
+                <Camera className="w-4 h-4 text-amber-400" />
+                <span className="text-xs font-bold text-zinc-100 uppercase tracking-wider">
+                  Inspeção Biométrica & Foto Tática
+                </span>
+                {inspectingPhoto.tipo && (
+                  <span className="bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-bold px-2 py-0.5 rounded">
+                    {inspectingPhoto.tipo}
+                  </span>
+                )}
+                {inspectingPhoto.principal && (
+                  <span className="bg-amber-500 text-black text-[9px] font-black px-2 py-0.5 rounded shadow">
+                    ★ PRINCIPAL
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setInspectingPhoto(null)}
+                className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded cursor-pointer transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Main Image View */}
+            <div className="p-4 flex flex-col items-center justify-center bg-black/70 min-h-[360px] max-h-[65vh] overflow-hidden">
+              <img
+                src={inspectingPhoto.url}
+                alt={inspectingPhoto.descricao || 'Foto Tática'}
+                className="max-h-[60vh] max-w-full object-contain rounded border border-zinc-800 shadow-2xl"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src =
+                    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=600&h=600&fit=crop';
+                }}
+              />
+            </div>
+
+            {/* Footer / Description */}
+            <div className="p-3.5 bg-[#09090C] border-t border-zinc-850 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="space-y-0.5">
+                {inspectingPhoto.suspectName && (
+                  <span className="text-[10px] text-zinc-500 block uppercase font-bold">
+                    Infrator: <strong className="text-amber-400 font-sans">{inspectingPhoto.suspectName}</strong>
+                  </span>
+                )}
+                <p className="text-zinc-200 text-xs">
+                  {inspectingPhoto.descricao || 'Registro fotográfico para reconhecimento facial e detalhamento tático.'}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setInspectingPhoto(null)}
+                className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded font-bold text-xs cursor-pointer transition"
+              >
+                Fechar Visualizador
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Confirmação de Exclusão de Infrator */}
       {suspectToDelete && (

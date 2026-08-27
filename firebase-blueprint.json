@@ -11,6 +11,7 @@
         "data_nascimento": { "type": "string" },
         "cpf": { "type": "string" },
         "foto_url": { "type": "string" },
+        "galeria_fotos": { "type": "array" },
         "gangue_faccao": { "type": "string" },
         "status_mandado_prisao": { "type": "boolean" },
         "periculosidade": { "type": "string" },

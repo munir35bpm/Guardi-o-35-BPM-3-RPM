@@ -167,6 +167,7 @@ export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails):
       data_nascimento: suspectFull.data_nascimento || '',
       cpf: suspectFull.cpf || '',
       foto_url: suspectFull.foto_url || '',
+      galeria_fotos: suspectFull.galeria_fotos || [],
       gangue_faccao: suspectFull.gangue_faccao || 'Sem facção informada',
       status_mandado_prisao: !!suspectFull.status_mandado_prisao,
       situacao_atual: suspectFull.situacao_atual || suspectFull.situacao_prisional || (suspectFull.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE'),

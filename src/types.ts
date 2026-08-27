@@ -1,5 +1,17 @@
 export type SituacaoInfrator = 'EM_LIBERDADE' | 'FORAGIDO' | 'PRESO' | 'MORTO';
 
+export type TipoFotoInfrator = 'ROSTO' | 'PERFIL' | 'TATUAGEM' | 'CICATRIZ' | 'SINAL' | 'CORPO' | 'TATICA' | 'OUTRO';
+
+export interface FotoInfrator {
+  id: string;
+  url: string;
+  tipo?: TipoFotoInfrator | string;
+  descricao?: string;
+  principal?: boolean;
+  data_inclusao?: string;
+  created_at?: string;
+}
+
 export interface Infrator {
   id: string;
   nome_completo: string;
@@ -7,6 +19,7 @@ export interface Infrator {
   data_nascimento: string;
   cpf: string;
   foto_url: string;
+  galeria_fotos?: FotoInfrator[];
   gangue_faccao: string;
   status_mandado_prisao: boolean;
   situacao_atual?: SituacaoInfrator | string;

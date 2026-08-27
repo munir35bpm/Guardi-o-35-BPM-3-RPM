@@ -609,6 +609,37 @@ export default function FacialRecognitionModule({
                         </div>
                       </div>
 
+                      {/* Photo Gallery Strip for Candidate (Tattoos, Scars, Sinais, etc.) */}
+                      {suspectData?.galeria_fotos && suspectData.galeria_fotos.length > 0 && (
+                        <div className="bg-[#0D0D10] p-2.5 rounded border border-zinc-850 space-y-1.5 font-mono text-[10px]">
+                          <span className="text-[9px] text-amber-400 font-bold uppercase flex items-center gap-1">
+                            <Camera className="w-3 h-3 text-amber-400" />
+                            Acervo Biométrico Cadastral ({suspectData.galeria_fotos.length} fotos registradas):
+                          </span>
+                          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                            {suspectData.galeria_fotos.map((f, fIdx) => (
+                              <div
+                                key={f.id || fIdx}
+                                className="relative flex-shrink-0 w-16 rounded overflow-hidden border border-zinc-700 bg-black group"
+                              >
+                                <img
+                                  src={f.url}
+                                  alt={f.descricao || f.tipo}
+                                  className="w-16 h-16 object-cover"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src =
+                                      'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop';
+                                  }}
+                                />
+                                <span className="absolute bottom-0 inset-x-0 bg-black/85 text-[7px] text-zinc-300 text-center uppercase truncate px-0.5">
+                                  {f.tipo}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Convergences & Divergences Breakdown */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                         <div className="space-y-1.5">
