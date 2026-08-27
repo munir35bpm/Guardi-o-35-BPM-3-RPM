@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { OcorrenciaCriminal, EnderecoAtuacao, GangAreaZone } from '../types';
+import { OcorrenciaCriminal, EnderecoAtuacao, GangAreaZone, Infrator } from '../types';
 import {
   MapPin,
   Crosshair,
@@ -62,6 +62,11 @@ interface TacticalMapProps {
   selectedCoords?: { lat: number; lng: number } | null;
   onSelectCoords?: (coords: { lat: number; lng: number }) => void;
   highlightedSuspectId?: string | null;
+  occurrencesList?: OcorrenciaCriminal[];
+  addressesList?: EnderecoAtuacao[];
+  suspectsList?: Infrator[];
+  refreshTrigger?: number;
+  onRefresh?: () => void;
 }
 
 // Helper to deduplicate addresses for clean tactical map rendering
@@ -122,16 +127,22 @@ export default function TacticalMap({
   selectedCoords,
   onSelectCoords,
   highlightedSuspectId,
+  occurrencesList,
+  addressesList,
+  suspectsList,
+  refreshTrigger,
+  onRefresh,
 }: TacticalMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const clickMarkerRef = useRef<L.Marker | null>(null);
   const activeTileLayerRef = useRef<L.TileLayer | null>(null);
 
-  const [occurrences, setOccurrences] = useState<OcorrenciaCriminal[]>([]);
-  const [addresses, setAddresses] = useState<EnderecoAtuacao[]>([]);
+  const [occurrences, setOccurrences] = useState<OcorrenciaCriminal[]>(occurrencesList || []);
+  const [addresses, setAddresses] = useState<EnderecoAtuacao[]>(addressesList || []);
   const [gangAreas, setGangAreas] = useState<GangAreaZone[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Basemap selector state (defaults to high-contrast open street map)
   const [baseMapStyle, setBaseMapStyle] = useState<BaseMapStyle>('street');
@@ -153,25 +164,50 @@ export default function TacticalMap({
   // Polygon layers lookup map for fast fly-to
   const polygonLayersMapRef = useRef<Record<string, L.Polygon | L.Polyline>>({});
 
+  // Sync with incoming props if provided
+  useEffect(() => {
+    if (occurrencesList) {
+      setOccurrences(occurrencesList);
+    }
+  }, [occurrencesList]);
+
+  useEffect(() => {
+    if (addressesList) {
+      const activeSuspects = suspectsList || db.infratores || [];
+      const validSuspectIds = new Set(activeSuspects.map((i) => i.id));
+      const filtered = addressesList.filter(
+        (ea) => ea.infrator_id && validSuspectIds.has(ea.infrator_id)
+      );
+      setAddresses(deduplicateAddressList(filtered));
+    }
+  }, [addressesList, suspectsList]);
+
   const fetchMapData = async () => {
     try {
+      setIsRefreshing(true);
       const [resOc, resAdd, resGang] = await Promise.all([
         fetch('/api/ocorrencias').catch(() => null),
         fetch('/api/enderecos').catch(() => null),
         fetch('/api/gang-areas').catch(() => null),
       ]);
 
+      const activeSuspects = suspectsList || db.infratores || [];
+      const validSuspectIds = new Set(activeSuspects.map((i) => i.id));
+
       if (resOc && resOc.ok) {
         const dataOc = await resOc.json();
         setOccurrences(dataOc);
       } else {
-        setOccurrences(db.ocorrencias_criminais);
+        setOccurrences(db.ocorrencias_criminais || []);
       }
 
       if (resAdd && resAdd.ok) {
         const dataAdd = await resAdd.json();
-        const enriched = (Array.isArray(dataAdd) ? dataAdd : []).map((ea: EnderecoAtuacao) => {
-          const inf = db.infratores?.find((i) => i.id === ea.infrator_id) || db.getInfratorFull?.(ea.infrator_id);
+        const filtered = (Array.isArray(dataAdd) ? dataAdd : []).filter(
+          (ea: EnderecoAtuacao) => ea.infrator_id && validSuspectIds.has(ea.infrator_id)
+        );
+        const enriched = filtered.map((ea: EnderecoAtuacao) => {
+          const inf = activeSuspects.find((i) => i.id === ea.infrator_id) || db.getInfratorFull?.(ea.infrator_id);
           return {
             ...ea,
             infrator_nome: ea.infrator_nome || inf?.nome_completo,
@@ -180,8 +216,11 @@ export default function TacticalMap({
         });
         setAddresses(deduplicateAddressList(enriched));
       } else {
-        const enriched = (db.enderecos_atuacao || []).map((ea: EnderecoAtuacao) => {
-          const inf = db.infratores?.find((i) => i.id === ea.infrator_id) || db.getInfratorFull?.(ea.infrator_id);
+        const filtered = (db.enderecos_atuacao || []).filter(
+          (ea: EnderecoAtuacao) => ea.infrator_id && validSuspectIds.has(ea.infrator_id)
+        );
+        const enriched = filtered.map((ea: EnderecoAtuacao) => {
+          const inf = activeSuspects.find((i) => i.id === ea.infrator_id) || db.getInfratorFull?.(ea.infrator_id);
           return {
             ...ea,
             infrator_nome: ea.infrator_nome || inf?.nome_completo,
@@ -196,7 +235,6 @@ export default function TacticalMap({
         if (Array.isArray(dataGang) && dataGang.length > 0) {
           setGangAreas(dataGang);
         } else {
-          // Check localStorage or fallback to default
           loadLocalGangAreas();
         }
       } else {
@@ -206,11 +244,23 @@ export default function TacticalMap({
       setLoading(false);
     } catch (e) {
       console.warn('Backend indisponível para mapa, usando dados locais:', e);
-      setOccurrences(db.ocorrencias_criminais);
-      setAddresses(db.enderecos_atuacao);
+      const activeSuspects = suspectsList || db.infratores || [];
+      const validSuspectIds = new Set(activeSuspects.map((i) => i.id));
+      const filtered = (db.enderecos_atuacao || []).filter(
+        (ea: EnderecoAtuacao) => ea.infrator_id && validSuspectIds.has(ea.infrator_id)
+      );
+      setOccurrences(db.ocorrencias_criminais || []);
+      setAddresses(deduplicateAddressList(filtered));
       loadLocalGangAreas();
       setLoading(false);
+    } finally {
+      setIsRefreshing(false);
     }
+  };
+
+  const handleManualRefresh = () => {
+    fetchMapData();
+    if (onRefresh) onRefresh();
   };
 
   const loadLocalGangAreas = () => {
@@ -516,8 +566,16 @@ export default function TacticalMap({
 
     markerLayersGroupRef.current.clearLayers();
 
-    // 1. Draw Suspect Addresses with influence buffer circles
-    addresses.forEach((addr) => {
+    const activeSuspects = suspectsList || db.infratores || [];
+    const validSuspectIds = new Set(activeSuspects.map((i) => i.id));
+
+    // 1. Draw Suspect Addresses with influence buffer circles (if enabled)
+    if (showAddressesLayer) {
+      const validAddresses = addresses.filter(
+        (addr) => addr.infrator_id && validSuspectIds.has(addr.infrator_id)
+      );
+
+      validAddresses.forEach((addr) => {
       const isHighlighted = highlightedSuspectId === addr.infrator_id;
       const lat = addr.geom_ponto?.lat;
       const lng = addr.geom_ponto?.lng;
@@ -598,9 +656,11 @@ export default function TacticalMap({
         mapRef.current?.setView([lat, lng], 14);
       }
     });
+    }
 
-    // 2. Draw Crime Occurrences with Beacons
-    occurrences.forEach((oc) => {
+    // 2. Draw Crime Occurrences with Beacons (if enabled)
+    if (showOccurrencesLayer) {
+      occurrences.forEach((oc) => {
       const lat = oc.geom_crime?.lat;
       const lng = oc.geom_crime?.lng;
 
@@ -832,7 +892,16 @@ export default function TacticalMap({
 
       markerLayersGroupRef.current?.addLayer(marker);
     });
-  }, [occurrences, addresses, highlightedSuspectId]);
+    }
+  }, [
+    occurrences,
+    addresses,
+    highlightedSuspectId,
+    showAddressesLayer,
+    showOccurrencesLayer,
+    suspectsList,
+    refreshTrigger,
+  ]);
 
   // Update selection indicator marker
   const updateClickMarker = (lat: number, lng: number, pan = false) => {
@@ -987,9 +1056,56 @@ export default function TacticalMap({
           )}
         </div>
 
-        {/* Right: Basemap Switcher, Gang Layer Controls & Importer Button */}
-        <div className="flex items-center gap-2 pointer-events-auto">
+        {/* Right: Basemap Switcher, Layer Toggles, Gang Controls & Importer Button */}
+        <div className="flex items-center gap-1.5 pointer-events-auto">
           
+          {/* Quick Toggle: Residências */}
+          <button
+            type="button"
+            onClick={() => setShowAddressesLayer(!showAddressesLayer)}
+            className={`px-2 py-1.5 rounded text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 border transition cursor-pointer shadow-md ${
+              showAddressesLayer
+                ? 'bg-blue-950/80 text-blue-300 border-blue-600'
+                : 'bg-slate-900/90 text-slate-400 hover:bg-slate-800 border-slate-700 opacity-60'
+            }`}
+            title={showAddressesLayer ? 'Ocultar marcadores de residências e endereços' : 'Exibir marcadores de residências'}
+          >
+            <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+            <span className="hidden md:inline">Residências</span>
+            <span className="text-[10px] bg-blue-900/60 px-1 rounded text-blue-200">
+              {addresses.filter(a => a.infrator_id && (suspectsList || db.infratores || []).some(s => s.id === a.infrator_id)).length}
+            </span>
+            {showAddressesLayer ? <Eye className="w-3 h-3 text-blue-400" /> : <EyeOff className="w-3 h-3 text-slate-500" />}
+          </button>
+
+          {/* Quick Toggle: B.O. / Ocorrências */}
+          <button
+            type="button"
+            onClick={() => setShowOccurrencesLayer(!showOccurrencesLayer)}
+            className={`px-2 py-1.5 rounded text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 border transition cursor-pointer shadow-md ${
+              showOccurrencesLayer
+                ? 'bg-red-950/80 text-red-300 border-red-600'
+                : 'bg-slate-900/90 text-slate-400 hover:bg-slate-800 border-slate-700 opacity-60'
+            }`}
+            title={showOccurrencesLayer ? 'Ocultar marcadores de B.O. / Ocorrências' : 'Exibir marcadores de B.O. / Ocorrências'}
+          >
+            <span className="w-2 h-2 rounded-full bg-red-500"></span>
+            <span className="hidden md:inline">B.O.s</span>
+            <span className="text-[10px] bg-red-900/60 px-1 rounded text-red-200">{occurrences.length}</span>
+            {showOccurrencesLayer ? <Eye className="w-3 h-3 text-red-400" /> : <EyeOff className="w-3 h-3 text-slate-500" />}
+          </button>
+
+          {/* Sync / Refresh Button */}
+          <button
+            type="button"
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="p-1.5 bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-amber-400 rounded border border-slate-700 transition cursor-pointer shadow-md"
+            title="Atualizar e sincronizar pontos do mapa"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-amber-400' : ''}`} />
+          </button>
+
           {/* Basemap Style Switcher Dropdown */}
           <div className="relative">
             <button

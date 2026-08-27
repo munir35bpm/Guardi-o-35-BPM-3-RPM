@@ -462,7 +462,10 @@ app.delete('/api/infratores/:id', (req, res) => {
       res.status(404).json({ error: 'Infrator não encontrado.' });
       return;
     }
-    res.json({ success: true, message: 'Infrator e vínculos excluídos com sucesso.' });
+    // Explicitly guarantee all addresses and links for this suspect are removed from memory
+    db.enderecos_atuacao = db.enderecos_atuacao.filter(ea => ea.infrator_id !== id);
+    db.infrator_ocorrencia = db.infrator_ocorrencia.filter(io => io.infrator_id !== id);
+    res.json({ success: true, message: 'Infrator, ocorrências vinculadas e endereços excluídos com sucesso.' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -554,6 +557,12 @@ app.delete('/api/ocorrencias/:id', (req, res) => {
 // 3. Endereços de Atuação (Operational Addresses) CRUD
 app.get('/api/enderecos', (req, res) => {
   try {
+    const validSuspectIds = new Set(db.infratores.map(i => i.id));
+    // Filter and prune orphaned addresses of deleted suspects
+    db.enderecos_atuacao = db.enderecos_atuacao.filter(
+      ea => !ea.infrator_id || validSuspectIds.has(ea.infrator_id)
+    );
+
     const list = db.enderecos_atuacao.map(ea => {
       const inf = db.infratores.find(i => i.id === ea.infrator_id);
       return {

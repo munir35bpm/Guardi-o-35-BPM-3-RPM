@@ -899,6 +899,7 @@ export default function App() {
         console.warn('Backend delete address failed, using local DB fallback', e);
       }
       db.enderecos_atuacao = db.enderecos_atuacao.filter((ea) => ea.id !== enderecoId);
+      setAddresses((prev) => prev.filter((a) => a.id !== enderecoId));
       // Delete from Firebase Firestore
       await deleteAddressFromFirebase(enderecoId);
       const updated = db.getInfratorFull(selectedSuspectDetail.id);
@@ -1427,6 +1428,7 @@ export default function App() {
     try {
       // Optimistic update
       setSuspects((prev) => prev.filter((s) => s.id !== id));
+      setAddresses((prev) => prev.filter((a) => a.infrator_id !== id));
       setTotalSuspects((prev) => Math.max(0, prev - 1));
       if (selectedSuspectDetail?.id === id) {
         setSelectedSuspectDetail(null);
@@ -2004,6 +2006,10 @@ export default function App() {
                   selectedCoords={selectedCoords}
                   onSelectCoords={handleMapCoordinatePick}
                   highlightedSuspectId={highlightedSuspectId}
+                  occurrencesList={occurrences}
+                  addressesList={addresses}
+                  suspectsList={suspects}
+                  onRefresh={fetchTelemetry}
                 />
               </div>
 

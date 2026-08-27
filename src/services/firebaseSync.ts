@@ -86,19 +86,48 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
       db.caracteristicas_fisicas = infratores
         .filter((i: any) => i.fisicas)
         .map((i: any) => i.fisicas);
+    } else {
+      db.infratores = [];
+      db.caracteristicas_fisicas = [];
     }
-    if (enderecos.length > 0) {
-      const { unique, duplicatesToDelete } = deduplicateAddresses(enderecos);
-      db.enderecos_atuacao = unique;
-      if (duplicatesToDelete.length > 0) {
-        // Clean up redundant duplicate records in Firestore
-        for (const dupId of duplicatesToDelete) {
-          removeEndereco(dupId).catch(() => null);
+
+    // Filter and clean orphaned addresses (addresses for suspects that were deleted)
+    const validSuspectIds = new Set((infratores || []).map((i: any) => i.id));
+    const activeEnderecos = (enderecos || []).filter((addr: EnderecoAtuacao) => {
+      if (!addr) return false;
+      // If the address belongs to a specific infrator, verify that infrator exists
+      if (addr.infrator_id) {
+        return validSuspectIds.has(addr.infrator_id);
+      }
+      return false; // Do not keep anonymous/detached residency pins
+    });
+
+    // Clean up orphaned address records from Firestore
+    const orphanedAddrs = (enderecos || []).filter((addr: EnderecoAtuacao) => {
+      if (!addr || !addr.id) return false;
+      return !addr.infrator_id || !validSuspectIds.has(addr.infrator_id);
+    });
+    if (orphanedAddrs.length > 0) {
+      console.log(`🧹 [Firestore] Removendo ${orphanedAddrs.length} endereços residenciais de infratores excluídos...`);
+      for (const orphan of orphanedAddrs) {
+        if (orphan.id) {
+          removeEndereco(orphan.id).catch(() => null);
         }
       }
     }
+
+    const { unique, duplicatesToDelete } = deduplicateAddresses(activeEnderecos);
+    db.enderecos_atuacao = unique;
+    if (duplicatesToDelete.length > 0) {
+      for (const dupId of duplicatesToDelete) {
+        removeEndereco(dupId).catch(() => null);
+      }
+    }
+
     if (ocorrencias.length > 0) {
       db.ocorrencias_criminais = ocorrencias;
+    } else {
+      db.ocorrencias_criminais = [];
     }
     if (vinculos.length > 0) {
       db.vinculos_comparsas = vinculos;
@@ -114,17 +143,27 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
     // 2. Setup real-time listeners for live updates
     subscribeToDatabase({
       onInfratoresChange: (list) => {
-        if (list && list.length >= 0) {
+        if (list) {
           db.infratores = list;
           db.caracteristicas_fisicas = list
             .filter((i: any) => i.fisicas)
             .map((i: any) => i.fisicas);
+          
+          // Re-validate addresses against active suspects
+          const currentValidIds = new Set(list.map((i: any) => i.id));
+          db.enderecos_atuacao = db.enderecos_atuacao.filter(
+            (a) => a.infrator_id && currentValidIds.has(a.infrator_id)
+          );
           if (onDataChange) onDataChange();
         }
       },
       onEnderecosChange: (list) => {
         if (list) {
-          const { unique, duplicatesToDelete } = deduplicateAddresses(list);
+          const currentValidIds = new Set(db.infratores.map((i: any) => i.id));
+          const validList = list.filter(
+            (addr) => addr.infrator_id && currentValidIds.has(addr.infrator_id)
+          );
+          const { unique, duplicatesToDelete } = deduplicateAddresses(validList);
           db.enderecos_atuacao = unique;
           if (duplicatesToDelete.length > 0) {
             for (const dupId of duplicatesToDelete) {
@@ -203,17 +242,34 @@ export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails):
 /**
  * Deletes a suspect and their associated addresses and links from Firestore.
  */
-export async function deleteSuspectFromFirebase(suspectId: string): Promise<void> {
+export async function deleteSuspectFromFirebase(suspectId: string, addressIds?: string[]): Promise<void> {
   try {
     await removeInfrator(suspectId);
     
-    // Remove related addresses
-    const relatedAddrs = db.enderecos_atuacao.filter(a => a.infrator_id === suspectId);
-    for (const a of relatedAddrs) {
-      await removeEndereco(a.id);
+    // 1. Fetch current addresses directly from Firestore to ensure no orphans remain
+    const firestoreAddrs = await fetchEnderecos().catch(() => []);
+    const toDelete = firestoreAddrs.filter(
+      (a) => a.infrator_id === suspectId || (addressIds && addressIds.includes(a.id))
+    );
+    for (const a of toDelete) {
+      if (a.id) {
+        await removeEndereco(a.id);
+      }
     }
+
+    // 2. Also remove any provided addressIds directly
+    if (addressIds && addressIds.length > 0) {
+      for (const aId of addressIds) {
+        await removeEndereco(aId);
+      }
+    }
+
+    // 3. Clean local memory state
+    db.enderecos_atuacao = db.enderecos_atuacao.filter(
+      (a) => a.infrator_id !== suspectId && (!addressIds || !addressIds.includes(a.id))
+    );
   } catch (err) {
-    console.error('Erro ao excluir infrator do Firestore:', err);
+    console.error('Erro ao excluir infrator e endereços do Firestore:', err);
   }
 }
 
@@ -253,9 +309,21 @@ export async function persistOccurrenceToFirebase(occurrence: OcorrenciaCriminal
 /**
  * Removes an occurrence from Firestore.
  */
-export async function deleteOccurrenceFromFirebase(occurrenceId: string): Promise<void> {
+export async function deleteOccurrenceFromFirebase(occurrenceId: string, numeroBo?: string): Promise<void> {
   try {
     await removeOcorrencia(occurrenceId);
+    if (numeroBo) {
+      const allOcs = await fetchOcorrencias().catch(() => []);
+      const matches = allOcs.filter((o) => o.numero_bo === numeroBo && o.id !== occurrenceId);
+      for (const m of matches) {
+        if (m.id) {
+          await removeOcorrencia(m.id);
+        }
+      }
+    }
+    db.ocorrencias_criminais = db.ocorrencias_criminais.filter(
+      (o) => o.id !== occurrenceId && (!numeroBo || o.numero_bo !== numeroBo)
+    );
   } catch (err) {
     console.error('Erro ao excluir ocorrência do Firestore:', err);
   }
