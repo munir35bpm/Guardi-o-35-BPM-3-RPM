@@ -1,6 +1,163 @@
 import { Infrator, OrcrimData } from '../types';
 import { db } from '../backend/db';
 
+export const SVG_LOGO_PMMG = `
+<svg viewBox="0 0 200 240" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 52px; height: 60px; flex-shrink: 0; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));">
+  <!-- Shield base -->
+  <path d="M100 235C45 200 8 135 8 20C65 20 100 5 100 5C100 5 135 20 192 20C192 135 155 200 100 235Z" fill="#0E1726" stroke="#C4A76E" stroke-width="4"/>
+  <path d="M100 225C50 192 18 132 18 28C68 28 100 15 100 15C100 15 132 28 182 28C182 132 150 192 100 225Z" fill="#FAF8F5"/>
+  <!-- Upper Header Arc -->
+  <path d="M22 30 C 60 28, 140 28, 178 30 L 178 52 C 140 50, 60 50, 22 52 Z" fill="#0E1726"/>
+  <text x="100" y="45" text-anchor="middle" fill="#E2E8F0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif" font-weight="900" font-size="10.5" letter-spacing="1">POLÍCIA MILITAR</text>
+  <!-- Minas Red Triangle -->
+  <polygon points="100,68 62,132 138,132" fill="#DC2626" stroke="#991B1B" stroke-width="2"/>
+  <!-- Crossed Pistols / Rifles in Gold -->
+  <g stroke="#C4A76E" stroke-width="2.5" stroke-linecap="round">
+    <line x1="72" y1="168" x2="128" y2="122" />
+    <line x1="128" y1="168" x2="72" y2="122" />
+  </g>
+  <circle cx="100" cy="145" r="5" fill="#C4A76E"/>
+  <circle cx="100" cy="100" r="4" fill="#FFFFFF"/>
+  <!-- Stars -->
+  <circle cx="50" cy="95" r="2.5" fill="#C4A76E"/>
+  <circle cx="150" cy="95" r="2.5" fill="#C4A76E"/>
+  <circle cx="42" cy="120" r="2" fill="#C4A76E"/>
+  <circle cx="158" cy="120" r="2" fill="#C4A76E"/>
+  <!-- Lower Banner: MINAS GERAIS / 1775 -->
+  <path d="M35 186 C 65 196, 135 196, 165 186 L 160 206 C 130 214, 70 214, 40 206 Z" fill="#0E1726" stroke="#C4A76E" stroke-width="1.5"/>
+  <text x="100" y="200" text-anchor="middle" fill="#DFC897" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-weight="800" font-size="9" letter-spacing="1">MINAS GERAIS</text>
+  <text x="100" y="216" text-anchor="middle" fill="#94A3B8" font-family="monospace" font-weight="700" font-size="7.5">1775</text>
+</svg>
+`;
+
+export const SVG_LOGO_35BPM = `
+<svg viewBox="0 0 400 450" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 54px; height: 60px; flex-shrink: 0; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));">
+  <defs>
+    <clipPath id="shield-clip-doc">
+      <path d="M200 440C120 400 20 300 20 50C130 50 200 20 200 20C200 20 270 50 380 50C380 300 280 400 200 440Z" />
+    </clipPath>
+    <linearGradient id="gold-border-doc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stopColor="#DFC897" />
+      <stop offset="50%" stopColor="#C4A76E" />
+      <stop offset="100%" stopColor="#9E7E45" />
+    </linearGradient>
+    <linearGradient id="river-blue-doc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stopColor="#12234B" />
+      <stop offset="50%" stopColor="#1E3875" />
+      <stop offset="100%" stopColor="#152756" />
+    </linearGradient>
+  </defs>
+  <path d="M200 445C118 405 15 303 15 48C128 48 200 15 200 15C200 15 272 48 385 48C385 303 282 405 200 445Z" fill="#111216" stroke="#090A0D" stroke-width="3"/>
+  <path d="M200 435C124 397 27 298 27 56C132 56 200 26 200 26C200 26 268 56 373 56C373 298 276 397 200 435Z" fill="url(#gold-border-doc)"/>
+  <path d="M200 420C128 384 37 288 37 66C136 66 200 37 200 37C200 37 264 66 363 66C363 288 272 384 200 420Z" fill="#F3EEE4"/>
+  <g clip-path="url(#shield-clip-doc)">
+    <text x="200" y="125" text-anchor="middle" font-family="Impact, sans-serif" font-weight="900" font-size="74" fill="#141518" letter-spacing="2">PMMG</text>
+    <text x="200" y="158" text-anchor="middle" font-family="Impact, sans-serif" font-weight="900" font-size="26" fill="#181A20" letter-spacing="1">35º BPM</text>
+    <text x="200" y="178" text-anchor="middle" font-family="Arial, sans-serif" font-weight="700" font-size="9.5" fill="#333842" letter-spacing="1.2">O GUARDIÃO DO ALTO RIO DAS VELHAS</text>
+    <g transform="translate(142, 172)">
+      <rect x="10" y="70" width="96" height="60" fill="#E8DFCE" stroke="#A88B52" stroke-width="2.5" />
+      <path d="M46,130 L46,102 Q58,92 70,102 L70,130 Z" fill="#1C1E24" />
+      <polygon points="30,70 58,35 86,70" fill="#E8DFCE" stroke="#A88B52" stroke-width="2.5" />
+      <circle cx="58" cy="58" r="7" fill="#A88B52" />
+      <rect x="56" y="20" width="4" height="16" fill="#1A1C22" />
+      <rect x="51" y="24" width="14" height="4" fill="#1A1C22" />
+      <rect x="10" y="42" width="22" height="88" fill="#E8DFCE" stroke="#A88B52" stroke-width="2" />
+      <polygon points="8,42 21,12 34,42" fill="#B3975C" stroke="#7A6335" stroke-width="1.5" />
+      <rect x="84" y="42" width="22" height="88" fill="#E8DFCE" stroke="#A88B52" stroke-width="2" />
+      <polygon points="82,42 95,12 108,42" fill="#B3975C" stroke="#7A6335" stroke-width="1.5" />
+    </g>
+    <path d="M90 318 C160 318 110 332 170 332 C230 332 260 345 310 350 L360 415 C280 435 180 435 90 405 C50 375 70 340 90 318 Z" fill="url(#river-blue-doc)"/>
+  </g>
+</svg>
+`;
+
+/**
+ * Builds an analytical summary of occurrences focusing on modus operandi and investigation points
+ */
+function buildCriminalDossierSummary(occurrences: any[]) {
+  if (!occurrences || occurrences.length === 0) {
+    return {
+      hasOccurrences: false,
+      totalCount: 0,
+      tipificacoesCount: [] as { crime: string; count: number }[],
+      armas: [] as string[],
+      veiculos: [] as string[],
+      modusOperandiList: [] as string[],
+      papeisCount: {} as Record<string, number>,
+      diligencePoints: [] as { bo: string; data: string; tipificacao: string; papel: string; pontoChave: string }[],
+    };
+  }
+
+  const tipificacoesMap: Record<string, number> = {};
+  const armasSet = new Set<string>();
+  const veiculosSet = new Set<string>();
+  const modusOperandiSet = new Set<string>();
+  const papeisCount: Record<string, number> = {};
+  const diligencePoints: { bo: string; data: string; tipificacao: string; papel: string; pontoChave: string }[] = [];
+
+  for (const oc of occurrences) {
+    // Tipificação
+    const tip = (oc.tipificacao_penal || 'Não especificada').trim();
+    tipificacoesMap[tip] = (tipificacoesMap[tip] || 0) + 1;
+
+    // Papel
+    const papel = (oc.papel || oc.papel_no_crime || 'Autor').trim();
+    papeisCount[papel] = (papeisCount[papel] || 0) + 1;
+
+    // Armas
+    if (oc.armas_utilizadas && oc.armas_utilizadas.trim() && oc.armas_utilizadas !== 'Não informada' && oc.armas_utilizadas !== 'N/D') {
+      const parts = oc.armas_utilizadas.split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean);
+      parts.forEach((p: string) => armasSet.add(p));
+    }
+
+    // Veículos
+    if (oc.veiculo_utilizado && oc.veiculo_utilizado.trim() && oc.veiculo_utilizado !== 'Não informado' && oc.veiculo_utilizado !== 'N/D') {
+      const parts = oc.veiculo_utilizado.split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean);
+      parts.forEach((p: string) => veiculosSet.add(p));
+    }
+
+    // Modus Operandi
+    if (oc.modus_operandi && oc.modus_operandi.trim() && oc.modus_operandi.length > 5) {
+      modusOperandiSet.add(oc.modus_operandi.trim());
+    }
+
+    // Build key investigative takeaway
+    const boNum = oc.numero_bo || 'S/N';
+    const dataFmt = oc.data_hora ? new Date(oc.data_hora).toLocaleDateString('pt-BR') : 'Data N/D';
+    let pontoChave = oc.modus_operandi || '';
+    if (!pontoChave && oc.descricao_fato) {
+      // Shorten description to first 180 chars
+      pontoChave = oc.descricao_fato.length > 180 ? oc.descricao_fato.slice(0, 180) + '...' : oc.descricao_fato;
+    }
+    if (!pontoChave) {
+      pontoChave = 'Registro policial vinculado ao investigado no âmbito da circunscrição policial.';
+    }
+
+    diligencePoints.push({
+      bo: boNum,
+      data: dataFmt,
+      tipificacao: tip,
+      papel: papel,
+      pontoChave: pontoChave,
+    });
+  }
+
+  const tipificacoesCount = Object.entries(tipificacoesMap)
+    .map(([crime, count]) => ({ crime, count }))
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    hasOccurrences: true,
+    totalCount: occurrences.length,
+    tipificacoesCount,
+    armas: Array.from(armasSet),
+    veiculos: Array.from(veiculosSet),
+    modusOperandiList: Array.from(modusOperandiSet),
+    papeisCount,
+    diligencePoints,
+  };
+}
+
 export function generateSuspectDossierHtml(infratorFull: any): string {
   if (!infratorFull) {
     return '<h1>Infrator não encontrado</h1>';
@@ -57,6 +214,9 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
   const cicatrizes = fisicas.cicatrizes || infratorFull.cicatrizes || 'Sem cicatrizes registradas';
   const sinais = fisicas.sinais_particulares || infratorFull.sinais_particulares || 'Sem sinais particulares cadastrados';
 
+  // Build intelligence criminal dossier summary
+  const dossierSummary = buildCriminalDossierSummary(occurrences);
+
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -79,7 +239,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       line-height: 1.35;
       margin: 0;
       padding: 0;
-      font-size: 9.5pt;
+      font-size: 9pt;
       background: #ffffff;
     }
     .btn-bar {
@@ -130,13 +290,13 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
     .document-container {
       max-width: 820px;
       margin: 0 auto;
-      padding: 16px 20px 30px 20px;
+      padding: 14px 18px 24px 18px;
       background: #fff;
     }
     .header {
       border-bottom: 2.5px solid #0f172a;
-      padding-bottom: 10px;
-      margin-bottom: 14px;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -146,34 +306,21 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       align-items: center;
       gap: 12px;
     }
-    .badge {
-      width: 58px;
-      height: 58px;
-      background: #0E121B;
-      color: #DFC897;
-      border-radius: 6px;
+    .header-logos {
       display: flex;
-      flex-direction: column;
       align-items: center;
-      justify-content: center;
-      font-weight: 900;
-      font-size: 7.5pt;
-      text-align: center;
-      border: 2px solid #C4A76E;
-      letter-spacing: 0.5px;
-      line-height: 1.1;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+      gap: 8px;
     }
     .header-title h1 {
-      font-size: 12.5pt;
+      font-size: 12pt;
       margin: 0;
       color: #0E121B;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      font-weight: 800;
+      font-weight: 900;
     }
     .header-title h2 {
-      font-size: 8pt;
+      font-size: 7.8pt;
       margin: 2px 0 0 0;
       color: #1D356D;
       font-weight: 700;
@@ -185,7 +332,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       color: #dc2626;
       font-weight: 900;
       padding: 3px 8px;
-      font-size: 8pt;
+      font-size: 7.5pt;
       text-transform: uppercase;
       letter-spacing: 1px;
       border-radius: 4px;
@@ -193,17 +340,17 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
     }
     .suspect-overview {
       display: flex;
-      gap: 16px;
-      margin-bottom: 14px;
+      gap: 14px;
+      margin-bottom: 12px;
       background: #f8fafc;
-      padding: 12px;
+      padding: 10px 12px;
       border-radius: 6px;
       border: 1px solid #e2e8f0;
     }
     .suspect-photo-box {
       flex-shrink: 0;
-      width: 125px;
-      height: 155px;
+      width: 120px;
+      height: 150px;
       border: 2px solid #0f172a;
       border-radius: 4px;
       overflow: hidden;
@@ -221,21 +368,21 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       flex-grow: 1;
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 6px 12px;
+      gap: 5px 12px;
     }
     .detail-item {
       border-bottom: 1px solid #e2e8f0;
       padding-bottom: 2px;
     }
     .detail-label {
-      font-size: 7pt;
+      font-size: 6.8pt;
       color: #64748b;
       text-transform: uppercase;
       font-weight: 700;
       letter-spacing: 0.4px;
     }
     .detail-value {
-      font-size: 9.5pt;
+      font-size: 9pt;
       font-weight: 700;
       color: #0f172a;
     }
@@ -245,7 +392,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       padding: 2px 6px;
       border-radius: 3px;
       display: inline-block;
-      font-size: 8.5pt;
+      font-size: 8pt;
       font-weight: 800;
       border: 1px solid #f87171;
     }
@@ -255,7 +402,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       padding: 2px 6px;
       border-radius: 3px;
       display: inline-block;
-      font-size: 8.5pt;
+      font-size: 8pt;
       font-weight: 800;
       border: 1px solid #ef4444;
     }
@@ -265,7 +412,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       padding: 2px 6px;
       border-radius: 3px;
       display: inline-block;
-      font-size: 8.5pt;
+      font-size: 8pt;
       font-weight: 800;
       border: 1px solid #86efac;
     }
@@ -275,7 +422,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       padding: 2px 6px;
       border-radius: 3px;
       display: inline-block;
-      font-size: 8.5pt;
+      font-size: 8pt;
       font-weight: 800;
       border: 1px solid #94a3b8;
     }
@@ -285,7 +432,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       font-size: 8.5pt;
       font-weight: 800;
       padding: 4px 8px;
-      margin: 12px 0 6px 0;
+      margin: 10px 0 6px 0;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       border-radius: 3px;
@@ -298,37 +445,15 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       color: #f59e0b;
       font-weight: bold;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 8.5pt;
-      margin-bottom: 10px;
-    }
-    th {
-      background: #f1f5f9;
-      text-align: left;
-      padding: 5px 6px;
-      border-bottom: 2px solid #cbd5e1;
-      color: #334155;
-      text-transform: uppercase;
-      font-size: 7pt;
-      font-weight: 700;
-      letter-spacing: 0.3px;
-    }
-    td {
-      padding: 5px 6px;
-      border-bottom: 1px solid #e2e8f0;
-      vertical-align: top;
-    }
     .cf-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 4px 12px;
       background: #f8fafc;
-      padding: 8px 12px;
+      padding: 6px 10px;
       border-radius: 4px;
       border: 1px solid #e2e8f0;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     .cf-item {
       display: flex;
@@ -337,67 +462,121 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
     .cf-label {
       font-weight: 700;
       color: #64748b;
-      font-size: 7pt;
+      font-size: 6.8pt;
       text-transform: uppercase;
     }
     .cf-value {
-      font-size: 9pt;
+      font-size: 8.5pt;
       color: #0f172a;
       font-weight: 600;
     }
-    .incident-card {
+    .dossier-box {
+      background: #f8fafc;
       border: 1px solid #cbd5e1;
       border-radius: 4px;
+      padding: 8px 10px;
+      margin-bottom: 10px;
+    }
+    .dossier-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 8px;
       margin-bottom: 8px;
-      padding: 8px;
+    }
+    .dossier-card {
       background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      padding: 6px 8px;
+    }
+    .dossier-card-title {
+      font-size: 7pt;
+      font-weight: 800;
+      text-transform: uppercase;
+      color: #1e293b;
+      border-bottom: 1.5px solid #e2e8f0;
+      padding-bottom: 3px;
+      margin-bottom: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .crime-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #fee2e2;
+      color: #991b1b;
+      font-weight: 700;
+      font-size: 7.5pt;
+      padding: 1.5px 6px;
+      border-radius: 3px;
+      border: 1px solid #fca5a5;
+      margin: 2px;
+    }
+    .crime-tag-badge {
+      background: #991b1b;
+      color: #ffffff;
+      padding: 0 4px;
+      border-radius: 2px;
+      font-size: 6.5pt;
+    }
+    .diligence-item {
+      border-left: 3px solid #f59e0b;
+      padding: 4px 8px;
+      background: #ffffff;
+      border-radius: 0 4px 4px 0;
+      margin-bottom: 5px;
+      border-top: 1px solid #f1f5f9;
+      border-right: 1px solid #f1f5f9;
+      border-bottom: 1px solid #f1f5f9;
       page-break-inside: avoid;
     }
-    .incident-header {
+    .diligence-header {
       display: flex;
       justify-content: space-between;
-      border-bottom: 1px solid #e2e8f0;
-      padding-bottom: 4px;
-      margin-bottom: 4px;
+      align-items: center;
+      margin-bottom: 2px;
     }
-    .incident-bo {
+    .diligence-bo {
       font-weight: 800;
-      font-size: 9.5pt;
+      font-size: 8pt;
       color: #0f172a;
     }
-    .incident-badge {
-      font-weight: 800;
-      font-size: 7.5pt;
-      padding: 2px 6px;
-      border-radius: 3px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .incident-meta {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 4px;
+    .diligence-body {
       font-size: 8pt;
-      margin-bottom: 4px;
-      background: #f8fafc;
-      padding: 4px 6px;
-      border-radius: 3px;
-    }
-    .incident-narrative {
-      font-size: 8.5pt;
       color: #334155;
-      line-height: 1.3;
-      margin-top: 3px;
-      padding-left: 6px;
-      border-left: 3px solid #f59e0b;
+      line-height: 1.25;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 8pt;
+      margin-bottom: 8px;
+    }
+    th {
+      background: #f1f5f9;
+      text-align: left;
+      padding: 4px 6px;
+      border-bottom: 2px solid #cbd5e1;
+      color: #334155;
+      text-transform: uppercase;
+      font-size: 6.8pt;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    td {
+      padding: 4px 6px;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: top;
     }
     .footer {
-      margin-top: 20px;
+      margin-top: 16px;
       border-top: 1px solid #000;
-      padding-top: 6px;
+      padding-top: 5px;
       display: flex;
       justify-content: space-between;
-      font-size: 7pt;
+      font-size: 6.8pt;
       color: #64748b;
       text-transform: uppercase;
       page-break-inside: avoid;
@@ -430,7 +609,10 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
   <div class="document-container">
     <div class="header">
       <div class="header-left">
-        <div class="badge">PMMG<br>35º BPM</div>
+        <div class="header-logos">
+          ${SVG_LOGO_PMMG}
+          ${SVG_LOGO_35BPM}
+        </div>
         <div class="header-title">
           <h1>PMMG • 35º BATALHÃO DE POLÍCIA MILITAR</h1>
           <h2>O GUARDIÃO DO ALTO RIO DAS VELHAS • DOSSIÊ DE INTELIGÊNCIA INDIVIDUAL</h2>
@@ -446,7 +628,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       <div class="suspect-details-grid">
         <div class="detail-item" style="grid-column: span 2;">
           <div class="detail-label">Nome Completo do Infrator</div>
-          <div class="detail-value" style="font-size: 11pt; color: #000;">${infratorFull.nome_completo || 'Não informado'}</div>
+          <div class="detail-value" style="font-size: 10.5pt; color: #000;">${infratorFull.nome_completo || 'Não informado'}</div>
         </div>
         <div class="detail-item">
           <div class="detail-label">Alcunha / Vulgo</div>
@@ -517,55 +699,78 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       </div>
     </div>
 
+    <!-- DOSSIÊ CRIMINAL - SÍNTESE ANALÍTICA PARA INVESTIGAÇÃO E DILIGÊNCIAS -->
     <div class="section-title">
-      <span>Histórico de Ocorrências Criminais Registradas (B.O.s Vinculados)</span>
-      <span class="count">${occurrences.length} Registros</span>
+      <span>Dossiê Criminal • Síntese de Inteligência & Modus Operandi</span>
+      <span class="count">${dossierSummary.totalCount} Registro(s) Analisado(s)</span>
     </div>
-    ${occurrences.length === 0 ? `
-      <div style="padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; text-align: center; color: #64748b; font-size: 8.5pt; border-radius: 4px; margin-bottom: 10px;">
+
+    ${!dossierSummary.hasOccurrences ? `
+      <div style="padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; text-align: center; color: #64748b; font-size: 8pt; border-radius: 4px; margin-bottom: 10px;">
         Nenhuma ocorrência criminal vinculada diretamente a este investigado no banco de dados.
       </div>
-    ` : occurrences.map((oc: any) => {
-      const p = (oc.papel || oc.papel_no_crime || 'Suspeito').toLowerCase();
-      let badgeStyle = 'background: #fef3c7; color: #92400e; border: 1px solid #fcd34d;';
-      if (p.includes('autor') && !p.includes('coautor')) {
-        badgeStyle = 'background: #fee2e2; color: #991b1b; border: 1px solid #f87171;';
-      } else if (p.includes('coautor') || p.includes('co-autor')) {
-        badgeStyle = 'background: #ffedd5; color: #9a3412; border: 1px solid #fb923c;';
-      } else if (p.includes('vítima') || p.includes('vitima')) {
-        badgeStyle = 'background: #dbeafe; color: #1e40af; border: 1px solid #60a5fa;';
-      } else if (p.includes('notificado')) {
-        badgeStyle = 'background: #f3e8ff; color: #6b21a8; border: 1px solid #c084fc;';
-      } else if (p.includes('testemunha') || p.includes('condutor')) {
-        badgeStyle = 'background: #ccfbf1; color: #115e59; border: 1px solid #2dd4bf;';
-      }
-
-      return `
-      <div class="incident-card">
-        <div class="incident-header">
-          <div>
-            <span class="incident-bo">B.O. Nº ${oc.numero_bo || 'S/N'}</span>
-            <span style="color: #64748b; font-size: 8pt; margin-left: 8px;">
-              ${oc.data_hora ? new Date(oc.data_hora).toLocaleDateString('pt-BR') : 'Data N/D'}
-            </span>
+    ` : `
+      <div class="dossier-box">
+        <!-- Linha 1: Perfil Delitivo Consolidado -->
+        <div class="dossier-grid">
+          <!-- Bloco A: Tipificações Recorrentes -->
+          <div class="dossier-card">
+            <div class="dossier-card-title">
+              <span>Recorrência Criminal & Tipificações</span>
+              <span style="color: #64748b; font-size: 6.5pt;">Incidências</span>
+            </div>
+            <div>
+              ${dossierSummary.tipificacoesCount.map(t => `
+                <span class="crime-tag">
+                  ${t.crime}
+                  <span class="crime-tag-badge">${t.count}x</span>
+                </span>
+              `).join('')}
+            </div>
           </div>
-          <span class="incident-badge" style="${badgeStyle}">Papel: ${oc.papel || oc.papel_no_crime || 'Suspeito'}</span>
+
+          <!-- Bloco B: Meios Empregados (Armas & Veículos) -->
+          <div class="dossier-card">
+            <div class="dossier-card-title">
+              <span>Meios Empregados em Ações</span>
+            </div>
+            <div style="font-size: 7.5pt; color: #334155; display: flex; flex-direction: column; gap: 3px;">
+              <div>
+                <strong style="color: #991b1b;">Armas / Artefatos:</strong>
+                <span>${dossierSummary.armas.length > 0 ? dossierSummary.armas.join(', ') : 'Não especificado nos registros'}</span>
+              </div>
+              <div>
+                <strong style="color: #1e3a8a;">Veículos de Apoio/Fuga:</strong>
+                <span>${dossierSummary.veiculos.length > 0 ? dossierSummary.veiculos.join(', ') : 'Não especificado nos registros'}</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="incident-meta">
-          <div><strong>Tipificação:</strong> ${oc.tipificacao_penal || 'Não informada'}</div>
-          <div><strong>Armas:</strong> ${oc.armas_utilizadas || 'Não informada'}</div>
-          <div><strong>Veículo:</strong> ${oc.veiculo_utilizado || 'Não informado'}</div>
-        </div>
-        <div style="font-size: 8pt; margin-bottom: 3px;">
-          <strong>Modus Operandi:</strong> ${oc.modus_operandi || 'Padrão não especificado'}
-        </div>
-        <div>
-          <strong style="font-size: 7.5pt; text-transform: uppercase; color: #475569;">Narrativa Circunstanciada do Fato:</strong>
-          <div class="incident-narrative">${oc.descricao_fato || 'Sem narrativa circunstanciada cadastrada.'}</div>
+
+        <!-- Bloco C: Pontos de Destaque para Diligências & Investigação Futura -->
+        <div class="dossier-card">
+          <div class="dossier-card-title" style="color: #9a3412;">
+            <span>Pontos de Destaque para Diligências Policiais & Linha de Investigação</span>
+            <span style="color: #9a3412; font-size: 6.5pt; font-weight: 700;">Síntese Tática</span>
+          </div>
+          <div>
+            ${dossierSummary.diligencePoints.map(p => `
+              <div class="diligence-item">
+                <div class="diligence-header">
+                  <span class="diligence-bo">B.O. Nº ${p.bo} <span style="font-weight: normal; color: #64748b; font-size: 7.5pt;">(${p.data})</span></span>
+                  <span style="font-size: 7pt; font-weight: 700; background: #fef3c7; color: #92400e; padding: 1px 5px; border-radius: 2px; border: 1px solid #fde68a;">
+                    ${p.tipificacao} [${p.papel}]
+                  </span>
+                </div>
+                <div class="diligence-body">
+                  <strong>Padrão / Modus Operandi:</strong> ${p.pontoChave}
+                </div>
+              </div>
+            `).join('')}
+          </div>
         </div>
       </div>
-      `;
-    }).join('')}
+    `}
 
     <div class="section-title">
       <span>Locais Conhecidos de Atuação, Esconderijos e Redutos</span>
@@ -602,14 +807,14 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       <span class="count">${comparsas.length} Vínculo(s) Detectado(s)</span>
     </div>
     ${comparsas.length === 0 ? `
-      <div style="padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; text-align: center; color: #64748b; font-size: 8.5pt; border-radius: 4px; margin-bottom: 10px;">
+      <div style="padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; text-align: center; color: #64748b; font-size: 8pt; border-radius: 4px; margin-bottom: 8px;">
         Nenhum comparsa ou vínculo direto em registro policial (B.O.) identificado até o momento.
       </div>
     ` : `
-    <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
       <thead>
         <tr>
-          <th style="width: 50px; text-align: center;">Foto</th>
+          <th style="width: 45px; text-align: center;">Foto</th>
           <th>Identificação do Comparsa / Co-autor</th>
           <th>Situação Prisional</th>
           <th>Facção</th>
@@ -643,34 +848,34 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
 
           return `
           <tr>
-            <td style="text-align: center; vertical-align: middle; padding: 4px;">
-              <img src="${fotoComp}" alt="${vulgoComp}" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid #0f172a;" />
+            <td style="text-align: center; vertical-align: middle; padding: 3px;">
+              <img src="${fotoComp}" alt="${vulgoComp}" style="width: 34px; height: 34px; object-fit: cover; border-radius: 4px; border: 1px solid #0f172a;" />
             </td>
             <td style="vertical-align: top;">
-              <strong style="color: #0f172a; font-size: 8.5pt;">${nomeComp}</strong><br/>
-              <span style="color: #b45309; font-weight: 800; font-size: 8pt;">"${vulgoComp}"</span>
+              <strong style="color: #0f172a; font-size: 8pt;">${nomeComp}</strong><br/>
+              <span style="color: #b45309; font-weight: 800; font-size: 7.5pt;">"${vulgoComp}"</span>
             </td>
             <td style="vertical-align: top;">
               ${sitBadgeHtml}
             </td>
-            <td style="vertical-align: top; font-size: 8pt; color: #334155; font-weight: 600;">
+            <td style="vertical-align: top; font-size: 7.5pt; color: #334155; font-weight: 600;">
               ${faccaoComp}
             </td>
-            <td style="vertical-align: top; font-size: 8pt;">
+            <td style="vertical-align: top; font-size: 7.5pt;">
               <div style="margin-bottom: 2px;">
-                <span style="font-size: 7pt; font-weight: 800; text-transform: uppercase; padding: 1px 4px; border-radius: 2px; ${isRegistroPolicial ? 'background: #fef3c7; color: #92400e; border: 1px solid #fcd34d;' : 'background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd;'}">
+                <span style="font-size: 6.8pt; font-weight: 800; text-transform: uppercase; padding: 1px 4px; border-radius: 2px; ${isRegistroPolicial ? 'background: #fef3c7; color: #92400e; border: 1px solid #fcd34d;' : 'background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd;'}">
                   ${isRegistroPolicial ? '📋 VÍNCULO EM REGISTRO POLICIAL (B.O.)' : '🔗 VÍNCULO DE INTELIGÊNCIA TÁTICA'}
                 </span>
-                <span style="font-weight: bold; color: ${rel.grau === 'Forte' ? '#dc2626' : '#d97706'}; font-size: 7.5pt; margin-left: 4px;">
+                <span style="font-weight: bold; color: ${rel.grau === 'Forte' ? '#dc2626' : '#d97706'}; font-size: 7pt; margin-left: 4px;">
                   [${rel.grau || 'Geral'}]
                 </span>
               </div>
               
               ${hasSharedBos ? `
-                <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px; padding: 4px 6px; margin-top: 3px; font-size: 7.5pt;">
-                  <strong style="color: #92400e; text-transform: uppercase; font-size: 7pt;">B.O.s Compartilhados em Co-autoria:</strong>
+                <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 3px; padding: 3px 5px; margin-top: 2px; font-size: 7pt;">
+                  <strong style="color: #92400e; text-transform: uppercase; font-size: 6.8pt;">B.O.s Compartilhados em Co-autoria:</strong>
                   ${rel.shared_bos.map((b: any) => `
-                    <div style="margin-top: 2px; color: #1e293b;">
+                    <div style="margin-top: 1px; color: #1e293b;">
                       • <strong>B.O. Nº ${b.numero_bo}</strong> (${b.tipificacao_penal}): 
                       <span style="color: #475569;">Investigado: <strong>${b.papel_infrator || 'Autor'}</strong> / Comparsa: <strong>${b.papel_comparsa || 'Autor'}</strong></span>
                     </div>
@@ -678,7 +883,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
                 </div>
               ` : ''}
 
-              <div style="color: #475569; font-size: 7.5pt; margin-top: 2px; line-height: 1.2;">
+              <div style="color: #475569; font-size: 7pt; margin-top: 2px; line-height: 1.2;">
                 ${rel.historico || rel.historico_conjunto || 'Relação baseada em monitoramento tático e comparsaria.'}
               </div>
             </td>
