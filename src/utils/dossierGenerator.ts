@@ -2,31 +2,128 @@ import { Infrator, OrcrimData } from '../types';
 import { db } from '../backend/db';
 
 export const SVG_LOGO_PMMG = `
-<svg viewBox="0 0 200 240" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 52px; height: 60px; flex-shrink: 0; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));">
-  <!-- Shield base -->
-  <path d="M100 235C45 200 8 135 8 20C65 20 100 5 100 5C100 5 135 20 192 20C192 135 155 200 100 235Z" fill="#0E1726" stroke="#C4A76E" stroke-width="4"/>
-  <path d="M100 225C50 192 18 132 18 28C68 28 100 15 100 15C100 15 132 28 182 28C182 132 150 192 100 225Z" fill="#FAF8F5"/>
-  <!-- Upper Header Arc -->
-  <path d="M22 30 C 60 28, 140 28, 178 30 L 178 52 C 140 50, 60 50, 22 52 Z" fill="#0E1726"/>
-  <text x="100" y="45" text-anchor="middle" fill="#E2E8F0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif" font-weight="900" font-size="10.5" letter-spacing="1">POLÍCIA MILITAR</text>
-  <!-- Minas Red Triangle -->
-  <polygon points="100,68 62,132 138,132" fill="#DC2626" stroke="#991B1B" stroke-width="2"/>
-  <!-- Crossed Pistols / Rifles in Gold -->
-  <g stroke="#C4A76E" stroke-width="2.5" stroke-linecap="round">
-    <line x1="72" y1="168" x2="128" y2="122" />
-    <line x1="128" y1="168" x2="72" y2="122" />
+<svg viewBox="0 0 400 460" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 52px; height: 60px; flex-shrink: 0; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));">
+  <defs>
+    <path id="curve-pmmg-text" d="M 50 120 C 130 50, 270 50, 350 120" />
+    <linearGradient id="gold-pmmg-rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stopColor="#C4A86A" />
+      <stop offset="50%" stopColor="#9E844F" />
+      <stop offset="100%" stopColor="#816B3C" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Black Shield Outline -->
+  <path d="M200 452C122 412 18 310 18 55C125 55 200 18 200 18C200 18 275 55 382 55C382 310 278 412 200 452Z" fill="#111215" stroke="#090A0D" stroke-width="3"/>
+  
+  <!-- Gold Outer Rim -->
+  <path d="M200 442C126 404 28 305 28 63C130 63 200 28 200 28C200 28 270 63 372 63C372 305 274 404 200 442Z" fill="url(#gold-pmmg-rim)"/>
+  
+  <!-- Shield Inner Field (Warm Off-white / Cream) -->
+  <path d="M200 426C130 390 38 295 38 73C135 73 200 39 200 39C200 39 265 73 362 73C362 295 270 390 200 426Z" fill="#ECE8DF"/>
+
+  <!-- Arched Header: PMMG in bold black typography matching official emblem -->
+  <g fill="#111215" font-family="Impact, 'Arial Black', -apple-system, sans-serif" font-weight="900">
+    <text x="200" y="125" text-anchor="middle" font-size="78" letter-spacing="4">PMMG</text>
   </g>
-  <circle cx="100" cy="145" r="5" fill="#C4A76E"/>
-  <circle cx="100" cy="100" r="4" fill="#FFFFFF"/>
-  <!-- Stars -->
-  <circle cx="50" cy="95" r="2.5" fill="#C4A76E"/>
-  <circle cx="150" cy="95" r="2.5" fill="#C4A76E"/>
-  <circle cx="42" cy="120" r="2" fill="#C4A76E"/>
-  <circle cx="158" cy="120" r="2" fill="#C4A76E"/>
-  <!-- Lower Banner: MINAS GERAIS / 1775 -->
-  <path d="M35 186 C 65 196, 135 196, 165 186 L 160 206 C 130 214, 70 214, 40 206 Z" fill="#0E1726" stroke="#C4A76E" stroke-width="1.5"/>
-  <text x="100" y="200" text-anchor="middle" fill="#DFC897" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-weight="800" font-size="9" letter-spacing="1">MINAS GERAIS</text>
-  <text x="100" y="216" text-anchor="middle" fill="#94A3B8" font-family="monospace" font-weight="700" font-size="7.5">1775</text>
+
+  <!-- Red Triangle of Minas Gerais / Inconfidência Mineira -->
+  <polygon points="200,122 88,322 312,322" fill="#C5282F" stroke="#991B1B" stroke-width="1.5"/>
+
+  <!-- Left Laurel Branch (Black Wreath) -->
+  <g fill="#111215">
+    <!-- Main stem -->
+    <path d="M80 305 Q55 230 92 140" stroke="#111215" stroke-width="4" fill="none" stroke-linecap="round" />
+    <!-- Leaves -->
+    <ellipse cx="68" cy="275" rx="14" ry="7" transform="rotate(-35 68 275)" />
+    <ellipse cx="94" cy="270" rx="14" ry="7" transform="rotate(25 94 270)" />
+    <ellipse cx="58" cy="240" rx="14" ry="7" transform="rotate(-45 58 240)" />
+    <ellipse cx="86" cy="235" rx="14" ry="7" transform="rotate(15 86 235)" />
+    <ellipse cx="56" cy="200" rx="14" ry="7" transform="rotate(-55 56 200)" />
+    <ellipse cx="84" cy="195" rx="14" ry="7" transform="rotate(5 84 195)" />
+    <ellipse cx="62" cy="165" rx="13" ry="6.5" transform="rotate(-65 62 165)" />
+    <ellipse cx="88" cy="160" rx="13" ry="6.5" transform="rotate(-5 88 160)" />
+    <ellipse cx="82" cy="135" rx="12" ry="6" transform="rotate(-75 82 135)" />
+  </g>
+
+  <!-- Right Laurel Branch (Black Wreath) -->
+  <g fill="#111215">
+    <!-- Main stem -->
+    <path d="M320 305 Q345 230 308 140" stroke="#111215" stroke-width="4" fill="none" stroke-linecap="round" />
+    <!-- Leaves -->
+    <ellipse cx="332" cy="275" rx="14" ry="7" transform="rotate(35 332 275)" />
+    <ellipse cx="306" cy="270" rx="14" ry="7" transform="rotate(-25 306 270)" />
+    <ellipse cx="342" cy="240" rx="14" ry="7" transform="rotate(45 342 240)" />
+    <ellipse cx="314" cy="235" rx="14" ry="7" transform="rotate(-15 314 235)" />
+    <ellipse cx="344" cy="200" rx="14" ry="7" transform="rotate(55 344 200)" />
+    <ellipse cx="316" cy="195" rx="14" ry="7" transform="rotate(-5 316 195)" />
+    <ellipse cx="338" cy="165" rx="13" ry="6.5" transform="rotate(65 338 165)" />
+    <ellipse cx="312" cy="160" rx="13" ry="6.5" transform="rotate(5 312 160)" />
+    <ellipse cx="318" cy="135" rx="12" ry="6" transform="rotate(75 318 135)" />
+  </g>
+
+  <!-- Alferes Tiradentes Profile Bust (Exact design from official PMMG shield) -->
+  <g transform="translate(130, 142)">
+    <!-- Tricorn Hat -->
+    <path d="M15 48 C 22 20, 52 14, 85 24 C 105 30, 125 50, 126 56 C 100 52, 60 52, 15 48 Z" fill="#1C1E24" />
+    <path d="M15 48 C 35 44, 75 42, 126 56 C 120 64, 100 68, 70 66 C 40 64, 20 58, 15 48 Z" fill="#111215" stroke="#C4A86A" stroke-width="1.5" />
+    
+    <!-- Face & Head Profile (Facing Left) -->
+    <path d="M38 52 C 40 60, 36 68, 30 74 C 27 77, 24 82, 28 85 C 32 87, 34 90, 31 93 C 25 96, 22 101, 26 104 C 30 106, 36 108, 42 106 C 48 104, 52 100, 56 104 C 60 108, 62 116, 60 125 L 75 125 C 78 110, 76 96, 75 85 C 75 70, 70 58, 55 52 Z" fill="#ECE8DF" stroke="#111215" stroke-width="1.5"/>
+    <!-- Eye and eyebrow -->
+    <path d="M35 72 Q 40 69 44 72" stroke="#111215" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <ellipse cx="39" cy="76" rx="2" ry="2.5" fill="#111215"/>
+    <!-- Nose profile line -->
+    <path d="M30 74 L 25 82 L 31 85" stroke="#111215" stroke-width="1.5" fill="none"/>
+    <!-- Mouth line -->
+    <path d="M29 93 Q 35 94 40 92" stroke="#111215" stroke-width="2" fill="none"/>
+    <!-- Hair sideburns & back curl -->
+    <path d="M52 64 C 65 68, 72 78, 68 96 C 64 104, 56 108, 54 116 C 52 122, 58 126, 64 126 C 70 126, 74 120, 72 108 C 72 90, 68 76, 52 64 Z" fill="#1C1E24" />
+
+    <!-- Colonial Military Uniform / Coat with Epaulette -->
+    <path d="M28 125 C 32 140, 48 178, 52 180 L 152 180 C 150 162, 142 145, 126 132 C 105 120, 85 122, 75 125 Z" fill="#1C1E24"/>
+    <!-- Gold Collar / Lapel -->
+    <path d="M48 125 C 55 130, 82 148, 86 180 L 98 180 C 95 145, 78 128, 64 125 Z" fill="#9E844F" stroke="#111215" stroke-width="1"/>
+    <!-- Ruffled White Cravat / Jabot with pleats -->
+    <g fill="#ECE8DF" stroke="#111215" stroke-width="1">
+      <path d="M38 125 C 44 128, 58 132, 60 140 C 50 144, 40 142, 38 136 Z"/>
+      <path d="M40 138 C 46 142, 58 145, 60 154 C 48 158, 42 154, 40 148 Z"/>
+      <path d="M42 152 C 48 156, 58 158, 60 168 C 48 172, 44 168, 42 162 Z"/>
+      <path d="M44 166 C 50 170, 58 172, 60 180 C 50 180, 46 178, 44 174 Z"/>
+    </g>
+    <!-- Gold Epaulette with Fringe on right shoulder -->
+    <g fill="#9E844F" stroke="#111215" stroke-width="1.2">
+      <ellipse cx="120" cy="138" rx="16" ry="7" transform="rotate(10 120 138)"/>
+      <path d="M106 142 Q 108 165 106 170 M 112 143 Q 114 168 112 173 M 118 144 Q 120 170 118 175 M 124 144 Q 126 170 124 175 M 130 143 Q 132 168 130 173 M 136 141 Q 138 165 136 170" stroke="#9E844F" stroke-width="2.5" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <!-- Crossed Pistols (Garruchas / Pistolas Cruzadas) at Bottom -->
+  <g transform="translate(150, 330)">
+    <!-- Pistol 1 (Top-Left to Bottom-Right) -->
+    <g transform="rotate(38 50 45)">
+      <!-- Barrel & Body -->
+      <rect x="10" y="40" width="80" height="9" rx="2" fill="#111215" stroke="#ECE8DF" stroke-width="0.8"/>
+      <!-- Curved Handle -->
+      <path d="M15 45 C 10 52, 8 68, 16 78 C 22 82, 28 80, 26 72 C 24 64, 22 55, 25 48 Z" fill="#111215" stroke="#ECE8DF" stroke-width="0.8"/>
+      <!-- Hammer & Lock -->
+      <path d="M35 34 L 40 40 L 30 40 Z" fill="#111215" />
+      <circle cx="36" cy="44" r="3.5" fill="#ECE8DF" />
+      <!-- Trigger Guard -->
+      <path d="M32 49 Q 34 58 44 49" stroke="#ECE8DF" stroke-width="1.8" fill="none" />
+    </g>
+    <!-- Pistol 2 (Top-Right to Bottom-Left) -->
+    <g transform="rotate(-38 50 45)">
+      <!-- Barrel & Body -->
+      <rect x="10" y="40" width="80" height="9" rx="2" fill="#111215" stroke="#ECE8DF" stroke-width="0.8"/>
+      <!-- Curved Handle -->
+      <path d="M85 45 C 90 52, 92 68, 84 78 C 78 82, 72 80, 74 72 C 76 64, 78 55, 75 48 Z" fill="#111215" stroke="#ECE8DF" stroke-width="0.8"/>
+      <!-- Hammer & Lock -->
+      <path d="M65 34 L 60 40 L 70 40 Z" fill="#111215" />
+      <circle cx="64" cy="44" r="3.5" fill="#ECE8DF" />
+      <!-- Trigger Guard -->
+      <path d="M68 49 Q 66 58 56 49" stroke="#ECE8DF" stroke-width="1.8" fill="none" />
+    </g>
+  </g>
 </svg>
 `;
 
@@ -72,9 +169,87 @@ export const SVG_LOGO_35BPM = `
 `;
 
 /**
+ * Generates a rich, highly detailed 5-line intelligence summary of all occurrences
+ * synthesising the criminal facts, modus operandi, weapons, mobility, spatiality, and investigative directives.
+ */
+function generateCriminalDossierRich5LineSummary(infratorFull: any, occurrences: any[]): string[] {
+  if (!occurrences || occurrences.length === 0) {
+    return [
+      'Nenhum registro criminal individual ou B.O. vinculado diretamente a este investigado no banco de dados até a presente data.',
+      'Infrator sem histórico de flagrantes ou inquéritos policiais ativos catalogados no sistema de inteligência do 35º BPM.',
+      'Recomenda-se verificação periódica de antecedentes junto ao sistema ISP/CINDS e BNMP para atualização cadastral.',
+      'Não há registro de apreensão de armas, veículos de apoio ou mandados judiciais pendentes associados.',
+      'Diretriz operacional: Proceder à identificação padrão em caso de abordagem policial preventiva de rotina.'
+    ];
+  }
+
+  // Aggregate data from all occurrences
+  const totalBos = occurrences.length;
+  const crimesSet = new Set<string>();
+  const papeisSet = new Set<string>();
+  const armasSet = new Set<string>();
+  const veiculosSet = new Set<string>();
+  const locaisSet = new Set<string>();
+  const modusList: string[] = [];
+  const narrativasList: string[] = [];
+
+  occurrences.forEach((oc: any) => {
+    if (oc.tipificacao_penal) crimesSet.add(oc.tipificacao_penal.trim());
+    if (oc.papel || oc.papel_no_crime) papeisSet.add((oc.papel || oc.papel_no_crime).trim());
+    if (oc.bairro) locaisSet.add(oc.bairro.trim());
+    if (oc.cidade && !oc.bairro) locaisSet.add(oc.cidade.trim());
+
+    if (oc.armas_utilizadas && oc.armas_utilizadas.trim() && !['não informada', 'n/d', 'nenhuma'].includes(oc.armas_utilizadas.toLowerCase())) {
+      oc.armas_utilizadas.split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean).forEach((w: string) => armasSet.add(w));
+    }
+    if (oc.veiculo_utilizado && oc.veiculo_utilizado.trim() && !['não informado', 'n/d', 'nenhum'].includes(oc.veiculo_utilizado.toLowerCase())) {
+      oc.veiculo_utilizado.split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean).forEach((v: string) => veiculosSet.add(v));
+    }
+    if (oc.modus_operandi && oc.modus_operandi.trim().length > 3) {
+      modusList.push(oc.modus_operandi.trim());
+    }
+    if (oc.descricao_fato && oc.descricao_fato.trim().length > 10) {
+      narrativasList.push(oc.descricao_fato.trim());
+    }
+  });
+
+  const crimesStr = Array.from(crimesSet).join(', ') || 'crimes diversos';
+  const papeisStr = Array.from(papeisSet).join(', ') || 'Autor/Investigado';
+  const armasStr = Array.from(armasSet).join(', ') || 'armamento não especificado no ato do registro';
+  const veiculosStr = Array.from(veiculosSet).join(', ') || 'deslocamento a pé ou meio não individualizado';
+  const locaisStr = Array.from(locaisSet).slice(0, 4).join(', ') || 'circunscrição do 35º BPM';
+  const faccao = infratorFull.gangue_faccao || 'não vinculada oficialmente';
+  const nomeGuerra = infratorFull.vulgo ? `"${infratorFull.vulgo}"` : infratorFull.nome_completo;
+
+  // Extract core fact highlights
+  let dinamicaFatos = '';
+  if (modusList.length > 0) {
+    dinamicaFatos = modusList.slice(0, 2).join('; ');
+  } else if (narrativasList.length > 0) {
+    const rawNarr = narrativasList[0].replace(/(\r\n|\n|\r)/gm, ' ');
+    dinamicaFatos = rawNarr.length > 160 ? rawNarr.slice(0, 160) + '...' : rawNarr;
+  } else {
+    dinamicaFatos = 'prática reiterada de delitos com divisão de tarefas e intimidação no perímetro de atuação';
+  }
+
+  // 5 Rich Intelligence Lines
+  const line1 = `<strong>1. Reiteração Delitiva & Tipificações:</strong> O investigado <strong>${nomeGuerra}</strong> possui envolvimento catalogado em <strong>${totalBos} ocorrência(s) policial(is)</strong>, com histórico concentrado na prática de <strong>${crimesStr}</strong>, figurando preponderantemente como <strong>${papeisStr}</strong> nos registros do 35º BPM.`;
+  
+  const line2 = `<strong>2. Dinâmica dos Fatos & Modus Operandi:</strong> As apurações indicam padrão de conduta caracterizado por <strong>${dinamicaFatos}</strong>, com atuação agressiva, rápida tomada de decisão e intimidação ostensiva a fim de assegurar a consumação dos atos criminosos e a impunidade.`;
+  
+  const line3 = `<strong>3. Meios Empregados (Armamento & Mobilidade):</strong> Constata-se emprego tático de <strong>${armasStr}</strong> para intimidação e confronto, utilizando como suporte logístico e rota de fuga <strong>${veiculosStr}</strong> para rápida evasão do cerco policial e ocultação em redutos.`;
+  
+  const line4 = `<strong>4. Espacialidade, Comparsaria & Facção:</strong> Reiteração delitiva com raio de ação concentrado nos bairros <strong>${locaisStr}</strong>, operando com suporte de comparsas e co-autores identificados em registros conjuntos, mantendo subordinação ou aliança com <strong>${faccao}</strong>.`;
+  
+  const line5 = `<strong>5. Diretriz Tática para Diligências & Investigação Futura:</strong> Em intervenções operacionais e cumprimento de mandados judiciais, adotar cautela máxima quanto ao risco de confronto armado, monitorar rotas de escape para áreas de mata/vielas e realizar cerco simultâneo aos pontos de guarda de armamentos e comparsas.`;
+
+  return [line1, line2, line3, line4, line5];
+}
+
+/**
  * Builds an analytical summary of occurrences focusing on modus operandi and investigation points
  */
-function buildCriminalDossierSummary(occurrences: any[]) {
+function buildCriminalDossierSummary(infratorFull: any, occurrences: any[]) {
   if (!occurrences || occurrences.length === 0) {
     return {
       hasOccurrences: false,
@@ -84,7 +259,8 @@ function buildCriminalDossierSummary(occurrences: any[]) {
       veiculos: [] as string[],
       modusOperandiList: [] as string[],
       papeisCount: {} as Record<string, number>,
-      diligencePoints: [] as { bo: string; data: string; tipificacao: string; papel: string; pontoChave: string }[],
+      diligencePoints: [] as { bo: string; data: string; tipificacao: string; papel: string; local: string; pontoChave: string }[],
+      rich5Lines: generateCriminalDossierRich5LineSummary(infratorFull, occurrences),
     };
   }
 
@@ -93,7 +269,7 @@ function buildCriminalDossierSummary(occurrences: any[]) {
   const veiculosSet = new Set<string>();
   const modusOperandiSet = new Set<string>();
   const papeisCount: Record<string, number> = {};
-  const diligencePoints: { bo: string; data: string; tipificacao: string; papel: string; pontoChave: string }[] = [];
+  const diligencePoints: { bo: string; data: string; tipificacao: string; papel: string; local: string; pontoChave: string }[] = [];
 
   for (const oc of occurrences) {
     // Tipificação
@@ -104,20 +280,23 @@ function buildCriminalDossierSummary(occurrences: any[]) {
     const papel = (oc.papel || oc.papel_no_crime || 'Autor').trim();
     papeisCount[papel] = (papeisCount[papel] || 0) + 1;
 
+    // Local
+    const local = oc.bairro ? `${oc.bairro} (${oc.cidade || 'Santa Luzia'})` : (oc.cidade || 'Circunscrição 35º BPM');
+
     // Armas
-    if (oc.armas_utilizadas && oc.armas_utilizadas.trim() && oc.armas_utilizadas !== 'Não informada' && oc.armas_utilizadas !== 'N/D') {
+    if (oc.armas_utilizadas && oc.armas_utilizadas.trim() && !['não informada', 'n/d', 'nenhuma'].includes(oc.armas_utilizadas.toLowerCase())) {
       const parts = oc.armas_utilizadas.split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean);
       parts.forEach((p: string) => armasSet.add(p));
     }
 
     // Veículos
-    if (oc.veiculo_utilizado && oc.veiculo_utilizado.trim() && oc.veiculo_utilizado !== 'Não informado' && oc.veiculo_utilizado !== 'N/D') {
+    if (oc.veiculo_utilizado && oc.veiculo_utilizado.trim() && !['não informado', 'n/d', 'nenhum'].includes(oc.veiculo_utilizado.toLowerCase())) {
       const parts = oc.veiculo_utilizado.split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean);
       parts.forEach((p: string) => veiculosSet.add(p));
     }
 
     // Modus Operandi
-    if (oc.modus_operandi && oc.modus_operandi.trim() && oc.modus_operandi.length > 5) {
+    if (oc.modus_operandi && oc.modus_operandi.trim() && oc.modus_operandi.length > 3) {
       modusOperandiSet.add(oc.modus_operandi.trim());
     }
 
@@ -126,11 +305,10 @@ function buildCriminalDossierSummary(occurrences: any[]) {
     const dataFmt = oc.data_hora ? new Date(oc.data_hora).toLocaleDateString('pt-BR') : 'Data N/D';
     let pontoChave = oc.modus_operandi || '';
     if (!pontoChave && oc.descricao_fato) {
-      // Shorten description to first 180 chars
-      pontoChave = oc.descricao_fato.length > 180 ? oc.descricao_fato.slice(0, 180) + '...' : oc.descricao_fato;
+      pontoChave = oc.descricao_fato.length > 200 ? oc.descricao_fato.slice(0, 200) + '...' : oc.descricao_fato;
     }
     if (!pontoChave) {
-      pontoChave = 'Registro policial vinculado ao investigado no âmbito da circunscrição policial.';
+      pontoChave = 'Registro policial catalogado na unidade de área.';
     }
 
     diligencePoints.push({
@@ -138,6 +316,7 @@ function buildCriminalDossierSummary(occurrences: any[]) {
       data: dataFmt,
       tipificacao: tip,
       papel: papel,
+      local: local,
       pontoChave: pontoChave,
     });
   }
@@ -145,6 +324,8 @@ function buildCriminalDossierSummary(occurrences: any[]) {
   const tipificacoesCount = Object.entries(tipificacoesMap)
     .map(([crime, count]) => ({ crime, count }))
     .sort((a, b) => b.count - a.count);
+
+  const rich5Lines = generateCriminalDossierRich5LineSummary(infratorFull, occurrences);
 
   return {
     hasOccurrences: true,
@@ -155,6 +336,7 @@ function buildCriminalDossierSummary(occurrences: any[]) {
     modusOperandiList: Array.from(modusOperandiSet),
     papeisCount,
     diligencePoints,
+    rich5Lines,
   };
 }
 
@@ -215,7 +397,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
   const sinais = fisicas.sinais_particulares || infratorFull.sinais_particulares || 'Sem sinais particulares cadastrados';
 
   // Build intelligence criminal dossier summary
-  const dossierSummary = buildCriminalDossierSummary(occurrences);
+  const dossierSummary = buildCriminalDossierSummary(infratorFull, occurrences);
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -470,6 +652,40 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       color: #0f172a;
       font-weight: 600;
     }
+    .rich-summary-box {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-left: 4px solid #1e3a8a;
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+    }
+    .rich-summary-header {
+      font-size: 7.5pt;
+      font-weight: 800;
+      text-transform: uppercase;
+      color: #1e3a8a;
+      letter-spacing: 0.5px;
+      border-bottom: 1.5px solid #e2e8f0;
+      padding-bottom: 3px;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .rich-line-item {
+      font-size: 8pt;
+      color: #1e293b;
+      line-height: 1.38;
+      margin-bottom: 4px;
+      padding-left: 2px;
+    }
+    .rich-line-item:last-child {
+      margin-bottom: 0;
+    }
+    .rich-line-item strong {
+      color: #0f172a;
+    }
     .dossier-box {
       background: #f8fafc;
       border: 1px solid #cbd5e1;
@@ -711,7 +927,20 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
       </div>
     ` : `
       <div class="dossier-box">
-        <!-- Linha 1: Perfil Delitivo Consolidado -->
+        <!-- Síntese Circunstanciada Consolidada em até 5 Linhas com Riqueza de Detalhes -->
+        <div class="rich-summary-box">
+          <div class="rich-summary-header">
+            <span>📋 Resumo Circunstanciado de Inteligência • Análise Consolidada dos Registros</span>
+            <span style="font-size: 6.8pt; font-weight: 700; color: #64748b;">Síntese Integrada</span>
+          </div>
+          <div>
+            ${dossierSummary.rich5Lines.map((line: string) => `
+              <div class="rich-line-item">${line}</div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Indicadores Técnicos: Tipificações Recorrentes & Meios Empregados -->
         <div class="dossier-grid">
           <!-- Bloco A: Tipificações Recorrentes -->
           <div class="dossier-card">
@@ -720,7 +949,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
               <span style="color: #64748b; font-size: 6.5pt;">Incidências</span>
             </div>
             <div>
-              ${dossierSummary.tipificacoesCount.map(t => `
+              ${dossierSummary.tipificacoesCount.map((t: any) => `
                 <span class="crime-tag">
                   ${t.crime}
                   <span class="crime-tag-badge">${t.count}x</span>
@@ -733,6 +962,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
           <div class="dossier-card">
             <div class="dossier-card-title">
               <span>Meios Empregados em Ações</span>
+              <span style="color: #1e3a8a; font-size: 6.5pt; font-weight: 700;">Inteligência</span>
             </div>
             <div style="font-size: 7.5pt; color: #334155; display: flex; flex-direction: column; gap: 3px;">
               <div>
@@ -747,27 +977,34 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
           </div>
         </div>
 
-        <!-- Bloco C: Pontos de Destaque para Diligências & Investigação Futura -->
-        <div class="dossier-card">
+        <!-- Bloco C: Quadro Sinóptico dos Registros Policiais (Linha do Tempo Compacta) -->
+        <div class="dossier-card" style="margin-top: 4px;">
           <div class="dossier-card-title" style="color: #9a3412;">
-            <span>Pontos de Destaque para Diligências Policiais & Linha de Investigação</span>
-            <span style="color: #9a3412; font-size: 6.5pt; font-weight: 700;">Síntese Tática</span>
+            <span>Quadro Sinóptico dos Registros Policiais Vinculados (B.O.s)</span>
+            <span style="color: #9a3412; font-size: 6.5pt; font-weight: 700;">${dossierSummary.diligencePoints.length} B.O.(s)</span>
           </div>
-          <div>
-            ${dossierSummary.diligencePoints.map(p => `
-              <div class="diligence-item">
-                <div class="diligence-header">
-                  <span class="diligence-bo">B.O. Nº ${p.bo} <span style="font-weight: normal; color: #64748b; font-size: 7.5pt;">(${p.data})</span></span>
-                  <span style="font-size: 7pt; font-weight: 700; background: #fef3c7; color: #92400e; padding: 1px 5px; border-radius: 2px; border: 1px solid #fde68a;">
-                    ${p.tipificacao} [${p.papel}]
-                  </span>
-                </div>
-                <div class="diligence-body">
-                  <strong>Padrão / Modus Operandi:</strong> ${p.pontoChave}
-                </div>
-              </div>
-            `).join('')}
-          </div>
+          <table style="margin-bottom: 0;">
+            <thead>
+              <tr>
+                <th style="width: 140px;">B.O. Nº / Data</th>
+                <th style="width: 130px;">Tipificação Penal</th>
+                <th style="width: 70px;">Papel</th>
+                <th style="width: 120px;">Bairro / Local</th>
+                <th>Destaque do Fato / Modus Operandi</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${dossierSummary.diligencePoints.map((p: any) => `
+                <tr>
+                  <td><strong>${p.bo}</strong><br/><span style="color: #64748b; font-size: 7pt;">${p.data}</span></td>
+                  <td><span style="font-weight: 700; color: #991b1b;">${p.tipificacao}</span></td>
+                  <td><span style="background: #fef3c7; color: #92400e; font-weight: 700; font-size: 6.8pt; padding: 1px 4px; border-radius: 2px; border: 1px solid #fde68a;">${p.papel}</span></td>
+                  <td>${p.local}</td>
+                  <td style="color: #334155; line-height: 1.25;">${p.pontoChave}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
         </div>
       </div>
     `}
@@ -1062,8 +1299,11 @@ export function generateOrcrimDossierHtml(orcrim: OrcrimData): string {
 
   <div style="padding: 16px 20px;">
     <div class="header">
-      <div style="display: flex; align-items: center; gap: 10px;">
-        <div class="badge">PMMG<br>35º BPM</div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          ${SVG_LOGO_PMMG}
+          ${SVG_LOGO_35BPM}
+        </div>
         <div class="header-title">
           <h1>PMMG • 35º BATALHÃO DE POLÍCIA MILITAR</h1>
           <h2>ESTRUTURA HIERÁRQUICA PIRAMIDAL: ${gangue.nome_gangue?.toUpperCase()}</h2>
