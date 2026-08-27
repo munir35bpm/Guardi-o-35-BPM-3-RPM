@@ -387,16 +387,54 @@ app.put('/api/infratores/:id', (req, res) => {
     };
 
     const fisIndex = db.caracteristicas_fisicas.findIndex(cf => cf.infrator_id === id);
+    const fisData = req.body.fisicas || req.body;
     if (fisIndex !== -1) {
       db.caracteristicas_fisicas[fisIndex] = {
         infrator_id: id,
-        altura_estimada: altura_estimada !== undefined ? Number(altura_estimada) : db.caracteristicas_fisicas[fisIndex].altura_estimada,
-        cor_pele: cor_pele || db.caracteristicas_fisicas[fisIndex].cor_pele,
-        compleicao: compleicao || db.caracteristicas_fisicas[fisIndex].compleicao,
-        tatuagens_detalhes: tatuagens_detalhes !== undefined ? tatuagens_detalhes : db.caracteristicas_fisicas[fisIndex].tatuagens_detalhes,
-        cicatrizes: cicatrizes !== undefined ? cicatrizes : db.caracteristicas_fisicas[fisIndex].cicatrizes,
-        sinais_particulares: sinais_particulares !== undefined ? sinais_particulares : db.caracteristicas_fisicas[fisIndex].sinais_particulares,
+        altura_estimada: fisData.altura_estimada !== undefined ? Number(fisData.altura_estimada) : db.caracteristicas_fisicas[fisIndex].altura_estimada,
+        cor_pele: fisData.cor_pele || db.caracteristicas_fisicas[fisIndex].cor_pele,
+        compleicao: fisData.compleicao || db.caracteristicas_fisicas[fisIndex].compleicao,
+        tatuagens_detalhes: fisData.tatuagens_detalhes !== undefined ? fisData.tatuagens_detalhes : db.caracteristicas_fisicas[fisIndex].tatuagens_detalhes,
+        cicatrizes: fisData.cicatrizes !== undefined ? fisData.cicatrizes : db.caracteristicas_fisicas[fisIndex].cicatrizes,
+        sinais_particulares: fisData.sinais_particulares !== undefined ? fisData.sinais_particulares : db.caracteristicas_fisicas[fisIndex].sinais_particulares,
       };
+    } else {
+      db.caracteristicas_fisicas.push({
+        infrator_id: id,
+        altura_estimada: Number(fisData.altura_estimada) || 1.75,
+        cor_pele: fisData.cor_pele || 'Parda',
+        compleicao: fisData.compleicao || 'Média',
+        tatuagens_detalhes: fisData.tatuagens_detalhes || 'Sem tatuagens cadastradas',
+        cicatrizes: fisData.cicatrizes || 'Sem cicatrizes cadastradas',
+        sinais_particulares: fisData.sinais_particulares || 'Sem sinais particulares cadastrados'
+      });
+    }
+
+    // Process updated addresses if provided
+    if (Array.isArray(req.body.enderecos)) {
+      db.enderecos_atuacao = db.enderecos_atuacao.filter(ea => ea.infrator_id !== id);
+      for (const end of req.body.enderecos) {
+        if (end.logradouro && end.logradouro.trim()) {
+          db.addEndereco({
+            ...end,
+            infrator_id: id
+          });
+        }
+      }
+    }
+
+    // Process updated occurrences if provided
+    if (Array.isArray(req.body.ocorrencias)) {
+      db.infrator_ocorrencia = db.infrator_ocorrencia.filter(io => io.infrator_id !== id);
+      for (const item of req.body.ocorrencias) {
+        const papel = item.papel_no_crime || item.papel || 'Autor';
+        if (item.ocorrencia_id) {
+          db.linkInfratorOcorrencia(id, item.ocorrencia_id, papel);
+        } else if (item.numero_bo && item.tipificacao_penal) {
+          const newOc = db.addOcorrencia(item);
+          db.linkInfratorOcorrencia(id, newOc.id, papel);
+        }
+      }
     }
 
     res.json(db.getInfratorFull(id));

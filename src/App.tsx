@@ -44,7 +44,8 @@ import {
   Fingerprint,
   Star,
   Eye,
-  Maximize2
+  Maximize2,
+  Edit3
 } from 'lucide-react';
 import TacticalMap from './components/TacticalMap';
 import NetworkGraph from './components/NetworkGraph';
@@ -165,6 +166,7 @@ export default function App() {
   const [suspectSearchQuery, setSuspectSearchQuery] = useState('');
   const [selectedSuspectDetail, setSelectedSuspectDetail] = useState<SuspectWithDetails | null>(null);
   const [isAddingSuspect, setIsAddingSuspect] = useState(false);
+  const [editingSuspectId, setEditingSuspectId] = useState<string | null>(null);
   const [isAddingOccurrence, setIsAddingOccurrence] = useState(false);
   const [isAddingAddress, setIsAddingAddress] = useState(false);
 
@@ -634,6 +636,146 @@ export default function App() {
       setSelectedSuspectDetail(localData);
       setActiveTab('db');
     }
+  };
+
+  // Start editing existing suspect
+  const handleStartEditSuspect = async (id: string) => {
+    let target: any = null;
+    try {
+      const res = await fetch(`/api/infratores/${id}`).catch(() => null);
+      if (res && res.ok) {
+        target = await res.json();
+      }
+    } catch (err) {
+      console.warn('Error fetching suspect from API for edit, fallback local:', err);
+    }
+
+    if (!target) {
+      target = db.getInfratorFull(id) || suspects.find(s => s.id === id);
+    }
+
+    if (!target) {
+      alert('Infrator não encontrado para edição.');
+      return;
+    }
+
+    setEditingSuspectId(id);
+    setNewSuspectForm({
+      nome_completo: target.nome_completo || '',
+      vulgo: target.vulgo || '',
+      data_nascimento: target.data_nascimento ? target.data_nascimento.slice(0, 10) : '1995-01-01',
+      cpf: target.cpf || '',
+      foto_url: target.foto_url || '',
+      gangue_faccao: target.gangue_faccao || '',
+      situacao_atual: target.situacao_atual || target.situacao_prisional || (target.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE'),
+      status_mandado_prisao: !!target.status_mandado_prisao,
+      periculosidade: target.periculosidade || 'Média',
+      altura_estimada: String(target.fisicas?.altura_estimada ?? '1.75'),
+      cor_pele: target.fisicas?.cor_pele || 'Parda',
+      compleicao: target.fisicas?.compleicao || 'Média',
+      tatuagens_detalhes: target.fisicas?.tatuagens_detalhes || '',
+      cicatrizes: target.fisicas?.cicatrizes || '',
+      sinais_particulares: target.fisicas?.sinais_particulares || '',
+    });
+
+    // Populate gallery photos
+    if (target.galeria_fotos && target.galeria_fotos.length > 0) {
+      setSuspectPhotosList(target.galeria_fotos);
+    } else if (target.foto_url) {
+      setSuspectPhotosList([{
+        id: `foto-${target.id}-main`,
+        url: target.foto_url,
+        tipo: 'ROSTO',
+        descricao: 'Foto Principal',
+        principal: true,
+        data_inclusao: new Date().toISOString()
+      }]);
+    } else {
+      setSuspectPhotosList([]);
+    }
+
+    // Populate operational addresses
+    if (target.enderecos && target.enderecos.length > 0) {
+      setSuspectAddressesList(target.enderecos.map((a: any) => ({
+        tempId: a.id || `addr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        tipo_endereco: a.tipo_endereco || 'Residência',
+        logradouro: a.logradouro || '',
+        bairro: a.bairro || 'Centro',
+        cidade: a.cidade || 'Santa Luzia',
+        raio_influencia_km: String(a.raio_influencia_km || '2.5'),
+        lat: String(a.geom_ponto?.lat ?? a.lat ?? '-19.7712'),
+        lng: String(a.geom_ponto?.lng ?? a.lng ?? '-43.8564'),
+      })));
+    } else {
+      const currentAddrs = addresses.filter(a => a.infrator_id === target.id);
+      if (currentAddrs.length > 0) {
+        setSuspectAddressesList(currentAddrs.map((a: any) => ({
+          tempId: a.id || `addr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          tipo_endereco: a.tipo_endereco || 'Residência',
+          logradouro: a.logradouro || '',
+          bairro: a.bairro || 'Centro',
+          cidade: a.cidade || 'Santa Luzia',
+          raio_influencia_km: String(a.raio_influencia_km || '2.5'),
+          lat: String(a.geom_ponto?.lat ?? a.lat ?? '-19.7712'),
+          lng: String(a.geom_ponto?.lng ?? a.lng ?? '-43.8564'),
+        })));
+      } else {
+        setSuspectAddressesList([]);
+      }
+    }
+
+    // Populate occurrences
+    if (target.ocorrencias_relacionadas && target.ocorrencias_relacionadas.length > 0) {
+      setSuspectOccurrencesList(target.ocorrencias_relacionadas.map((oc: any) => ({
+        tempId: `tmp-oc-${oc.id || oc.numero_bo}-${Math.random().toString(36).substring(2, 6)}`,
+        isNew: false,
+        ocorrencia_id: oc.id,
+        numero_bo: oc.numero_bo,
+        tipificacao_penal: oc.tipificacao_penal,
+        papel_no_crime: oc.papel || oc.papel_no_crime || 'Autor',
+        data_hora: oc.data_hora,
+        descricao_fato: oc.descricao_fato,
+        modus_operandi: oc.modus_operandi,
+        armas_utilizadas: oc.armas_utilizadas,
+        veiculo_utilizado: oc.veiculo_utilizado,
+      })));
+    } else {
+      setSuspectOccurrencesList([]);
+    }
+
+    setIsAddingSuspect(true);
+    setIsAddingOccurrence(false);
+    setIsAddingAddress(false);
+    setActiveTab('db');
+
+    // Scroll to top where the form is opened
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Cancel suspect edit
+  const handleCancelEditSuspect = () => {
+    setEditingSuspectId(null);
+    setIsAddingSuspect(false);
+    setNewSuspectForm({
+      nome_completo: '',
+      vulgo: '',
+      data_nascimento: '1995-01-01',
+      cpf: '',
+      foto_url: '',
+      gangue_faccao: '',
+      situacao_atual: 'EM_LIBERDADE',
+      status_mandado_prisao: false,
+      periculosidade: 'Média',
+      altura_estimada: '1.75',
+      cor_pele: 'Parda',
+      compleicao: 'Média',
+      tatuagens_detalhes: '',
+      cicatrizes: '',
+      sinais_particulares: '',
+    });
+    setSuspectOccurrencesList([]);
+    setSuspectAddressesList([]);
+    setSuspectPhotosList([]);
   };
 
   // Add an occurrence to the temporary suspect creation list
@@ -1595,6 +1737,65 @@ export default function App() {
         ocorrencias: occurrencesToLink,
       };
 
+      if (editingSuspectId) {
+        // UPDATE MODE
+        let updatedSuspect: any = null;
+        try {
+          const res = await fetch(`/api/infratores/${editingSuspectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(suspectPayload),
+          });
+          if (res.ok) {
+            updatedSuspect = await res.json();
+          }
+        } catch (netErr) {
+          console.warn('Backend API unavailable, updating local in-memory DB', netErr);
+        }
+
+        if (!updatedSuspect) {
+          updatedSuspect = db.updateInfrator(editingSuspectId, suspectPayload);
+        }
+
+        if (updatedSuspect) {
+          await persistSuspectToFirebase(updatedSuspect);
+          setSelectedSuspectDetail(updatedSuspect);
+        }
+
+        setIsAddingSuspect(false);
+        setEditingSuspectId(null);
+        setSuspectOccurrencesList([]);
+        setSuspectAddressesList([]);
+        setSuspectPhotosList([]);
+        setNewPhotoManualUrl('');
+        setNewPhotoManualDesc('');
+        fetchTelemetry();
+
+        // Reset form
+        setNewSuspectForm({
+          nome_completo: '',
+          vulgo: '',
+          data_nascimento: '1995-01-01',
+          cpf: '',
+          foto_url: '',
+          gangue_faccao: '',
+          situacao_atual: 'EM_LIBERDADE',
+          status_mandado_prisao: false,
+          periculosidade: 'Média',
+          altura_estimada: '1.75',
+          cor_pele: 'Parda',
+          compleicao: 'Média',
+          tatuagens_detalhes: '',
+          cicatrizes: '',
+          sinais_particulares: '',
+        });
+
+        setToastMessage(`Ficha de "${newSuspectForm.nome_completo}" atualizada e salva com sucesso!`);
+        setTimeout(() => setToastMessage(null), 4000);
+        return;
+      }
+
+      // CREATE MODE (New Suspect)
       // Try server API first
       try {
         const res = await fetch('/api/infratores', {
@@ -2878,6 +3079,14 @@ export default function App() {
                                 Ficha Completa
                               </button>
                               <button
+                                onClick={() => handleStartEditSuspect(item.infrator_id)}
+                                className="px-2.5 py-1 bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-800/80 text-[10px] font-bold rounded transition inline-flex items-center gap-1 cursor-pointer"
+                                title="Editar ou Continuar Cadastro deste Infrator"
+                              >
+                                <Edit3 className="w-3 h-3 stroke-[2.5]" />
+                                <span>Editar</span>
+                              </button>
+                              <button
                                 type="button"
                                 onClick={() => openSuspectDossier(item.infrator_id, suspects.find(s => s.id === item.infrator_id) || item.suspect_details)}
                                 className="px-3 py-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-[10px] rounded transition uppercase flex items-center gap-1 cursor-pointer shadow-sm shadow-amber-500/20"
@@ -2982,6 +3191,27 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-3 bg-[#0F0F12] border border-zinc-800 p-3.5 rounded shadow-xl font-mono">
                 <button
                   onClick={() => {
+                    setEditingSuspectId(null);
+                    setNewSuspectForm({
+                      nome_completo: '',
+                      vulgo: '',
+                      data_nascimento: '1995-01-01',
+                      cpf: '',
+                      foto_url: '',
+                      gangue_faccao: '',
+                      situacao_atual: 'EM_LIBERDADE',
+                      status_mandado_prisao: false,
+                      periculosidade: 'Média',
+                      altura_estimada: '1.75',
+                      cor_pele: 'Parda',
+                      compleicao: 'Média',
+                      tatuagens_detalhes: '',
+                      cicatrizes: '',
+                      sinais_particulares: '',
+                    });
+                    setSuspectOccurrencesList([]);
+                    setSuspectAddressesList([]);
+                    setSuspectPhotosList([]);
                     setIsAddingSuspect(true);
                     setIsAddingOccurrence(false);
                     setIsAddingAddress(false);
@@ -3017,6 +3247,7 @@ export default function App() {
                 <div className="bg-[#0F0F12] border border-zinc-800 p-5 rounded relative tactical-corner shadow-2xl">
                   <button
                     onClick={() => {
+                      setEditingSuspectId(null);
                       setIsAddingSuspect(false);
                       setIsAddingOccurrence(false);
                       setIsAddingAddress(false);
@@ -3028,9 +3259,30 @@ export default function App() {
 
                   {isAddingSuspect && (
                     <form onSubmit={handleAddSuspectSubmit} className="space-y-4 font-mono">
-                      <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                        <UserPlus className="w-4 h-4" /> Cadastrar Ficha de Infrator
-                      </h3>
+                      {editingSuspectId ? (
+                        <div className="bg-amber-950/40 border border-amber-500/60 p-3.5 rounded space-y-1.5 mb-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h3 className="text-xs font-bold text-amber-300 uppercase tracking-widest flex items-center gap-2">
+                              <Edit3 className="w-4 h-4 text-amber-400" />
+                              <span>Modo de Edição / Continuação de Cadastro: {newSuspectForm.nome_completo || 'Infrator'} {newSuspectForm.vulgo ? `("${newSuspectForm.vulgo}")` : ''}</span>
+                            </h3>
+                            <button
+                              type="button"
+                              onClick={handleCancelEditSuspect}
+                              className="text-[10px] bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 px-2.5 py-1 rounded cursor-pointer transition font-bold"
+                            >
+                              ✕ Cancelar Edição
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-zinc-300 font-sans leading-relaxed">
+                            Você está editando este cadastro existente. Complete ou altere quaisquer dados (informações pessoais, fotos, características físicas, endereços e B.O.s vinculados) e clique em <strong className="text-amber-400">Salvar Alterações da Ficha</strong> no fim do formulário.
+                          </p>
+                        </div>
+                      ) : (
+                        <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                          <UserPlus className="w-4 h-4 text-emerald-400" /> Cadastrar Ficha de Infrator
+                        </h3>
+                      )}
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                           <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Nome Completo *</label>
@@ -4015,11 +4267,30 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="pt-2">
-                        <button type="submit" className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-black font-bold rounded text-xs uppercase cursor-pointer flex items-center gap-2 shadow-lg shadow-emerald-600/20">
+                      <div className="pt-2 flex flex-wrap items-center gap-3">
+                        <button
+                          type="submit"
+                          disabled={isSubmittingSuspect}
+                          className={`px-5 py-2.5 ${editingSuspectId ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-amber-500/20' : 'bg-emerald-600 hover:bg-emerald-500 text-black shadow-emerald-600/20'} font-bold rounded text-xs uppercase cursor-pointer flex items-center gap-2 shadow-lg transition`}
+                        >
                           <CheckCircle className="w-4 h-4" />
-                          <span>Salvar Infrator e Vincular Ocorrências</span>
+                          <span>
+                            {isSubmittingSuspect
+                              ? (editingSuspectId ? 'Salvando Alterações...' : 'Cadastrando Infrator...')
+                              : (editingSuspectId ? 'Salvar Alterações da Ficha' : 'Salvar Infrator e Vincular Ocorrências')}
+                          </span>
                         </button>
+
+                        {editingSuspectId && (
+                          <button
+                            type="button"
+                            onClick={handleCancelEditSuspect}
+                            className="px-4 py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 font-bold rounded text-xs uppercase cursor-pointer transition flex items-center gap-1.5"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Cancelar Edição</span>
+                          </button>
+                        )}
                       </div>
                     </form>
                   )}
@@ -4443,6 +4714,14 @@ export default function App() {
                                 Ficha
                               </button>
                               <button
+                                onClick={() => handleStartEditSuspect(s.id)}
+                                className="px-2 py-1 bg-amber-950/80 hover:bg-amber-900 border border-amber-800 text-amber-300 hover:text-white rounded text-[10px] font-bold transition inline-flex items-center gap-1 cursor-pointer shadow-sm shadow-amber-950/40"
+                                title="Editar ou Continuar Preenchimento da Ficha"
+                              >
+                                <Edit3 className="w-3 h-3 stroke-[2.5]" />
+                                <span>Editar</span>
+                              </button>
+                              <button
                                 type="button"
                                 onClick={() => openSuspectDossier(s.id, s)}
                                 className="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-[10px] transition inline-flex items-center gap-1 cursor-pointer shadow-sm shadow-amber-500/20"
@@ -4471,25 +4750,51 @@ export default function App() {
                 <div className="bg-[#0F0F12] border border-zinc-800 rounded p-5 shadow-2xl tactical-corner">
                   <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-4 border-b border-zinc-800 pb-2.5 font-mono flex items-center justify-between">
                     <span>Ficha Tática de Inteligência</span>
-                    <span className="text-[9px] text-zinc-500 font-mono">ID // INSPECTION</span>
+                    <div className="flex items-center gap-2">
+                      {selectedSuspectDetail && (
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditSuspect(selectedSuspectDetail.id)}
+                          className="px-2.5 py-0.5 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-[9px] uppercase font-mono flex items-center gap-1 transition cursor-pointer shadow-sm shadow-amber-500/20"
+                          title="Continuar Preenchimento ou Editar Ficha"
+                        >
+                          <Edit3 className="w-2.5 h-2.5" />
+                          <span>Editar Ficha</span>
+                        </button>
+                      )}
+                      <span className="text-[9px] text-zinc-500 font-mono">ID // INSPECTION</span>
+                    </div>
                   </h3>
 
                   {selectedSuspectDetail ? (
                     <div className="space-y-4 text-xs">
-                      <div className="flex items-center gap-3.5">
-                        <img
-                          src={selectedSuspectDetail.foto_url}
-                          alt={selectedSuspectDetail.vulgo}
-                          className="w-14 h-14 rounded object-cover border border-amber-500/40 shadow-lg"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop';
-                          }}
-                        />
-                        <div>
-                          <h4 className="font-bold text-zinc-100 text-sm font-sans">{selectedSuspectDetail.nome_completo}</h4>
-                          <span className="text-xs text-amber-400 font-mono block">Alcunha: "{selectedSuspectDetail.vulgo}"</span>
+                      <div className="flex items-center justify-between gap-3.5">
+                        <div className="flex items-center gap-3.5">
+                          <img
+                            src={selectedSuspectDetail.foto_url}
+                            alt={selectedSuspectDetail.vulgo}
+                            className="w-14 h-14 rounded object-cover border border-amber-500/40 shadow-lg"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop';
+                            }}
+                          />
+                          <div>
+                            <h4 className="font-bold text-zinc-100 text-sm font-sans">{selectedSuspectDetail.nome_completo}</h4>
+                            <span className="text-xs text-amber-400 font-mono block">Alcunha: "{selectedSuspectDetail.vulgo}"</span>
+                          </div>
                         </div>
                       </div>
+
+                      {/* Primary Quick Edit Action Banner */}
+                      <button
+                        type="button"
+                        onClick={() => handleStartEditSuspect(selectedSuspectDetail.id)}
+                        className="w-full py-2 bg-gradient-to-r from-amber-500/20 via-amber-500/30 to-amber-500/20 hover:from-amber-500/30 hover:to-amber-500/40 border border-amber-500/50 hover:border-amber-400 text-amber-300 font-bold rounded text-xs font-mono flex items-center justify-center gap-2 transition cursor-pointer shadow-sm shadow-amber-500/10"
+                        title="Continuar preenchimento, alterar fotos, características, endereços ou ocorrências"
+                      >
+                        <Edit3 className="w-4 h-4 text-amber-400" />
+                        <span>✏️ Continuar / Editar Cadastro Completo</span>
+                      </button>
 
                       <div className="space-y-2 border-t border-zinc-800/80 pt-3 font-mono">
                         <div className="grid grid-cols-2 gap-2">

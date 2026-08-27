@@ -552,16 +552,54 @@ class CrimIntelDatabase {
     };
 
     const fisIndex = this.caracteristicas_fisicas.findIndex(cf => cf.infrator_id === id);
-    if (fisIndex !== -1 && data.fisicas) {
+    const fisData = data.fisicas || data;
+    if (fisIndex !== -1) {
       this.caracteristicas_fisicas[fisIndex] = {
         infrator_id: id,
-        altura_estimada: data.fisicas.altura_estimada !== undefined ? Number(data.fisicas.altura_estimada) : this.caracteristicas_fisicas[fisIndex].altura_estimada,
-        cor_pele: data.fisicas.cor_pele || this.caracteristicas_fisicas[fisIndex].cor_pele,
-        compleicao: data.fisicas.compleicao || this.caracteristicas_fisicas[fisIndex].compleicao,
-        tatuagens_detalhes: data.fisicas.tatuagens_detalhes !== undefined ? data.fisicas.tatuagens_detalhes : this.caracteristicas_fisicas[fisIndex].tatuagens_detalhes,
-        cicatrizes: data.fisicas.cicatrizes !== undefined ? data.fisicas.cicatrizes : this.caracteristicas_fisicas[fisIndex].cicatrizes,
-        sinais_particulares: data.fisicas.sinais_particulares !== undefined ? data.fisicas.sinais_particulares : this.caracteristicas_fisicas[fisIndex].sinais_particulares,
+        altura_estimada: fisData.altura_estimada !== undefined ? Number(fisData.altura_estimada) : this.caracteristicas_fisicas[fisIndex].altura_estimada,
+        cor_pele: fisData.cor_pele || this.caracteristicas_fisicas[fisIndex].cor_pele,
+        compleicao: fisData.compleicao || this.caracteristicas_fisicas[fisIndex].compleicao,
+        tatuagens_detalhes: fisData.tatuagens_detalhes !== undefined ? fisData.tatuagens_detalhes : this.caracteristicas_fisicas[fisIndex].tatuagens_detalhes,
+        cicatrizes: fisData.cicatrizes !== undefined ? fisData.cicatrizes : this.caracteristicas_fisicas[fisIndex].cicatrizes,
+        sinais_particulares: fisData.sinais_particulares !== undefined ? fisData.sinais_particulares : this.caracteristicas_fisicas[fisIndex].sinais_particulares,
       };
+    } else {
+      this.caracteristicas_fisicas.push({
+        infrator_id: id,
+        altura_estimada: Number(fisData.altura_estimada) || 1.75,
+        cor_pele: fisData.cor_pele || 'Parda',
+        compleicao: fisData.compleicao || 'Média',
+        tatuagens_detalhes: fisData.tatuagens_detalhes || 'Sem tatuagens cadastradas',
+        cicatrizes: fisData.cicatrizes || 'Sem cicatrizes cadastradas',
+        sinais_particulares: fisData.sinais_particulares || 'Sem sinais particulares cadastrados'
+      });
+    }
+
+    // Process updated addresses if provided
+    if (Array.isArray(data.enderecos)) {
+      this.enderecos_atuacao = this.enderecos_atuacao.filter(ea => ea.infrator_id !== id);
+      for (const end of data.enderecos) {
+        if (end.logradouro && end.logradouro.trim()) {
+          this.addEndereco({
+            ...end,
+            infrator_id: id
+          });
+        }
+      }
+    }
+
+    // Process updated occurrences if provided
+    if (Array.isArray(data.ocorrencias)) {
+      this.infrator_ocorrencia = this.infrator_ocorrencia.filter(io => io.infrator_id !== id);
+      for (const item of data.ocorrencias) {
+        const papel = item.papel_no_crime || item.papel || 'Autor';
+        if (item.ocorrencia_id) {
+          this.linkInfratorOcorrencia(id, item.ocorrencia_id, papel);
+        } else if (item.numero_bo && item.tipificacao_penal) {
+          const newOc = this.addOcorrencia(item);
+          this.linkInfratorOcorrencia(id, newOc.id, papel);
+        }
+      }
     }
 
     return this.getInfratorFull(id);
