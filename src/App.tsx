@@ -4070,6 +4070,7 @@ export default function App() {
                                       onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, tipificacao_penal: e.target.value })}
                                       className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
                                     >
+                                      <option value="Averiguação">Averiguação</option>
                                       <option value="Roubo a Mão Armada">Roubo a Mão Armada (Art. 157 §2º)</option>
                                       <option value="Roubo de Carga">Roubo de Carga</option>
                                       <option value="Tráfico de Drogas">Tráfico Ilícito de Drogas (Art. 33)</option>
@@ -4082,6 +4083,9 @@ export default function App() {
                                       <option value="Lesão Corporal">Lesão Corporal (Art. 129)</option>
                                       <option value="Extorsão / Sequestro">Extorsão / Sequestro Relâmpago</option>
                                       <option value="Organização Criminosa">Organização Criminosa (Lei 12.850)</option>
+                                      <option value="Furto">Furto (Art. 155)</option>
+                                      <option value="Receptação">Receptação (Art. 180)</option>
+                                      <option value="Outros">Outros / Não Especificado</option>
                                     </select>
                                   </div>
                                 </>
@@ -4322,12 +4326,30 @@ export default function App() {
                           <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Tipificação Penal *</label>
                           <input
                             type="text"
+                            list="tipificacoes-list"
                             required
-                            placeholder="Ex: Roubo a Mão Armada (Art. 157)"
+                            placeholder="Ex: Averiguação, Roubo a Mão Armada..."
                             value={newIncidentForm.tipificacao_penal}
                             onChange={(e) => setNewIncidentForm({ ...newIncidentForm, tipificacao_penal: e.target.value })}
                             className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none focus:border-amber-500 text-zinc-200"
                           />
+                          <datalist id="tipificacoes-list">
+                            <option value="Averiguação" />
+                            <option value="Roubo a Mão Armada (Art. 157 §2º)" />
+                            <option value="Roubo de Carga" />
+                            <option value="Tráfico Ilícito de Drogas (Art. 33)" />
+                            <option value="Associação para o Tráfico (Art. 35)" />
+                            <option value="Homicídio Tentado (Art. 121 c/c 14)" />
+                            <option value="Homicídio Consumado (Art. 121)" />
+                            <option value="Porte Ilegal de Arma de Fogo" />
+                            <option value="Disparo de Arma de Fogo" />
+                            <option value="Ameaça / Coação (Art. 147)" />
+                            <option value="Lesão Corporal (Art. 129)" />
+                            <option value="Extorsão / Sequestro" />
+                            <option value="Organização Criminosa" />
+                            <option value="Furto (Art. 155)" />
+                            <option value="Receptação (Art. 180)" />
+                          </datalist>
                         </div>
                         <div>
                           <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Data / Hora do Fato</label>
@@ -5252,6 +5274,7 @@ export default function App() {
                                         onChange={(e) => setDirectNewOcData({ ...directNewOcData, tipificacao_penal: e.target.value })}
                                         className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
                                       >
+                                        <option value="Averiguação">Averiguação</option>
                                         <option value="Roubo a Mão Armada">Roubo a Mão Armada</option>
                                         <option value="Roubo de Carga">Roubo de Carga</option>
                                         <option value="Tráfico de Drogas">Tráfico de Drogas</option>
@@ -5259,9 +5282,14 @@ export default function App() {
                                         <option value="Homicídio Tentado">Homicídio Tentado</option>
                                         <option value="Homicídio Consumado">Homicídio Consumado</option>
                                         <option value="Porte Ilegal de Arma de Fogo">Porte Ilegal de Arma de Fogo</option>
+                                        <option value="Disparo de Arma de Fogo">Disparo de Arma de Fogo</option>
                                         <option value="Ameaça / Coação">Ameaça / Coação</option>
                                         <option value="Lesão Corporal">Lesão Corporal</option>
                                         <option value="Extorsão / Sequestro">Extorsão / Sequestro</option>
+                                        <option value="Organização Criminosa">Organização Criminosa</option>
+                                        <option value="Furto">Furto</option>
+                                        <option value="Receptação">Receptação</option>
+                                        <option value="Outros">Outros / Não Especificado</option>
                                       </select>
                                     </div>
                                     
