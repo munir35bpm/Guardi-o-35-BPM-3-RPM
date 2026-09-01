@@ -3304,10 +3304,10 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">CPF</label>
+                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Número de Documento</label>
                           <input
                             type="text"
-                            placeholder="000.000.000-00"
+                            placeholder="Ex: CPF, RG ou outro doc"
                             value={newSuspectForm.cpf}
                             onChange={(e) => setNewSuspectForm({ ...newSuspectForm, cpf: e.target.value })}
                             className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none focus:border-amber-500 text-zinc-200"
@@ -4644,7 +4644,7 @@ export default function App() {
                       <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-500" />
                       <input
                         type="text"
-                        placeholder="Filtrar por nome, vulgo, CPF..."
+                        placeholder="Filtrar por nome, vulgo, documento..."
                         value={suspectSearchQuery}
                         onChange={(e) => setSuspectSearchQuery(e.target.value)}
                         className="bg-[#0A0A0B] border border-zinc-800 rounded p-2 pl-8 text-xs font-mono focus:outline-none focus:border-amber-500 w-60 text-zinc-200"
@@ -4657,7 +4657,7 @@ export default function App() {
                       <thead className="text-[9px] uppercase bg-[#0A0A0B] border-b border-zinc-800 text-zinc-500 font-bold tracking-wider">
                         <tr>
                           <th className="p-2.5">Foto</th>
-                          <th className="p-2.5">Nome / CPF</th>
+                          <th className="p-2.5">Nome / Nº Documento</th>
                           <th className="p-2.5">Vulgo</th>
                           <th className="p-2.5">Facção</th>
                           <th className="p-2.5">Perigo</th>
@@ -4827,8 +4827,8 @@ export default function App() {
                             </span>
                           </div>
                           <div className="bg-[#0A0A0B] p-2 rounded border border-zinc-850">
-                            <span className="text-[9px] text-zinc-500 block uppercase font-bold">CPF</span>
-                            <span className="text-zinc-200 font-medium">{selectedSuspectDetail.cpf}</span>
+                            <span className="text-[9px] text-zinc-500 block uppercase font-bold">Número de Documento</span>
+                            <span className="text-zinc-200 font-medium">{selectedSuspectDetail.cpf || 'Não informado'}</span>
                           </div>
                           <div className="bg-[#0A0A0B] p-2 rounded border border-zinc-850">
                             <span className="text-[9px] text-zinc-500 block uppercase font-bold">Facção</span>

@@ -851,7 +851,7 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
           <div class="detail-value" style="color: #b45309;">"${infratorFull.vulgo || 'S/V'}"</div>
         </div>
         <div class="detail-item">
-          <div class="detail-label">CPF / Documento</div>
+          <div class="detail-label">Número de Documento</div>
           <div class="detail-value">${infratorFull.cpf || 'Não cadastrado'}</div>
         </div>
         <div class="detail-item">
