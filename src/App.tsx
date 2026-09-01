@@ -67,6 +67,7 @@ import {
 import { db } from './backend/db';
 import { openSuspectDossier } from './utils/dossierGenerator';
 import { analyzeCrimeIntelligenceLocally } from './utils/intelligenceEngine';
+import { compressImage } from './utils/imageCompressor';
 import {
   initFirebaseSync,
   persistSuspectToFirebase,
@@ -1057,30 +1058,31 @@ export default function App() {
   };
 
   // Photo handlers for Registration Form (Unlimited photos)
-  const handleAddFilesToRegistration = (files: FileList | File[]) => {
-    Array.from(files).forEach((file) => {
-      if (!file.type.startsWith('image/')) return;
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const dataUrl = reader.result as string;
+  const handleAddFilesToRegistration = async (files: FileList | File[]) => {
+    const fileList = Array.from(files);
+    for (const file of fileList) {
+      if (!file.type.startsWith('image/')) continue;
+      try {
+        const compressedDataUrl = await compressImage(file, 1000, 1000, 0.78);
         setSuspectPhotosList((prev) => {
           const isFirst = prev.length === 0;
           const newPhoto: FotoInfrator = {
             id: `foto-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            url: dataUrl,
+            url: compressedDataUrl,
             tipo: isFirst ? 'ROSTO' : 'TATUAGEM',
             descricao: isFirst ? 'Foto Facial Principal' : '',
             principal: isFirst,
             created_at: new Date().toISOString(),
           };
           if (isFirst) {
-            setNewSuspectForm((f) => ({ ...f, foto_url: dataUrl }));
+            setNewSuspectForm((f) => ({ ...f, foto_url: compressedDataUrl }));
           }
           return [...prev, newPhoto];
         });
-      };
-      reader.readAsDataURL(file);
-    });
+      } catch (err) {
+        console.error('Erro ao processar/comprimir imagem:', err);
+      }
+    }
   };
 
   const handleSetRegistrationPrimaryPhoto = (index: number) => {
@@ -1126,49 +1128,42 @@ export default function App() {
 
     for (const file of fileList) {
       if (!file.type.startsWith('image/')) continue;
-      await new Promise<void>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const dataUrl = reader.result as string;
-          try {
-            const isFirst = (!selectedSuspectDetail.galeria_fotos || selectedSuspectDetail.galeria_fotos.length === 0);
-            const photoPayload = {
-              url: dataUrl,
-              tipo: isFirst ? 'ROSTO' : 'TATUAGEM',
-              descricao: isFirst ? 'Foto Principal' : 'Registro Fotográfico Complementar',
-              principal: isFirst,
-            };
-
-            let updated: any = null;
-            try {
-              const res = await fetch(`/api/infratores/${suspectId}/fotos`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(photoPayload),
-              });
-              if (res.ok) {
-                updated = await res.json();
-              }
-            } catch (err) {
-              console.warn('API direct photo upload failed, using local DB', err);
-            }
-
-            if (!updated) {
-              updated = db.addPhotoToInfrator(suspectId, photoPayload);
-            }
-
-            if (updated) {
-              await persistSuspectToFirebase(updated);
-              setSelectedSuspectDetail(updated);
-              setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
-            }
-          } catch (e) {
-            console.error('Error uploading photo:', e);
-          }
-          resolve();
+      try {
+        const compressedDataUrl = await compressImage(file, 1000, 1000, 0.78);
+        const isFirst = (!selectedSuspectDetail.galeria_fotos || selectedSuspectDetail.galeria_fotos.length === 0);
+        const photoPayload = {
+          url: compressedDataUrl,
+          tipo: isFirst ? 'ROSTO' : 'TATUAGEM',
+          descricao: isFirst ? 'Foto Principal' : 'Registro Fotográfico Complementar',
+          principal: isFirst,
         };
-        reader.readAsDataURL(file);
-      });
+
+        let updated: any = null;
+        try {
+          const res = await fetch(`/api/infratores/${suspectId}/fotos`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(photoPayload),
+          });
+          if (res.ok) {
+            updated = await res.json();
+          }
+        } catch (err) {
+          console.warn('API direct photo upload failed, using local DB', err);
+        }
+
+        if (!updated) {
+          updated = db.addPhotoToInfrator(suspectId, photoPayload);
+        }
+
+        if (updated) {
+          await persistSuspectToFirebase(updated);
+          setSelectedSuspectDetail(updated);
+          setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
+        }
+      } catch (e) {
+        console.error('Error uploading photo:', e);
+      }
     }
 
     fetchTelemetry();
@@ -1729,6 +1724,15 @@ export default function App() {
         }
       }
 
+      // Ensure any manual dataUrl photo is compressed
+      if (primaryUrl && primaryUrl.startsWith('data:image/') && primaryUrl.length > 200000) {
+        try {
+          primaryUrl = await compressImage(primaryUrl, 1000, 1000, 0.78);
+        } catch (e) {
+          console.warn('Compress fallback:', e);
+        }
+      }
+
       const suspectPayload = {
         ...newSuspectForm,
         foto_url: primaryUrl,
@@ -1758,7 +1762,11 @@ export default function App() {
         }
 
         if (updatedSuspect) {
-          await persistSuspectToFirebase(updatedSuspect);
+          try {
+            await persistSuspectToFirebase(updatedSuspect);
+          } catch (fireErr) {
+            console.warn('Erro ao sincronizar com Firestore:', fireErr);
+          }
           setSelectedSuspectDetail(updatedSuspect);
         }
 
@@ -1817,7 +1825,11 @@ export default function App() {
 
       // Persist to Firebase Firestore
       if (createdSuspect) {
-        await persistSuspectToFirebase(createdSuspect);
+        try {
+          await persistSuspectToFirebase(createdSuspect);
+        } catch (fireErr) {
+          console.warn('Erro ao persistir no Firebase (dados mantidos no sistema local):', fireErr);
+        }
       }
 
       setIsAddingSuspect(false);
@@ -1877,9 +1889,9 @@ export default function App() {
       const countAddr = addressesToAttach.length;
       setToastMessage(`Infrator "${newSuspectForm.nome_completo}" cadastrado com sucesso! ${countAddr > 0 ? `(${countAddr} endereço(s))` : ''} ${countOc > 0 ? `(${countOc} ocorrência(s))` : ''}`);
       setTimeout(() => setToastMessage(null), 4000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error adding suspect:', err);
-      alert('Ocorreu um erro ao salvar o infrator.');
+      alert(`Erro ao salvar infrator: ${err?.message || 'Falha de comunicação'}. Seus dados não foram apagados do formulário.`);
     } finally {
       setIsSubmittingSuspect(false);
     }
@@ -4127,11 +4139,10 @@ export default function App() {
                                 {/* Coordenadas Geográficas (Lat / Long) */}
                                 <div>
                                   <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1 mb-1">
-                                    <MapPin className="w-3 h-3 text-cyan-400" /> Latitude (Lat) *
+                                    <MapPin className="w-3 h-3 text-cyan-400" /> Latitude (Lat)
                                   </label>
                                   <input
                                     type="text"
-                                    required
                                     placeholder="Ex: -19.7712"
                                     value={suspectNewOcData.lat}
                                     onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, lat: e.target.value })}
@@ -4140,11 +4151,10 @@ export default function App() {
                                 </div>
                                 <div>
                                   <label className="text-[9px] uppercase text-cyan-400 font-bold flex items-center gap-1 mb-1">
-                                    <MapPin className="w-3 h-3 text-cyan-400" /> Longitude (Long) *
+                                    <MapPin className="w-3 h-3 text-cyan-400" /> Longitude (Long)
                                   </label>
                                   <input
                                     type="text"
-                                    required
                                     placeholder="Ex: -43.8564"
                                     value={suspectNewOcData.lng}
                                     onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, lng: e.target.value })}

@@ -197,11 +197,12 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
  * Saves a full suspect (with characteristics, addresses, and occurrences) to Firestore.
  */
 export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails): Promise<void> {
+  if (!suspectFull || !suspectFull.id) return;
   try {
     // 1. Save Infrator doc
     const infratorData: Infrator = {
       id: suspectFull.id,
-      nome_completo: suspectFull.nome_completo,
+      nome_completo: suspectFull.nome_completo || 'Infrator',
       vulgo: suspectFull.vulgo || '',
       data_nascimento: suspectFull.data_nascimento || '',
       cpf: suspectFull.cpf || '',
@@ -214,16 +215,32 @@ export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails):
       periculosidade: suspectFull.periculosidade || 'Média',
       created_at: suspectFull.created_at || new Date().toISOString(),
     };
-    (infratorData as any).fisicas = suspectFull.fisicas;
+    if (suspectFull.fisicas) {
+      (infratorData as any).fisicas = suspectFull.fisicas;
+    }
     await saveInfrator(infratorData);
 
     // 2. Save associated addresses
     if (suspectFull.enderecos && suspectFull.enderecos.length > 0) {
       for (const addr of suspectFull.enderecos) {
+        if (!addr) continue;
+        const anyAddr = addr as any;
+        const endId = addr.id || `end-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
         await saveEndereco({
           ...addr,
+          id: endId,
+          infrator_id: addr.infrator_id || suspectFull.id,
           infrator_nome: addr.infrator_nome || suspectFull.nome_completo,
-          infrator_vulgo: addr.infrator_vulgo || suspectFull.vulgo
+          infrator_vulgo: addr.infrator_vulgo || suspectFull.vulgo,
+          tipo_endereco: addr.tipo_endereco || 'Residência',
+          logradouro: addr.logradouro || 'Não informado',
+          bairro: addr.bairro || 'Centro',
+          cidade: addr.cidade || 'Santa Luzia',
+          raio_influencia_km: Number(addr.raio_influencia_km) || 2.5,
+          geom_ponto: {
+            lat: addr.geom_ponto?.lat !== undefined ? Number(addr.geom_ponto.lat) : (anyAddr.lat !== undefined ? Number(anyAddr.lat) : -19.7712),
+            lng: addr.geom_ponto?.lng !== undefined ? Number(addr.geom_ponto.lng) : (anyAddr.lng !== undefined ? Number(anyAddr.lng) : -43.8564)
+          }
         });
       }
     }
@@ -231,7 +248,23 @@ export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails):
     // 3. Save associated occurrences
     if (suspectFull.ocorrencias && suspectFull.ocorrencias.length > 0) {
       for (const oc of suspectFull.ocorrencias) {
-        await saveOcorrencia(oc);
+        if (!oc) continue;
+        const anyOc = oc as any;
+        const ocId = oc.id || `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        await saveOcorrencia({
+          id: ocId,
+          numero_bo: oc.numero_bo || 'S/N',
+          data_hora: oc.data_hora || new Date().toISOString(),
+          tipificacao_penal: oc.tipificacao_penal || 'Não informada',
+          descricao_fato: oc.descricao_fato || '',
+          modus_operandi: oc.modus_operandi || '',
+          armas_utilizadas: oc.armas_utilizadas || '',
+          veiculo_utilizado: oc.veiculo_utilizado || '',
+          geom_crime: {
+            lat: oc.geom_crime?.lat !== undefined ? Number(oc.geom_crime.lat) : (anyOc.lat !== undefined ? Number(anyOc.lat) : -19.7712),
+            lng: oc.geom_crime?.lng !== undefined ? Number(oc.geom_crime.lng) : (anyOc.lng !== undefined ? Number(anyOc.lng) : -43.8564)
+          }
+        });
       }
     }
   } catch (err) {

@@ -29,6 +29,29 @@ export const COLLECTIONS = {
   GANG_AREAS: 'gang_areas',
 };
 
+// Helper to recursively remove undefined fields and convert invalid structures for Firestore
+export function sanitizeForFirestore(obj: any): any {
+  if (obj === undefined || obj === null) {
+    return null;
+  }
+  if (Array.isArray(obj)) {
+    return obj
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeForFirestore(item));
+  }
+  if (typeof obj === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const key of Object.keys(obj)) {
+      const val = obj[key];
+      if (val !== undefined) {
+        cleaned[key] = sanitizeForFirestore(val);
+      }
+    }
+    return cleaned;
+  }
+  return obj;
+}
+
 // ==========================================
 // INFRATORES CRUD
 // ==========================================
@@ -50,7 +73,8 @@ export async function fetchInfratores(): Promise<Infrator[]> {
 
 export async function saveInfrator(infrator: Infrator): Promise<void> {
   const docRef = doc(firestore, COLLECTIONS.INFRATORES, infrator.id);
-  await setDoc(docRef, infrator, { merge: true });
+  const sanitized = sanitizeForFirestore(infrator);
+  await setDoc(docRef, sanitized, { merge: true });
 }
 
 export async function removeInfrator(id: string): Promise<void> {
@@ -79,7 +103,8 @@ export async function fetchEnderecos(): Promise<EnderecoAtuacao[]> {
 
 export async function saveEndereco(endereco: EnderecoAtuacao): Promise<void> {
   const docRef = doc(firestore, COLLECTIONS.ENDERECOS, endereco.id);
-  await setDoc(docRef, endereco, { merge: true });
+  const sanitized = sanitizeForFirestore(endereco);
+  await setDoc(docRef, sanitized, { merge: true });
 }
 
 export async function removeEndereco(id: string): Promise<void> {
@@ -108,7 +133,8 @@ export async function fetchOcorrencias(): Promise<OcorrenciaCriminal[]> {
 
 export async function saveOcorrencia(ocorrencia: OcorrenciaCriminal): Promise<void> {
   const docRef = doc(firestore, COLLECTIONS.OCORRENCIAS, ocorrencia.id);
-  await setDoc(docRef, ocorrencia, { merge: true });
+  const sanitized = sanitizeForFirestore(ocorrencia);
+  await setDoc(docRef, sanitized, { merge: true });
 }
 
 export async function removeOcorrencia(id: string): Promise<void> {
@@ -138,7 +164,8 @@ export async function fetchVinculos(): Promise<VinculoComparsa[]> {
 export async function saveVinculo(vinculo: VinculoComparsa): Promise<void> {
   const id = `${vinculo.infrator_origem_id}_${vinculo.infrator_destino_id}`;
   const docRef = doc(firestore, COLLECTIONS.VINCULOS_COMPARSAS, id);
-  await setDoc(docRef, vinculo, { merge: true });
+  const sanitized = sanitizeForFirestore(vinculo);
+  await setDoc(docRef, sanitized, { merge: true });
 }
 
 export async function removeVinculo(origemId: string, destinoId: string): Promise<void> {
