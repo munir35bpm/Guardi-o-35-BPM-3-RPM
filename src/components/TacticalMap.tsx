@@ -69,6 +69,18 @@ interface TacticalMapProps {
   onRefresh?: () => void;
 }
 
+// Helper to compute centroid of polygon coordinates for tactical label placement
+function getPolygonCentroid(coords: [number, number][]): [number, number] {
+  if (!coords || coords.length === 0) return [-19.7712, -43.8564];
+  let sumLat = 0;
+  let sumLng = 0;
+  for (let i = 0; i < coords.length; i++) {
+    sumLat += coords[i][0];
+    sumLng += coords[i][1];
+  }
+  return [sumLat / coords.length, sumLng / coords.length];
+}
+
 // Helper to deduplicate addresses for clean tactical map rendering
 function deduplicateAddressList(list: EnderecoAtuacao[]): EnderecoAtuacao[] {
   const seen = new Set<string>();
@@ -152,6 +164,7 @@ export default function TacticalMap({
   const [isImporterOpen, setIsImporterOpen] = useState(false);
   const [isLayersPanelOpen, setIsLayersPanelOpen] = useState(false);
   const [showAllGangLayers, setShowAllGangLayers] = useState(true);
+  const [showGangLabels, setShowGangLabels] = useState(true);
   const [showOccurrencesLayer, setShowOccurrencesLayer] = useState(true);
   const [showAddressesLayer, setShowAddressesLayer] = useState(true);
   const [activeZoneHover, setActiveZoneHover] = useState<GangAreaZone | null>(null);
@@ -420,6 +433,54 @@ export default function TacticalMap({
         return isPointInPolygon([oc.geom_crime.lat, oc.geom_crime.lng], zone.coordinates);
       });
 
+      const gangDisplayName = zone.gangName || zone.name || 'GANGUE NÃO IDENTIFICADA';
+      const dangerBadge = zone.dangerLevel
+        ? `<span style="font-size: 9px; font-weight: 800; background: ${
+            zone.dangerLevel === 'CRÍTICO' ? '#991b1b' : '#854d0e'
+          }; color: #ffffff; padding: 1px 5px; border-radius: 2px; text-transform: uppercase; letter-spacing: 0.5px;">
+            ${zone.dangerLevel}
+          </span>`
+        : '';
+
+      const tooltipHTML = `
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.45; min-width: 190px; max-width: 280px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid ${color}99; padding-bottom: 4px; margin-bottom: 4px;">
+            <div style="display: flex; align-items: center; gap: 5px; min-width: 0;">
+              <span style="display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: ${color}; box-shadow: 0 0 8px ${color}; flex-shrink: 0;"></span>
+              <span style="font-weight: 800; color: #FFFFFF; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; white-space: normal;">
+                ${gangDisplayName}
+              </span>
+            </div>
+            ${dangerBadge}
+          </div>
+          ${zone.name && zone.name.toLowerCase() !== gangDisplayName.toLowerCase() ? `<div style="font-size: 10px; color: #cbd5e1; margin-bottom: 3px; font-weight: 600;">${zone.name}</div>` : ''}
+          <div style="font-size: 10px; color: #94a3b8; display: flex; flex-direction: column; gap: 2px;">
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: #64748b;">Área / Dimensão:</span>
+              <span style="color: #38bdf8; font-weight: bold;">${zone.areaKm2 ? `${zone.areaKm2} km²` : 'Território delimitado'}</span>
+            </div>
+            ${zone.rivalGang ? `
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #64748b;">Rivalidade:</span>
+                <span style="color: #f87171; font-weight: bold;">⚔️ ${zone.rivalGang}</span>
+              </div>
+            ` : ''}
+            ${suspectsInside.length > 0 ? `
+              <div style="display: flex; justify-content: space-between; color: #f59e0b; font-weight: bold; background: rgba(245, 158, 11, 0.1); padding: 1px 4px; border-radius: 2px; margin-top: 2px;">
+                <span>Infratores no território:</span>
+                <span>⚠️ ${suspectsInside.length}</span>
+              </div>
+            ` : ''}
+            ${occurrencesInside.length > 0 ? `
+              <div style="display: flex; justify-content: space-between; color: #f87171; font-weight: bold; background: rgba(239, 68, 68, 0.1); padding: 1px 4px; border-radius: 2px; margin-top: 1px;">
+                <span>Ocorrências registradas:</span>
+                <span>🚨 ${occurrencesInside.length}</span>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+
       if (zone.type === 'Polygon' && zone.coordinates.length >= 3) {
         const polyCoords = zone.innerHoles
           ? [zone.coordinates, ...zone.innerHoles]
@@ -432,17 +493,17 @@ export default function TacticalMap({
           fillColor: color,
           fillOpacity: opacity,
           dashArray: zone.dangerLevel === 'CRÍTICO' ? '4, 4' : undefined,
+          interactive: true,
         });
 
         // Tooltip on hover showing Gang Name clearly
-        const gangDisplayName = zone.gangName || zone.name;
-        polygon.bindTooltip(
-          `<div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 800; color: ${color}; text-shadow: 0 1px 3px rgba(0,0,0,0.8);">
-            🛡️ ${gangDisplayName.toUpperCase()}
-            ${zone.areaKm2 ? `<span style="color: #cbd5e1; font-weight: normal;"> (${zone.areaKm2} km²)</span>` : ''}
-          </div>`,
-          { sticky: true, className: 'tactical-map-tooltip' }
-        );
+        polygon.bindTooltip(tooltipHTML, {
+          sticky: true,
+          direction: 'top',
+          opacity: 1,
+          className: 'tactical-map-tooltip',
+          offset: [0, -10],
+        });
 
         // Rich popup on click
         const suspectsHTML =
@@ -523,9 +584,16 @@ export default function TacticalMap({
         polygon.on('mouseover', () => {
           polygon.setStyle({
             weight: strokeW + 2,
-            fillOpacity: Math.min(0.7, opacity + 0.25),
+            fillOpacity: Math.min(0.75, opacity + 0.3),
           });
-          setActiveZoneHover(zone);
+          if (typeof (polygon as any).bringToFront === 'function') {
+            (polygon as any).bringToFront();
+          }
+          setActiveZoneHover({
+            ...zone,
+            suspectsInsideCount: suspectsInside.length,
+            occurrencesInsideCount: occurrencesInside.length,
+          } as any);
         });
 
         polygon.on('mouseout', () => {
@@ -539,6 +607,52 @@ export default function TacticalMap({
         gangLayersGroupRef.current?.addLayer(polygon);
         polygonLayersMapRef.current[zone.id] = polygon;
 
+        // Centroid tactical label (if enabled)
+        if (showGangLabels) {
+          const centroid = getPolygonCentroid(zone.coordinates);
+          const labelIcon = L.divIcon({
+            className: 'gang-centroid-label',
+            html: `
+              <div style="
+                background: rgba(9, 12, 18, 0.90);
+                border: 1px solid ${color};
+                color: #FFFFFF;
+                padding: 2px 7px;
+                border-radius: 4px;
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 10px;
+                font-weight: 800;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                white-space: nowrap;
+                box-shadow: 0 3px 10px rgba(0,0,0,0.85), 0 0 8px ${color}55;
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                pointer-events: auto;
+                cursor: pointer;
+              ">
+                <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:${color}; box-shadow: 0 0 4px ${color};"></span>
+                <span>${gangDisplayName}</span>
+              </div>
+            `,
+            iconSize: [120, 20],
+            iconAnchor: [60, 10],
+          });
+
+          const labelMarker = L.marker(centroid, { icon: labelIcon, interactive: true });
+          labelMarker.on('click', () => {
+            polygon.openPopup();
+          });
+          labelMarker.on('mouseover', () => {
+            polygon.fire('mouseover');
+          });
+          labelMarker.on('mouseout', () => {
+            polygon.fire('mouseout');
+          });
+          gangLayersGroupRef.current?.addLayer(labelMarker);
+        }
+
         // Extend bounds
         zone.coordinates.forEach((c) => {
           bounds.extend(c);
@@ -550,15 +664,39 @@ export default function TacticalMap({
           weight: Math.max(3.5, strokeW),
           opacity: 0.9,
           dashArray: '5, 5',
+          interactive: true,
         });
-        polyline.bindTooltip(`📍 ${zone.name}`, { sticky: true });
-        polyline.on('mouseover', () => setActiveZoneHover(zone));
-        polyline.on('mouseout', () => setActiveZoneHover(null));
+        polyline.bindTooltip(tooltipHTML, { sticky: true, className: 'tactical-map-tooltip', opacity: 1, direction: 'top' });
+        polyline.on('mouseover', () => {
+          polyline.setStyle({ weight: strokeW + 2, opacity: 1 });
+          setActiveZoneHover(zone);
+        });
+        polyline.on('mouseout', () => {
+          polyline.setStyle({ weight: Math.max(3.5, strokeW), opacity: 0.9 });
+          setActiveZoneHover(null);
+        });
         gangLayersGroupRef.current?.addLayer(polyline);
         polygonLayersMapRef.current[zone.id] = polyline;
+      } else if (zone.type === 'Point' && zone.coordinates.length >= 1) {
+        const pt = zone.coordinates[0];
+        const ptIcon = L.divIcon({
+          className: 'custom-gang-pt',
+          html: `
+            <div style="display:flex; align-items:center; justify-content:center; width:22px; height:22px; background:${color}; border:2px solid #fff; border-radius:50%; box-shadow:0 0 10px ${color}; cursor:pointer;">
+              <span style="color:#fff; font-size:10px; font-weight:bold;">🛡️</span>
+            </div>
+          `,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+        });
+        const ptMarker = L.marker(pt, { icon: ptIcon, interactive: true });
+        ptMarker.bindTooltip(tooltipHTML, { sticky: true, className: 'tactical-map-tooltip', opacity: 1, direction: 'top' });
+        ptMarker.on('mouseover', () => setActiveZoneHover(zone));
+        ptMarker.on('mouseout', () => setActiveZoneHover(null));
+        gangLayersGroupRef.current?.addLayer(ptMarker);
       }
     });
-  }, [gangAreas, showAllGangLayers, addresses, occurrences]);
+  }, [gangAreas, showAllGangLayers, showGangLabels, addresses, occurrences]);
 
   // Redraw Suspect Addresses & Crime Occurrences
   useEffect(() => {
@@ -624,6 +762,7 @@ export default function TacticalMap({
         color: isHighlighted ? '#f59e0b' : color,
         weight: isHighlighted ? 2.5 : 1,
         dashArray: '3, 4',
+        interactive: false,
       });
 
       const suspectInfo = getSuspectInfoForAddress(addr);
@@ -1036,20 +1175,37 @@ export default function TacticalMap({
           {/* Active Hover Gang Zone HUD Badge */}
           {activeZoneHover && (
             <div
-              className="bg-slate-950/95 backdrop-blur-md border px-3 py-1.5 rounded-md shadow-xl flex items-center gap-2.5 font-mono animate-fade-in pointer-events-auto"
+              className="bg-slate-950/95 backdrop-blur-md border px-3.5 py-1.5 rounded-md shadow-2xl flex items-center gap-3 font-mono animate-fade-in pointer-events-auto"
               style={{ borderColor: activeZoneHover.color || '#ef4444' }}
             >
               <div
-                className="w-3 h-3 rounded-full animate-pulse"
+                className="w-3.5 h-3.5 rounded-full animate-pulse shadow-md"
                 style={{ backgroundColor: activeZoneHover.color || '#ef4444' }}
               />
               <div>
-                <div className="text-[10px] uppercase font-bold tracking-wider" style={{ color: activeZoneHover.color || '#ef4444' }}>
-                  Área em Foco: {activeZoneHover.gangName || activeZoneHover.name}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] uppercase font-bold tracking-wider" style={{ color: activeZoneHover.color || '#ef4444' }}>
+                    🛡️ {activeZoneHover.gangName || activeZoneHover.name}
+                  </span>
+                  {activeZoneHover.dangerLevel && (
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded text-white ${
+                      activeZoneHover.dangerLevel === 'CRÍTICO' ? 'bg-red-800' : 'bg-amber-700'
+                    }`}>
+                      {activeZoneHover.dangerLevel}
+                    </span>
+                  )}
                 </div>
-                <div className="text-[10px] text-slate-300">
-                  {activeZoneHover.areaKm2 ? `${activeZoneHover.areaKm2} km²` : 'Território delimitado'}
-                  {activeZoneHover.rivalGang ? ` • Rival: ${activeZoneHover.rivalGang}` : ''}
+                <div className="text-[10px] text-slate-300 flex items-center gap-2">
+                  <span>{activeZoneHover.areaKm2 ? `${activeZoneHover.areaKm2} km²` : 'Território demarcado'}</span>
+                  {activeZoneHover.rivalGang && (
+                    <span className="text-red-400 font-semibold">• Rival: {activeZoneHover.rivalGang}</span>
+                  )}
+                  {(activeZoneHover as any).suspectsInsideCount > 0 && (
+                    <span className="text-amber-400 font-bold">• ⚠️ {(activeZoneHover as any).suspectsInsideCount} Infrator(es)</span>
+                  )}
+                  {(activeZoneHover as any).occurrencesInsideCount > 0 && (
+                    <span className="text-rose-400 font-bold">• 🚨 {(activeZoneHover as any).occurrencesInsideCount} B.O.(s)</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -1059,6 +1215,22 @@ export default function TacticalMap({
         {/* Right: Basemap Switcher, Layer Toggles, Gang Controls & Importer Button */}
         <div className="flex items-center gap-1.5 pointer-events-auto">
           
+          {/* Quick Toggle: Nomes / Rótulos de Gangues */}
+          <button
+            type="button"
+            onClick={() => setShowGangLabels(!showGangLabels)}
+            className={`px-2 py-1.5 rounded text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 border transition cursor-pointer shadow-md ${
+              showGangLabels
+                ? 'bg-amber-950/80 text-amber-300 border-amber-600'
+                : 'bg-slate-900/90 text-slate-400 hover:bg-slate-800 border-slate-700 opacity-60'
+            }`}
+            title={showGangLabels ? 'Ocultar nomes/rótulos fixos de gangues sobre o mapa' : 'Exibir nomes/rótulos fixos de gangues sobre o mapa'}
+          >
+            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+            <span className="hidden md:inline">Nomes</span>
+            {showGangLabels ? <Eye className="w-3 h-3 text-amber-400" /> : <EyeOff className="w-3 h-3 text-slate-500" />}
+          </button>
+
           {/* Quick Toggle: Residências */}
           <button
             type="button"
