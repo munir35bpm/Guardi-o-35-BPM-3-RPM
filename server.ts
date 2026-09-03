@@ -332,9 +332,7 @@ app.post('/api/infratores/:id/ocorrencias', (req, res) => {
 app.delete('/api/infratores/:id/ocorrencias/:ocorrencia_id', (req, res) => {
   try {
     const { id, ocorrencia_id } = req.params;
-    db.infrator_ocorrencia = db.infrator_ocorrencia.filter(
-      io => !(io.infrator_id === id && io.ocorrencia_id === ocorrencia_id)
-    );
+    db.unlinkInfratorOcorrencia(id, ocorrencia_id);
     res.json({ success: true, updated: db.getInfratorFull(id) });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

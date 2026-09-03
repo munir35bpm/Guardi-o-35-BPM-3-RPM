@@ -459,24 +459,49 @@ class CrimIntelDatabase {
   }
 
   public linkInfratorOcorrencia(infrator_id: string, ocorrencia_id: string, papel_no_crime: string = 'Autor'): boolean {
-    const exists = this.infrator_ocorrencia.some(io => io.infrator_id === infrator_id && io.ocorrencia_id === ocorrencia_id);
+    const oc = this.ocorrencias_criminais.find(o => o.id === ocorrencia_id || o.numero_bo === ocorrencia_id);
+    const targetId = oc?.id || ocorrencia_id;
+    const targetBo = oc?.numero_bo;
+
+    const exists = this.infrator_ocorrencia.some(
+      io => io.infrator_id === infrator_id && (io.ocorrencia_id === targetId || io.ocorrencia_id === ocorrencia_id || (targetBo && io.ocorrencia_id === targetBo))
+    );
     if (exists) {
-      const item = this.infrator_ocorrencia.find(io => io.infrator_id === infrator_id && io.ocorrencia_id === ocorrencia_id);
-      if (item) item.papel_no_crime = papel_no_crime;
+      const item = this.infrator_ocorrencia.find(
+        io => io.infrator_id === infrator_id && (io.ocorrencia_id === targetId || io.ocorrencia_id === ocorrencia_id || (targetBo && io.ocorrencia_id === targetBo))
+      );
+      if (item) {
+        item.ocorrencia_id = targetId;
+        item.papel_no_crime = papel_no_crime;
+      }
       return true;
     }
     this.infrator_ocorrencia.push({
       infrator_id,
-      ocorrencia_id,
+      ocorrencia_id: targetId,
       papel_no_crime
     });
     return true;
   }
 
   public unlinkInfratorOcorrencia(infrator_id: string, ocorrencia_id: string): boolean {
+    const oc = this.ocorrencias_criminais.find(o => o.id === ocorrencia_id || o.numero_bo === ocorrencia_id);
+    const targetId = oc?.id || ocorrencia_id;
+    const targetBo = oc?.numero_bo;
+
+    // Remove from relational table
     this.infrator_ocorrencia = this.infrator_ocorrencia.filter(
-      io => !(io.infrator_id === infrator_id && io.ocorrencia_id === ocorrencia_id)
+      io => !(io.infrator_id === infrator_id && (io.ocorrencia_id === targetId || io.ocorrencia_id === ocorrencia_id || (targetBo && io.ocorrencia_id === targetBo)))
     );
+
+    // Remove from embedded array in target infrator if present
+    const infrator = this.infratores.find(i => i.id === infrator_id);
+    if (infrator && Array.isArray((infrator as any).ocorrencias)) {
+      (infrator as any).ocorrencias = (infrator as any).ocorrencias.filter(
+        (o: any) => o && o.id !== targetId && o.id !== ocorrencia_id && (!targetBo || o.numero_bo !== targetBo)
+      );
+    }
+
     return true;
   }
 
@@ -525,17 +550,27 @@ class CrimIntelDatabase {
 
   public deleteOcorrencia(id: string): boolean {
     const oc = this.ocorrencias_criminais.find(o => o.id === id || o.numero_bo === id);
-    if (!oc) return false;
-    const targetId = oc.id;
-    const targetBo = oc.numero_bo;
+    const targetId = oc?.id || id;
+    const targetBo = oc?.numero_bo;
 
     // Remove from occurrences table
-    this.ocorrencias_criminais = this.ocorrencias_criminais.filter(o => o.id !== targetId);
+    this.ocorrencias_criminais = this.ocorrencias_criminais.filter(
+      o => o.id !== targetId && o.id !== id && (!targetBo || o.numero_bo !== targetBo)
+    );
 
     // Remove all suspect linkages to this occurrence
     this.infrator_ocorrencia = this.infrator_ocorrencia.filter(
-      io => io.ocorrencia_id !== targetId && io.ocorrencia_id !== targetBo
+      io => io.ocorrencia_id !== targetId && io.ocorrencia_id !== id && (!targetBo || io.ocorrencia_id !== targetBo)
     );
+
+    // Clean up embedded occurrences from all infratores
+    this.infratores.forEach((inf) => {
+      if (Array.isArray((inf as any).ocorrencias)) {
+        (inf as any).ocorrencias = (inf as any).ocorrencias.filter(
+          (o: any) => o && o.id !== targetId && o.id !== id && (!targetBo || o.numero_bo !== targetBo)
+        );
+      }
+    });
 
     return true;
   }

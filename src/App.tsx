@@ -1517,42 +1517,38 @@ export default function App() {
   const handleUnlinkOccurrence = async (ocorrenciaId: string) => {
     if (!selectedSuspectDetail) return;
     try {
-      let updatedSuspect: any = null;
-      try {
-        const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias/${ocorrenciaId}`, {
-          method: 'DELETE',
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.updated) {
-            updatedSuspect = data.updated;
-          }
-        }
-      } catch (e) {
-        console.warn('Backend unlink endpoint not available, falling back to local DB', e);
+      const oc = (selectedSuspectDetail.ocorrencias || []).find((o: any) => o.id === ocorrenciaId || o.numero_bo === ocorrenciaId);
+      const boNum = oc?.numero_bo;
+
+      // 1. Local DB first for instant responsiveness
+      db.unlinkInfratorOcorrencia(selectedSuspectDetail.id, ocorrenciaId);
+      let updatedSuspect: any = db.getInfratorFull(selectedSuspectDetail.id);
+      if (updatedSuspect) {
+        setSelectedSuspectDetail(updatedSuspect);
       }
 
-      // Unlink in Firebase Firestore
+      // 2. Backend API
       try {
-        const persisted = await unlinkOccurrenceFromSuspectInFirebase(selectedSuspectDetail.id, ocorrenciaId);
+        await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias/${ocorrenciaId}`, {
+          method: 'DELETE',
+        }).catch(() => null);
+      } catch (e) {
+        console.warn('Backend unlink endpoint not available', e);
+      }
+
+      // 3. Unlink in Firebase Firestore
+      try {
+        const persisted = await unlinkOccurrenceFromSuspectInFirebase(selectedSuspectDetail.id, ocorrenciaId, boNum);
         if (persisted) {
           updatedSuspect = persisted;
+          setSelectedSuspectDetail(persisted as any);
         }
       } catch (fireErr) {
         console.warn('Erro ao desvincular no Firestore:', fireErr);
       }
 
-      if (!updatedSuspect) {
-        db.unlinkInfratorOcorrencia(selectedSuspectDetail.id, ocorrenciaId);
-        updatedSuspect = db.getInfratorFull(selectedSuspectDetail.id);
-      }
-
-      if (updatedSuspect) {
-        setSelectedSuspectDetail(updatedSuspect);
-        await persistSuspectToFirebase(updatedSuspect).catch(() => null);
-      }
       await fetchTelemetry();
-      setToastMessage('Ocorrência desvinculada com sucesso.');
+      setToastMessage(`B.O. ${boNum ? `Nº ${boNum} ` : ''}desvinculado do investigado com sucesso.`);
       setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
       console.error('Error unlinking occurrence:', err);
@@ -1665,22 +1661,22 @@ export default function App() {
     const { id, numero_bo, tipificacao } = boToDelete;
     setIsDeletingBo(true);
     try {
-      // Optimistic update of local state
+      // 1. Optimistic update of local occurrences state
       setOccurrences((prev) => prev.filter((o) => o.id !== id && o.numero_bo !== numero_bo));
       setTotalIncidents((prev) => Math.max(0, prev - 1));
 
-      // Remove from client-side DB
+      // 2. Remove from client-side DB
       db.deleteOcorrencia(id);
 
-      // Remove from Firestore
-      await deleteOccurrenceFromFirebase(id);
+      // 3. Remove from Firestore passing both id and numero_bo
+      await deleteOccurrenceFromFirebase(id, numero_bo);
 
-      // Call Express API endpoint
+      // 4. Call Express API endpoint
       await fetch(`/api/ocorrencias/${id}`, {
         method: 'DELETE',
       }).catch(() => null);
 
-      // If suspect drawer is open, refresh full suspect info
+      // 5. If suspect drawer is open, refresh full suspect info
       if (selectedSuspectDetail) {
         const updated = db.getInfratorFull(selectedSuspectDetail.id);
         if (updated) {
@@ -1688,14 +1684,19 @@ export default function App() {
         }
       }
 
+      // 6. Also update suspectOccurrencesList if user is currently creating/editing suspect
+      setSuspectOccurrencesList((prev) =>
+        prev.filter((item) => item.ocorrencia_id !== id && item.numero_bo !== numero_bo && item.tempId !== id)
+      );
+
       setToastMessage(`B.O. Nº ${numero_bo} (${tipificacao}) excluído com sucesso do sistema.`);
       setTimeout(() => setToastMessage(null), 4000);
-      fetchTelemetry();
+      await fetchTelemetry();
     } catch (err) {
       console.error('Error deleting occurrence:', err);
-      setToastMessage('B.O. excluído do banco de dados.');
+      setToastMessage('B.O. excluído do sistema.');
       setTimeout(() => setToastMessage(null), 4000);
-      fetchTelemetry();
+      await fetchTelemetry();
     } finally {
       setIsDeletingBo(false);
       setBoToDelete(null);

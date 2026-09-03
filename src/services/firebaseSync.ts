@@ -441,14 +441,19 @@ export async function linkOccurrenceToSuspectInFirebase(
  */
 export async function unlinkOccurrenceFromSuspectInFirebase(
   infratorId: string,
-  ocorrenciaId: string
+  ocorrenciaId: string,
+  numeroBo?: string
 ): Promise<SuspectWithDetails | null> {
   try {
+    const oc = db.ocorrencias_criminais.find((o) => o.id === ocorrenciaId || o.numero_bo === ocorrenciaId);
+    const targetBo = numeroBo || oc?.numero_bo;
+    const targetId = oc?.id || ocorrenciaId;
+
     // 1. Remove link from Firestore
-    await removeInfratorOcorrencia(infratorId, ocorrenciaId);
+    await removeInfratorOcorrencia(infratorId, targetId, targetBo);
 
     // 2. Update local db
-    db.unlinkInfratorOcorrencia(infratorId, ocorrenciaId);
+    db.unlinkInfratorOcorrencia(infratorId, targetId);
 
     // 3. Update full suspect in Firestore
     const fullSuspect = db.getInfratorFull(infratorId);
@@ -534,23 +539,16 @@ export async function persistOccurrenceToFirebase(occurrence: OcorrenciaCriminal
  */
 export async function deleteOccurrenceFromFirebase(occurrenceId: string, numeroBo?: string): Promise<void> {
   try {
-    await removeOcorrencia(occurrenceId);
-    await removeInfratorOcorrenciasByOcorrencia(occurrenceId);
+    const oc = db.ocorrencias_criminais.find((o) => o.id === occurrenceId || o.numero_bo === occurrenceId);
+    const targetBo = numeroBo || oc?.numero_bo;
+    const targetId = oc?.id || occurrenceId;
 
-    if (numeroBo) {
-      const allOcs = await fetchOcorrencias().catch(() => []);
-      const matches = allOcs.filter((o) => o.numero_bo === numeroBo && o.id !== occurrenceId);
-      for (const m of matches) {
-        if (m.id) {
-          await removeOcorrencia(m.id);
-          await removeInfratorOcorrenciasByOcorrencia(m.id);
-        }
-      }
-    }
+    await removeOcorrencia(targetId, targetBo);
+    await removeInfratorOcorrenciasByOcorrencia(targetId, targetBo);
 
-    db.deleteOcorrencia(occurrenceId);
+    db.deleteOcorrencia(targetId);
 
-    // Update all suspects in Firestore that had this occurrence embedded
+    // Update all suspects in Firestore that had this occurrence
     const currentInfratores = db.infratores;
     for (const inf of currentInfratores) {
       const full = db.getInfratorFull(inf.id);

@@ -137,9 +137,37 @@ export async function saveOcorrencia(ocorrencia: OcorrenciaCriminal): Promise<vo
   await setDoc(docRef, sanitized, { merge: true });
 }
 
-export async function removeOcorrencia(id: string): Promise<void> {
-  const docRef = doc(firestore, COLLECTIONS.OCORRENCIAS, id);
-  await deleteDoc(docRef);
+export async function removeOcorrencia(id: string, numero_bo?: string): Promise<void> {
+  try {
+    const docRef = doc(firestore, COLLECTIONS.OCORRENCIAS, id);
+    await deleteDoc(docRef).catch(() => null);
+
+    if (numero_bo && numero_bo !== id) {
+      const boDocRef = doc(firestore, COLLECTIONS.OCORRENCIAS, numero_bo);
+      await deleteDoc(boDocRef).catch(() => null);
+    }
+
+    // Double check collection to delete any docs matching id or numero_bo
+    const colRef = collection(firestore, COLLECTIONS.OCORRENCIAS);
+    const snapshot = await getDocs(colRef).catch(() => null);
+    if (snapshot) {
+      const promises: Promise<void>[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data() as OcorrenciaCriminal;
+        if (
+          docSnap.id === id ||
+          (numero_bo && docSnap.id === numero_bo) ||
+          (d && d.id === id) ||
+          (numero_bo && d && d.numero_bo === numero_bo)
+        ) {
+          promises.push(deleteDoc(doc(firestore, COLLECTIONS.OCORRENCIAS, docSnap.id)).catch(() => {}));
+        }
+      });
+      await Promise.all(promises);
+    }
+  } catch (err) {
+    console.warn('Erro ao remover ocorrência do Firestore:', err);
+  }
 }
 
 // ==========================================
@@ -177,10 +205,38 @@ export async function saveInfratorOcorrencia(
   await setDoc(docRef, sanitized, { merge: true });
 }
 
-export async function removeInfratorOcorrencia(infrator_id: string, ocorrencia_id: string): Promise<void> {
-  const id = `${infrator_id}_${ocorrencia_id}`;
-  const docRef = doc(firestore, COLLECTIONS.VINCULOS_CRIMES, id);
-  await deleteDoc(docRef);
+export async function removeInfratorOcorrencia(
+  infrator_id: string,
+  ocorrencia_id: string,
+  numero_bo?: string
+): Promise<void> {
+  try {
+    const id = `${infrator_id}_${ocorrencia_id}`;
+    await deleteDoc(doc(firestore, COLLECTIONS.VINCULOS_CRIMES, id)).catch(() => null);
+
+    if (numero_bo && numero_bo !== ocorrencia_id) {
+      const boLinkKey = `${infrator_id}_${numero_bo}`;
+      await deleteDoc(doc(firestore, COLLECTIONS.VINCULOS_CRIMES, boLinkKey)).catch(() => null);
+    }
+
+    const colRef = collection(firestore, COLLECTIONS.VINCULOS_CRIMES);
+    const snapshot = await getDocs(colRef).catch(() => null);
+    if (snapshot) {
+      const promises: Promise<void>[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data() as InfratorOcorrencia;
+        if (
+          d.infrator_id === infrator_id &&
+          (d.ocorrencia_id === ocorrencia_id || (numero_bo && d.ocorrencia_id === numero_bo))
+        ) {
+          promises.push(deleteDoc(doc(firestore, COLLECTIONS.VINCULOS_CRIMES, docSnap.id)).catch(() => {}));
+        }
+      });
+      await Promise.all(promises);
+    }
+  } catch (err) {
+    console.warn('Erro ao remover vínculo infrator-ocorrência do Firestore:', err);
+  }
 }
 
 export async function removeInfratorOcorrenciasByInfrator(infrator_id: string): Promise<void> {
@@ -200,14 +256,22 @@ export async function removeInfratorOcorrenciasByInfrator(infrator_id: string): 
   }
 }
 
-export async function removeInfratorOcorrenciasByOcorrencia(ocorrencia_id: string): Promise<void> {
+export async function removeInfratorOcorrenciasByOcorrencia(
+  ocorrencia_id: string,
+  numero_bo?: string
+): Promise<void> {
   try {
     const colRef = collection(firestore, COLLECTIONS.VINCULOS_CRIMES);
     const snapshot = await getDocs(colRef);
     const promises: Promise<void>[] = [];
     snapshot.forEach((docSnap) => {
       const d = docSnap.data() as InfratorOcorrencia;
-      if (d.ocorrencia_id === ocorrencia_id) {
+      if (
+        d.ocorrencia_id === ocorrencia_id ||
+        (numero_bo && d.ocorrencia_id === numero_bo) ||
+        (docSnap.id && docSnap.id.endsWith(`_${ocorrencia_id}`)) ||
+        (numero_bo && docSnap.id && docSnap.id.endsWith(`_${numero_bo}`))
+      ) {
         promises.push(deleteDoc(doc(firestore, COLLECTIONS.VINCULOS_CRIMES, docSnap.id)));
       }
     });
