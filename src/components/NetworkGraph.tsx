@@ -11,7 +11,11 @@ import {
   RotateCcw,
   Eye,
   EyeOff,
-  Filter
+  Filter,
+  Crosshair,
+  BookOpen,
+  Copy,
+  Check
 } from 'lucide-react';
 import { db } from '../backend/db';
 import { openSuspectDossier } from '../utils/dossierGenerator';
@@ -68,6 +72,17 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
   const [filterMode, setFilterMode] = useState<'gang_only' | 'no_gang' | 'all' | string>('gang_only');
   const [showIncidents, setShowIncidents] = useState<boolean>(true);
 
+  // Data exposure mode for incident inspector
+  const [incidentExposureMode, setIncidentExposureMode] = useState<'geral' | 'modus_operandi'>('geral');
+  const [copiedClipboard, setCopiedClipboard] = useState(false);
+
+  const handleCopyModusOperandi = (boNum: string, tip: string, mo: string, hist: string) => {
+    const text = `INFORMAÇÃO POLICIAL - B.O. ${boNum}\nTipificação: ${tip}\n\n[MODUS OPERANDI]\n${mo || 'Não informado'}\n\n[RESUMO DO HISTÓRICO]\n${hist || 'Não informado'}`;
+    navigator.clipboard.writeText(text);
+    setCopiedClipboard(true);
+    setTimeout(() => setCopiedClipboard(false), 2500);
+  };
+
   const containerRef = useRef<HTMLDivElement>(null);
   const dragNodeIdRef = useRef<string | null>(null);
   const requestRef = useRef<number | null>(null);
@@ -75,6 +90,34 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
 
   const width = 920;
   const height = 560;
+
+  const enrichIncidentNode = (n: any): NetworkNode => {
+    const inGang = isSuspectInGang(n.gang, n.has_gang);
+    const nodeData = { ...n };
+    if (nodeData.type === 'incident') {
+      const matchOc = (db.ocorrencias_criminais || []).find(
+        (o) =>
+          o.id === n.id ||
+          o.numero_bo === n.id ||
+          (n.numero_bo && o.numero_bo === n.numero_bo) ||
+          (n.label && o.numero_bo && n.label.includes(o.numero_bo))
+      );
+      if (matchOc) {
+        nodeData.numero_bo = nodeData.numero_bo || matchOc.numero_bo;
+        nodeData.modus_operandi = nodeData.modus_operandi || matchOc.modus_operandi;
+        nodeData.descricao_fato = nodeData.descricao_fato || matchOc.descricao_fato;
+        nodeData.armas_utilizadas = nodeData.armas_utilizadas || matchOc.armas_utilizadas;
+        nodeData.veiculo_utilizado = nodeData.veiculo_utilizado || matchOc.veiculo_utilizado;
+        nodeData.tipificacao = nodeData.tipificacao || matchOc.tipificacao_penal;
+        nodeData.data = nodeData.data || matchOc.data_hora;
+      }
+    }
+    return {
+      ...nodeData,
+      gang: inGang ? n.gang : 'Infratores sem gangue',
+      has_gang: inGang,
+    };
+  };
 
   const fetchGraphData = async () => {
     try {
@@ -92,15 +135,7 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
         graphData = db.getNetworkGraph();
       }
 
-      const fetchedNodes: NetworkNode[] = (graphData.nodes || []).map((n: any) => {
-        const inGang = isSuspectInGang(n.gang, n.has_gang);
-        return {
-          ...n,
-          gang: inGang ? n.gang : 'Infratores sem gangue',
-          has_gang: inGang,
-        };
-      });
-
+      const fetchedNodes: NetworkNode[] = (graphData.nodes || []).map(enrichIncidentNode);
       const fetchedEdges: NetworkEdge[] = graphData.edges || [];
 
       setRawNodes(fetchedNodes);
@@ -108,14 +143,7 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
     } catch (err: any) {
       console.warn('Erro ao processar dados do grafo:', err);
       const fallbackData = db.getNetworkGraph();
-      const fetchedNodes: NetworkNode[] = fallbackData.nodes.map((n: any) => {
-        const inGang = isSuspectInGang(n.gang, n.has_gang);
-        return {
-          ...n,
-          gang: inGang ? n.gang : 'Infratores sem gangue',
-          has_gang: inGang,
-        };
-      });
+      const fetchedNodes: NetworkNode[] = fallbackData.nodes.map(enrichIncidentNode);
       setRawNodes(fetchedNodes);
       setRawEdges(fallbackData.edges || []);
     } finally {
@@ -416,6 +444,56 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
 
   const currentVisibleSuspectsCount = nodes.filter((n) => n.type === 'suspect').length;
   const currentVisibleIncidentsCount = nodes.filter((n) => n.type === 'incident').length;
+
+  // Find matching full incident from database for maximum data richness
+  const matchingIncident = useMemo(() => {
+    if (!selectedNode || selectedNode.type !== 'incident') return null;
+    return (
+      (db.ocorrencias_criminais || []).find(
+        (o) =>
+          o.id === selectedNode.id ||
+          o.numero_bo === selectedNode.id ||
+          (selectedNode.numero_bo && o.numero_bo === selectedNode.numero_bo) ||
+          (selectedNode.label && o.numero_bo && selectedNode.label.includes(o.numero_bo))
+      ) || null
+    );
+  }, [selectedNode]);
+
+  const incidentBoNumber =
+    selectedNode?.numero_bo || matchingIncident?.numero_bo || selectedNode?.label?.split(' - ')[0] || 'S/N';
+  const incidentTipificacao =
+    selectedNode?.tipificacao || matchingIncident?.tipificacao_penal || 'Não informada';
+  const incidentDataHora =
+    selectedNode?.data || matchingIncident?.data_hora;
+  const incidentModusOperandi =
+    selectedNode?.modus_operandi || matchingIncident?.modus_operandi || '';
+  const incidentDescricaoFato =
+    selectedNode?.descricao_fato || matchingIncident?.descricao_fato || '';
+  const incidentArmas =
+    selectedNode?.armas_utilizadas || matchingIncident?.armas_utilizadas || '';
+  const incidentVeiculo =
+    selectedNode?.veiculo_utilizado || matchingIncident?.veiculo_utilizado || '';
+
+  // Connected suspects in this incident
+  const connectedIncidentSuspects = useMemo(() => {
+    if (!selectedNode || selectedNode.type !== 'incident') return [];
+    return edges
+      .filter(
+        (e) =>
+          (e.source === selectedNode.id || e.target === selectedNode.id) &&
+          e.type === 'participated'
+      )
+      .map((e) => {
+        const suspectId = e.source === selectedNode.id ? e.target : e.source;
+        const suspectNode = nodes.find((n) => n.id === suspectId) || rawNodes.find((n) => n.id === suspectId);
+        return {
+          id: suspectId,
+          suspectNode,
+          papel: e.label || 'Autor / Envolvido',
+        };
+      })
+      .filter((item) => Boolean(item.suspectNode));
+  }, [selectedNode, edges, nodes, rawNodes]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 font-sans">
@@ -999,29 +1077,236 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
                   })()}
                 </div>
               ) : (
-                <div className="space-y-3 text-sm">
+                <div className="space-y-3.5 text-sm">
+                  {/* Seletor de Opção de Exposição de Dados */}
                   <div>
-                    <span className="text-xs font-semibold text-slate-400 block uppercase">Tipificação Penal:</span>
-                    <span className="text-slate-200 font-medium">{selectedNode.tipificacao || 'Não cadastrado'}</span>
-                  </div>
-                  <div>
-                    <span className="text-xs font-semibold text-slate-400 block uppercase">Data e Hora:</span>
-                    <span className="text-slate-300 text-xs">
-                      {selectedNode.data ? new Date(selectedNode.data).toLocaleString('pt-BR') : 'Não cadastrado'}
+                    <span className="text-[11px] font-bold text-slate-400 block uppercase tracking-wider mb-1.5">
+                      Opção de Exposição de Dados:
                     </span>
+                    <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950 rounded-lg border border-slate-800 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setIncidentExposureMode('geral')}
+                        className={`py-1.5 px-2 rounded font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          incidentExposureMode === 'geral'
+                            ? 'bg-slate-800 text-white border border-slate-600 shadow-sm'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="Visualizar dados gerais do Boletim de Ocorrência"
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                        <span>Dados Gerais</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIncidentExposureMode('modus_operandi')}
+                        className={`py-1.5 px-2 rounded font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          incidentExposureMode === 'modus_operandi'
+                            ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                            : 'text-slate-400 hover:text-amber-400'
+                        }`}
+                        title="Visualizar Modus Operandi e Resumo do Histórico"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span className="truncate">Modus Operandi / Histórico</span>
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Opção 1: Modus Operandi / Resumo do Histórico */}
+                  {incidentExposureMode === 'modus_operandi' ? (
+                    <div className="space-y-3 pt-1">
+                      {/* Modus Operandi */}
+                      <div className="bg-slate-950 p-3 rounded-lg border border-amber-900/60 shadow-sm space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-extrabold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <Crosshair className="w-3.5 h-3.5 text-amber-500" /> Modus Operandi da Ação
+                          </span>
+                          {incidentModusOperandi && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-950 text-amber-300 font-mono border border-amber-800/60">
+                              Registrado
+                            </span>
+                          )}
+                        </div>
+                        <div className="p-2.5 bg-slate-900/80 rounded border border-slate-800 text-xs text-slate-200 leading-relaxed whitespace-pre-line font-sans">
+                          {incidentModusOperandi
+                            ? incidentModusOperandi
+                            : 'Nenhum modus operandi específico discriminado neste boletim de ocorrência.'}
+                        </div>
+                      </div>
+
+                      {/* Resumo do Histórico */}
+                      <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 shadow-sm space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-extrabold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <BookOpen className="w-3.5 h-3.5 text-blue-400" /> Resumo do Histórico (B.O.)
+                          </span>
+                          {incidentDescricaoFato && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-950 text-blue-300 font-mono border border-blue-800/60">
+                              Histórico
+                            </span>
+                          )}
+                        </div>
+                        <div className="p-2.5 bg-slate-900/80 rounded border border-slate-800 text-xs text-slate-300 leading-relaxed whitespace-pre-line max-h-52 overflow-y-auto pr-1">
+                          {incidentDescricaoFato
+                            ? incidentDescricaoFato
+                            : 'Sem resumo narrativo descritivo registrado no sistema para esta ocorrência.'}
+                        </div>
+                      </div>
+
+                      {/* Meios Empregados (Armas / Veículos) */}
+                      {(incidentArmas || incidentVeiculo) && (
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <span className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Armas:</span>
+                            <span className="text-slate-200 text-xs font-semibold block truncate">
+                              {incidentArmas || 'Não informada'}
+                            </span>
+                          </div>
+                          <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <span className="text-[10px] font-bold text-slate-400 block uppercase mb-1">Veículo:</span>
+                            <span className="text-slate-200 text-xs font-semibold block truncate">
+                              {incidentVeiculo || 'Não informado'}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Opção 2: Dados Gerais */
+                    <div className="space-y-3 pt-1">
+                      <div>
+                        <span className="text-xs font-semibold text-slate-400 block uppercase">Número do B.O.:</span>
+                        <span className="text-amber-400 font-mono font-bold text-sm">{incidentBoNumber}</span>
+                      </div>
+
+                      <div>
+                        <span className="text-xs font-semibold text-slate-400 block uppercase">Tipificação Penal:</span>
+                        <span className="text-slate-200 font-medium">{incidentTipificacao}</span>
+                      </div>
+
+                      <div>
+                        <span className="text-xs font-semibold text-slate-400 block uppercase">Data e Hora:</span>
+                        <span className="text-slate-300 text-xs">
+                          {incidentDataHora ? new Date(incidentDataHora).toLocaleString('pt-BR') : 'Não cadastrado'}
+                        </span>
+                      </div>
+
+                      {(incidentArmas || incidentVeiculo) && (
+                        <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                          <div>
+                            <span className="text-xs font-semibold text-slate-400 block uppercase">Armas:</span>
+                            <span className="text-slate-300 text-xs">{incidentArmas || 'Não informada'}</span>
+                          </div>
+                          <div>
+                            <span className="text-xs font-semibold text-slate-400 block uppercase">Veículo:</span>
+                            <span className="text-slate-300 text-xs">{incidentVeiculo || 'Não informado'}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Card de Atalho para Modus Operandi & Histórico */}
+                      <div className="mt-2 p-2.5 bg-slate-950 rounded-lg border border-amber-900/40 hover:border-amber-600/60 transition">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[11px] font-bold text-amber-400 uppercase flex items-center gap-1">
+                            <Crosshair className="w-3.5 h-3.5 text-amber-500" /> Modus Operandi / Histórico
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">Disponível</span>
+                        </div>
+                        <p className="text-xs text-slate-400 line-clamp-2 italic mb-2">
+                          {incidentModusOperandi || incidentDescricaoFato || 'Visualizar o modus operandi da ação e narrativa dos fatos.'}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setIncidentExposureMode('modus_operandi')}
+                          className="w-full py-1.5 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Exibir Modus Operandi / Resumo do Histórico ➔</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Infratores Envolvidos neste B.O. (comum para ambas as exposições) */}
+                  {connectedIncidentSuspects.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-slate-800">
+                      <span className="text-xs font-bold text-amber-400 uppercase block mb-2">
+                        Infratores Vinculados a este B.O. ({connectedIncidentSuspects.length}):
+                      </span>
+                      <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                        {connectedIncidentSuspects.map((item, idx) => {
+                          const sNode = item.suspectNode as PhysicsNode;
+                          return (
+                            <div
+                              key={idx}
+                              onClick={() => handleNodeClick(sNode)}
+                              className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded flex items-center justify-between gap-2 cursor-pointer transition"
+                            >
+                              <div className="flex items-center gap-2 overflow-hidden">
+                                {sNode.foto_url ? (
+                                  <img
+                                    src={sNode.foto_url}
+                                    alt={sNode.label}
+                                    className="w-6 h-6 rounded-full object-cover border border-slate-700 flex-shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-slate-300 text-[10px] flex-shrink-0">
+                                    <Users className="w-3 h-3" />
+                                  </div>
+                                )}
+                                <div className="truncate">
+                                  <p className="text-xs font-semibold text-slate-200 truncate">{sNode.label}</p>
+                                  <span className="text-[10px] text-amber-400 font-mono block">
+                                    {item.papel}
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="text-[10px] text-slate-400 hover:text-amber-300">Ver ➔</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
             <div className="mt-6 border-t border-slate-800 pt-4">
-              {selectedNode.type === 'suspect' && (
+              {selectedNode.type === 'suspect' ? (
                 <button
                   type="button"
                   onClick={() => openSuspectDossier(selectedNode.id, selectedNode)}
                   className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-xs flex items-center justify-center gap-1.5 transition uppercase shadow-lg shadow-amber-500/20 cursor-pointer"
                 >
                   <FileDown className="w-4 h-4 stroke-[2.5]" /> Extrair Ficha do Infrator em PDF
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopyModusOperandi(
+                      incidentBoNumber,
+                      incidentTipificacao,
+                      incidentModusOperandi,
+                      incidentDescricaoFato
+                    )
+                  }
+                  className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-900/60 font-bold rounded text-xs flex items-center justify-center gap-1.5 transition uppercase shadow-lg shadow-black/40 cursor-pointer"
+                >
+                  {copiedClipboard ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-400" />
+                      <span className="text-emerald-400">Modus Operandi & Histórico Copiados!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copiar Modus Operandi & Histórico</span>
+                    </>
+                  )}
                 </button>
               )}
             </div>

@@ -813,7 +813,12 @@ class CrimIntelDatabase {
         label: `${o.numero_bo} - ${o.tipificacao_penal}`,
         type: 'incident',
         tipificacao: o.tipificacao_penal,
-        data: o.data_hora
+        data: o.data_hora,
+        numero_bo: o.numero_bo,
+        modus_operandi: o.modus_operandi,
+        descricao_fato: o.descricao_fato,
+        armas_utilizadas: o.armas_utilizadas,
+        veiculo_utilizado: o.veiculo_utilizado
       });
     });
 

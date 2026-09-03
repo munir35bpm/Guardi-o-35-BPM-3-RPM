@@ -105,6 +105,11 @@ export interface NetworkNode {
   foto_url?: string;
   tipificacao?: string;
   data?: string;
+  numero_bo?: string;
+  modus_operandi?: string;
+  descricao_fato?: string;
+  armas_utilizadas?: string;
+  veiculo_utilizado?: string;
 }
 
 export interface NetworkEdge {
