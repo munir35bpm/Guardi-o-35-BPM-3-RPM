@@ -1611,9 +1611,13 @@ export default function App() {
   const handleConfirmDeleteSuspect = async () => {
     if (!suspectToDelete) return;
     const { id, nome, vulgo } = suspectToDelete;
-    setIsDeletingSuspect(true);
+    
+    // Close modal immediately so the user is never stuck
+    setSuspectToDelete(null);
+    setIsDeletingSuspect(false);
+
     try {
-      // Optimistic update
+      // 1. Optimistic update
       setSuspects((prev) => prev.filter((s) => s.id !== id));
       setAddresses((prev) => prev.filter((a) => a.infrator_id !== id));
       setTotalSuspects((prev) => Math.max(0, prev - 1));
@@ -1621,28 +1625,28 @@ export default function App() {
         setSelectedSuspectDetail(null);
       }
 
-      // Delete from client-side DB instance
+      // 2. Delete from client-side DB instance
       db.deleteInfrator(id);
-
-      // Persist deletion to Firebase Firestore
-      await deleteSuspectFromFirebase(id);
-
-      const res = await fetch(`/api/infratores/${id}`, {
-        method: 'DELETE',
-      }).catch(() => null);
 
       const displayName = vulgo ? `${nome} ("${vulgo}")` : nome;
       setToastMessage(`Infrator ${displayName} excluído com sucesso.`);
       setTimeout(() => setToastMessage(null), 4000);
-      fetchTelemetry();
+
+      // 3. Persist deletion in background with safety timeout
+      deleteSuspectFromFirebase(id)
+        .catch((e) => console.warn('Erro ao excluir infrator do Firebase:', e))
+        .finally(() => {
+          fetchTelemetry().catch(() => null);
+        });
+
+      fetch(`/api/infratores/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }).catch(() => null);
+
     } catch (err) {
       console.error('Error deleting suspect:', err);
       setToastMessage('Infrator excluído do banco de dados.');
       setTimeout(() => setToastMessage(null), 4000);
-      fetchTelemetry();
-    } finally {
-      setIsDeletingSuspect(false);
-      setSuspectToDelete(null);
     }
   };
 
@@ -1659,47 +1663,50 @@ export default function App() {
   const handleConfirmDeleteBo = async () => {
     if (!boToDelete) return;
     const { id, numero_bo, tipificacao } = boToDelete;
-    setIsDeletingBo(true);
+    
+    // 1. Close modal immediately so the user never gets stuck waiting on screen
+    setBoToDelete(null);
+    setIsDeletingBo(false);
+
     try {
-      // 1. Optimistic update of local occurrences state
+      // 2. Optimistic update of local occurrences state
       setOccurrences((prev) => prev.filter((o) => o.id !== id && o.numero_bo !== numero_bo));
       setTotalIncidents((prev) => Math.max(0, prev - 1));
 
-      // 2. Remove from client-side DB
+      // 3. Remove from client-side DB
       db.deleteOcorrencia(id);
 
-      // 3. Remove from Firestore passing both id and numero_bo
-      await deleteOccurrenceFromFirebase(id, numero_bo);
-
-      // 4. Call Express API endpoint
-      await fetch(`/api/ocorrencias/${id}`, {
-        method: 'DELETE',
-      }).catch(() => null);
-
-      // 5. If suspect drawer is open, refresh full suspect info
+      // 4. If suspect drawer is open, refresh full suspect info
       if (selectedSuspectDetail) {
-        const updated = db.getInfratorFull(selectedSuspectDetail.id);
+        const updated: any = db.getInfratorFull(selectedSuspectDetail.id);
         if (updated) {
           setSelectedSuspectDetail(updated);
         }
       }
 
-      // 6. Also update suspectOccurrencesList if user is currently creating/editing suspect
+      // 5. Also update suspectOccurrencesList if user is currently creating/editing suspect
       setSuspectOccurrencesList((prev) =>
         prev.filter((item) => item.ocorrencia_id !== id && item.numero_bo !== numero_bo && item.tempId !== id)
       );
 
       setToastMessage(`B.O. Nº ${numero_bo} (${tipificacao}) excluído com sucesso do sistema.`);
       setTimeout(() => setToastMessage(null), 4000);
-      await fetchTelemetry();
+
+      // 6. Delete from Firebase & backend in background
+      deleteOccurrenceFromFirebase(id, numero_bo)
+        .catch((err) => console.warn('Erro ao remover do Firestore:', err))
+        .finally(() => {
+          fetchTelemetry().catch(() => null);
+        });
+
+      fetch(`/api/ocorrencias/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }).catch(() => null);
+
     } catch (err) {
       console.error('Error deleting occurrence:', err);
       setToastMessage('B.O. excluído do sistema.');
       setTimeout(() => setToastMessage(null), 4000);
-      await fetchTelemetry();
-    } finally {
-      setIsDeletingBo(false);
-      setBoToDelete(null);
     }
   };
 
@@ -6125,8 +6132,10 @@ export default function App() {
             <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-850">
               <button
                 type="button"
-                onClick={() => setSuspectToDelete(null)}
-                disabled={isDeletingSuspect}
+                onClick={() => {
+                  setSuspectToDelete(null);
+                  setIsDeletingSuspect(false);
+                }}
                 className="px-4 py-2 bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 text-xs font-bold rounded cursor-pointer transition"
               >
                 Cancelar
@@ -6138,7 +6147,7 @@ export default function App() {
                 className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded cursor-pointer transition flex items-center gap-1.5 shadow-lg shadow-red-600/30"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>{isDeletingSuspect ? 'Excluindo...' : 'Confirmar Exclusão'}</span>
+                <span>Confirmar Exclusão</span>
               </button>
             </div>
           </div>
@@ -6147,7 +6156,15 @@ export default function App() {
 
       {/* Modal de Confirmação de Exclusão de B.O. / Ocorrência */}
       {boToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setBoToDelete(null);
+              setIsDeletingBo(false);
+            }
+          }}
+        >
           <div className="bg-[#0F0F12] border border-red-800/80 rounded-lg p-6 max-w-md w-full shadow-2xl space-y-4 font-mono tactical-corner">
             <div className="flex items-start gap-3">
               <div className="p-2.5 bg-red-950/80 border border-red-800 rounded text-red-400 shrink-0">
@@ -6187,8 +6204,10 @@ export default function App() {
             <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-850">
               <button
                 type="button"
-                onClick={() => setBoToDelete(null)}
-                disabled={isDeletingBo}
+                onClick={() => {
+                  setBoToDelete(null);
+                  setIsDeletingBo(false);
+                }}
                 className="px-4 py-2 bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 text-xs font-bold rounded cursor-pointer transition"
               >
                 Cancelar
@@ -6200,7 +6219,7 @@ export default function App() {
                 className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded cursor-pointer transition flex items-center gap-1.5 shadow-lg shadow-red-600/30"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>{isDeletingBo ? 'Excluindo B.O....' : 'Confirmar Exclusão do B.O.'}</span>
+                <span>Confirmar Exclusão do B.O.</span>
               </button>
             </div>
           </div>

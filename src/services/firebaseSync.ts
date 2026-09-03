@@ -543,19 +543,51 @@ export async function deleteOccurrenceFromFirebase(occurrenceId: string, numeroB
     const targetBo = numeroBo || oc?.numero_bo;
     const targetId = oc?.id || occurrenceId;
 
-    await removeOcorrencia(targetId, targetBo);
-    await removeInfratorOcorrenciasByOcorrencia(targetId, targetBo);
-
+    // 1. Instantly delete from local memory DB
     db.deleteOcorrencia(targetId);
 
-    // Update all suspects in Firestore that had this occurrence
-    const currentInfratores = db.infratores;
-    for (const inf of currentInfratores) {
-      const full = db.getInfratorFull(inf.id);
-      if (full) {
-        await persistSuspectToFirebase(full);
+    // 2. Perform Firestore cleanup with timeout protection so it never hangs
+    const firestoreCleanup = async () => {
+      // Remove occurrence document
+      await removeOcorrencia(targetId, targetBo).catch(() => null);
+      // Remove relation documents
+      await removeInfratorOcorrenciasByOcorrencia(targetId, targetBo).catch(() => null);
+
+      // Only update suspects that were actually linked to this occurrence
+      const currentInfratores = db.infratores;
+      const affectedSuspects = currentInfratores.filter((inf) => {
+        const ocs = (inf as any).ocorrencias;
+        return Array.isArray(ocs) && ocs.some(
+          (o: any) => o && (o.id === targetId || o.id === occurrenceId || (targetBo && o.numero_bo === targetBo))
+        );
+      });
+
+      for (const inf of affectedSuspects) {
+        const full = db.getInfratorFull(inf.id);
+        if (full) {
+          await saveInfrator({
+            id: full.id,
+            nome_completo: full.nome_completo,
+            vulgo: full.vulgo,
+            foto_url: full.foto_url,
+            galeria_fotos: full.galeria_fotos || [],
+            gangue_faccao: full.gangue_faccao,
+            status_mandado_prisao: !!full.status_mandado_prisao,
+            situacao_atual: full.situacao_atual || full.situacao_prisional,
+            situacao_prisional: full.situacao_atual || full.situacao_prisional,
+            periculosidade: full.periculosidade,
+            created_at: full.created_at,
+            ocorrencias: full.ocorrencias || [],
+            fisicas: full.fisicas,
+          } as any).catch(() => null);
+        }
       }
-    }
+    };
+
+    await Promise.race([
+      firestoreCleanup(),
+      new Promise<void>((resolve) => setTimeout(resolve, 4000)),
+    ]);
   } catch (err) {
     console.error('Erro ao excluir ocorrência do Firestore:', err);
   }

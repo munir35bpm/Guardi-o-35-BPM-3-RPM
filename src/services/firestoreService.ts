@@ -71,7 +71,7 @@ export async function fetchInfratores(): Promise<Infrator[]> {
   }
 }
 
-export async function saveInfrator(infrator: Infrator): Promise<void> {
+export async function saveInfrator(infrator: Infrator | (Partial<Infrator> & { id: string; [key: string]: any })): Promise<void> {
   const docRef = doc(firestore, COLLECTIONS.INFRATORES, infrator.id);
   const sanitized = sanitizeForFirestore(infrator);
   await setDoc(docRef, sanitized, { merge: true });
@@ -242,15 +242,21 @@ export async function removeInfratorOcorrencia(
 export async function removeInfratorOcorrenciasByInfrator(infrator_id: string): Promise<void> {
   try {
     const colRef = collection(firestore, COLLECTIONS.VINCULOS_CRIMES);
-    const snapshot = await getDocs(colRef);
-    const promises: Promise<void>[] = [];
-    snapshot.forEach((docSnap) => {
-      const d = docSnap.data() as InfratorOcorrencia;
-      if (d.infrator_id === infrator_id) {
-        promises.push(deleteDoc(doc(firestore, COLLECTIONS.VINCULOS_CRIMES, docSnap.id)));
-      }
-    });
-    await Promise.all(promises);
+    const getDocsPromise = getDocs(colRef).catch(() => null);
+    const snapshot = await Promise.race([
+      getDocsPromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))
+    ]);
+    if (snapshot) {
+      const promises: Promise<void>[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data() as InfratorOcorrencia;
+        if (d.infrator_id === infrator_id) {
+          promises.push(deleteDoc(doc(firestore, COLLECTIONS.VINCULOS_CRIMES, docSnap.id)).catch(() => {}));
+        }
+      });
+      await Promise.all(promises);
+    }
   } catch (err) {
     console.warn('Erro ao remover vínculos do infrator:', err);
   }
@@ -262,20 +268,26 @@ export async function removeInfratorOcorrenciasByOcorrencia(
 ): Promise<void> {
   try {
     const colRef = collection(firestore, COLLECTIONS.VINCULOS_CRIMES);
-    const snapshot = await getDocs(colRef);
-    const promises: Promise<void>[] = [];
-    snapshot.forEach((docSnap) => {
-      const d = docSnap.data() as InfratorOcorrencia;
-      if (
-        d.ocorrencia_id === ocorrencia_id ||
-        (numero_bo && d.ocorrencia_id === numero_bo) ||
-        (docSnap.id && docSnap.id.endsWith(`_${ocorrencia_id}`)) ||
-        (numero_bo && docSnap.id && docSnap.id.endsWith(`_${numero_bo}`))
-      ) {
-        promises.push(deleteDoc(doc(firestore, COLLECTIONS.VINCULOS_CRIMES, docSnap.id)));
-      }
-    });
-    await Promise.all(promises);
+    const getDocsPromise = getDocs(colRef).catch(() => null);
+    const snapshot = await Promise.race([
+      getDocsPromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))
+    ]);
+    if (snapshot) {
+      const promises: Promise<void>[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data() as InfratorOcorrencia;
+        if (
+          d.ocorrencia_id === ocorrencia_id ||
+          (numero_bo && d.ocorrencia_id === numero_bo) ||
+          (docSnap.id && docSnap.id.endsWith(`_${ocorrencia_id}`)) ||
+          (numero_bo && docSnap.id && docSnap.id.endsWith(`_${numero_bo}`))
+        ) {
+          promises.push(deleteDoc(doc(firestore, COLLECTIONS.VINCULOS_CRIMES, docSnap.id)).catch(() => {}));
+        }
+      });
+      await Promise.all(promises);
+    }
   } catch (err) {
     console.warn('Erro ao remover vínculos da ocorrência:', err);
   }
