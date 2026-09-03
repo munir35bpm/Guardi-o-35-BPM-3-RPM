@@ -22,11 +22,13 @@ import {
   Map as MapIcon,
   Globe,
   Radio,
+  X,
 } from 'lucide-react';
 import { db } from '../backend/db';
 import GangMapImporterModal from './GangMapImporterModal';
 import { isPointInPolygon, DEFAULT_GANG_AREAS_35BPM } from '../utils/kmlGeoJsonParser';
 import { persistGangAreasToFirebase } from '../services/firebaseSync';
+import { getGangIntelligenceDetails } from '../utils/gangIntelligence';
 
 // Base map layer providers (100% free, no API key required)
 export type BaseMapStyle = 'tactical_dark' | 'satellite' | 'street' | 'esri_streets';
@@ -67,6 +69,10 @@ interface TacticalMapProps {
   suspectsList?: Infrator[];
   refreshTrigger?: number;
   onRefresh?: () => void;
+  selectedGangZone?: GangAreaZone | null;
+  onSelectGangZone?: (zone: GangAreaZone | null) => void;
+  gangAreasProp?: GangAreaZone[];
+  onGangAreasChange?: (areas: GangAreaZone[]) => void;
 }
 
 // Helper to compute centroid of polygon coordinates for tactical label placement
@@ -144,6 +150,10 @@ export default function TacticalMap({
   suspectsList,
   refreshTrigger,
   onRefresh,
+  selectedGangZone = null,
+  onSelectGangZone,
+  gangAreasProp,
+  onGangAreasChange,
 }: TacticalMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -152,7 +162,7 @@ export default function TacticalMap({
 
   const [occurrences, setOccurrences] = useState<OcorrenciaCriminal[]>(occurrencesList || []);
   const [addresses, setAddresses] = useState<EnderecoAtuacao[]>(addressesList || []);
-  const [gangAreas, setGangAreas] = useState<GangAreaZone[]>([]);
+  const [gangAreas, setGangAreas] = useState<GangAreaZone[]>(gangAreasProp && gangAreasProp.length > 0 ? gangAreasProp : []);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -194,6 +204,20 @@ export default function TacticalMap({
       setAddresses(deduplicateAddressList(filtered));
     }
   }, [addressesList, suspectsList]);
+
+  // Sync with incoming gang areas prop
+  useEffect(() => {
+    if (gangAreasProp && gangAreasProp.length > 0) {
+      setGangAreas(gangAreasProp);
+    }
+  }, [gangAreasProp]);
+
+  // Auto-focus map on selected gang territory when selected
+  useEffect(() => {
+    if (selectedGangZone && mapRef.current && selectedGangZone.coordinates && selectedGangZone.coordinates.length > 0) {
+      flyToZone(selectedGangZone);
+    }
+  }, [selectedGangZone]);
 
   const fetchMapData = async () => {
     try {
@@ -283,6 +307,7 @@ export default function TacticalMap({
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setGangAreas(parsed);
+          if (onGangAreasChange) onGangAreasChange(parsed);
           return;
         }
       }
@@ -290,10 +315,12 @@ export default function TacticalMap({
       console.error('Falha ao ler gang areas do localStorage:', e);
     }
     setGangAreas(DEFAULT_GANG_AREAS_35BPM);
+    if (onGangAreasChange) onGangAreasChange(DEFAULT_GANG_AREAS_35BPM);
   };
 
   const saveGangAreas = async (newAreas: GangAreaZone[], replaceAll = true) => {
     setGangAreas(newAreas);
+    if (onGangAreasChange) onGangAreasChange(newAreas);
     try {
       localStorage.setItem('tactical_gang_areas_v1', JSON.stringify(newAreas));
       // Save to Firebase Firestore
@@ -416,6 +443,9 @@ export default function TacticalMap({
 
     gangAreas.forEach((zone) => {
       if (!zone.visible) return;
+
+      // Clean map filter: if a gang is selected, show ONLY that gang!
+      if (selectedGangZone && zone.id !== selectedGangZone.id) return;
 
       const color = zone.color || '#ef4444';
       const opacity = zone.fillOpacity !== undefined ? zone.fillOpacity : 0.35;
@@ -580,6 +610,12 @@ export default function TacticalMap({
 
         polygon.bindPopup(popupContent);
 
+        polygon.on('click', () => {
+          if (onSelectGangZone) {
+            onSelectGangZone(zone);
+          }
+        });
+
         // Hover high-contrast effect & HUD update
         polygon.on('mouseover', () => {
           polygon.setStyle({
@@ -642,6 +678,9 @@ export default function TacticalMap({
 
           const labelMarker = L.marker(centroid, { icon: labelIcon, interactive: true });
           labelMarker.on('click', () => {
+            if (onSelectGangZone) {
+              onSelectGangZone(zone);
+            }
             polygon.openPopup();
           });
           labelMarker.on('mouseover', () => {
@@ -667,6 +706,9 @@ export default function TacticalMap({
           interactive: true,
         });
         polyline.bindTooltip(tooltipHTML, { sticky: true, className: 'tactical-map-tooltip', opacity: 1, direction: 'top' });
+        polyline.on('click', () => {
+          if (onSelectGangZone) onSelectGangZone(zone);
+        });
         polyline.on('mouseover', () => {
           polyline.setStyle({ weight: strokeW + 2, opacity: 1 });
           setActiveZoneHover(zone);
@@ -691,12 +733,27 @@ export default function TacticalMap({
         });
         const ptMarker = L.marker(pt, { icon: ptIcon, interactive: true });
         ptMarker.bindTooltip(tooltipHTML, { sticky: true, className: 'tactical-map-tooltip', opacity: 1, direction: 'top' });
+        ptMarker.on('click', () => {
+          if (onSelectGangZone) onSelectGangZone(zone);
+        });
         ptMarker.on('mouseover', () => setActiveZoneHover(zone));
         ptMarker.on('mouseout', () => setActiveZoneHover(null));
         gangLayersGroupRef.current?.addLayer(ptMarker);
       }
     });
-  }, [gangAreas, showAllGangLayers, showGangLabels, addresses, occurrences]);
+
+    // Clean mode auto-zoom: When a gang is selected, focus map directly on its territory
+    if (selectedGangZone && selectedGangZone.coordinates && selectedGangZone.coordinates.length > 0) {
+      try {
+        const gangBounds = L.latLngBounds(selectedGangZone.coordinates);
+        if (gangBounds.isValid()) {
+          mapRef.current.flyToBounds(gangBounds, { padding: [50, 50], maxZoom: 16, duration: 0.8 });
+        }
+      } catch (err) {
+        console.warn('Falha ao focar limites da gangue selecionada:', err);
+      }
+    }
+  }, [gangAreas, showAllGangLayers, showGangLabels, addresses, occurrences, selectedGangZone]);
 
   // Redraw Suspect Addresses & Crime Occurrences
   useEffect(() => {
@@ -709,9 +766,29 @@ export default function TacticalMap({
 
     // 1. Draw Suspect Addresses with influence buffer circles (if enabled)
     if (showAddressesLayer) {
-      const validAddresses = addresses.filter(
+      let validAddresses = addresses.filter(
         (addr) => addr.infrator_id && validSuspectIds.has(addr.infrator_id)
       );
+
+      // Clean map filter: if a gang is selected, display ONLY addresses associated with that gang
+      if (selectedGangZone) {
+        const intel = getGangIntelligenceDetails(selectedGangZone, activeSuspects, addresses, occurrences);
+        const gangAddrIds = new Set(
+          intel.residencias.map(
+            (a) => a.id || `${a.infrator_id}-${a.logradouro}-${a.geom_ponto?.lat?.toFixed(4)}`
+          )
+        );
+        validAddresses = validAddresses.filter(
+          (a) =>
+            gangAddrIds.has(a.id || `${a.infrator_id}-${a.logradouro}-${a.geom_ponto?.lat?.toFixed(4)}`) ||
+            intel.residencias.some(
+              (r) =>
+                r.infrator_id === a.infrator_id &&
+                r.geom_ponto?.lat === a.geom_ponto?.lat &&
+                r.geom_ponto?.lng === a.geom_ponto?.lng
+            )
+        );
+      }
 
       validAddresses.forEach((addr) => {
       const isHighlighted = highlightedSuspectId === addr.infrator_id;
@@ -799,7 +876,18 @@ export default function TacticalMap({
 
     // 2. Draw Crime Occurrences with Beacons (if enabled)
     if (showOccurrencesLayer) {
-      occurrences.forEach((oc) => {
+      let validOccurrences = occurrences;
+
+      // Clean map filter: if a gang is selected, display ONLY crime occurrences tied to that gang
+      if (selectedGangZone) {
+        const intel = getGangIntelligenceDetails(selectedGangZone, activeSuspects, addresses, occurrences);
+        const gangOcIds = new Set(intel.ocorrencias.map((o) => o.id || o.numero_bo));
+        validOccurrences = validOccurrences.filter(
+          (o) => gangOcIds.has(o.id || o.numero_bo) || intel.ocorrencias.includes(o)
+        );
+      }
+
+      validOccurrences.forEach((oc) => {
       const lat = oc.geom_crime?.lat;
       const lng = oc.geom_crime?.lng;
 
@@ -1040,6 +1128,7 @@ export default function TacticalMap({
     showOccurrencesLayer,
     suspectsList,
     refreshTrigger,
+    selectedGangZone,
   ]);
 
   // Update selection indicator marker
@@ -1171,6 +1260,41 @@ export default function TacticalMap({
               35º BPM
             </button>
           </div>
+
+          {/* Selected Gang Filter Focus Indicator (Clean Mode) */}
+          {selectedGangZone && (
+            <div
+              className="bg-slate-950/95 backdrop-blur-md border px-3 py-1.5 rounded-md shadow-2xl flex items-center gap-2.5 font-mono animate-fade-in pointer-events-auto"
+              style={{ borderColor: selectedGangZone.color || '#f59e0b' }}
+            >
+              <div
+                className="w-3 h-3 rounded-full animate-pulse shadow-md"
+                style={{ backgroundColor: selectedGangZone.color || '#f59e0b' }}
+              />
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Gangue:</span>
+                  <span
+                    className="text-[11px] font-extrabold uppercase tracking-wider truncate max-w-[140px] md:max-w-[200px]"
+                    style={{ color: selectedGangZone.color || '#f59e0b' }}
+                  >
+                    {selectedGangZone.gangName || selectedGangZone.name}
+                  </span>
+                </div>
+                <span className="text-[9px] text-emerald-400 block font-semibold">
+                  Modo Clean Ativo
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onSelectGangZone && onSelectGangZone(null)}
+                className="ml-1 p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded border border-slate-700 transition cursor-pointer"
+                title="Limpar filtro e exibir todas as gangues"
+              >
+                <X className="w-3.5 h-3.5 text-rose-400" />
+              </button>
+            </div>
+          )}
 
           {/* Active Hover Gang Zone HUD Badge */}
           {activeZoneHover && (

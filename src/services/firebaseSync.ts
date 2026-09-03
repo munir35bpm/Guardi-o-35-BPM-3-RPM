@@ -32,6 +32,7 @@ import {
   SuspectWithDetails,
   InfratorOcorrencia
 } from '../types';
+import { DEFAULT_GANG_AREAS_35BPM } from '../utils/kmlGeoJsonParser';
 
 /**
  * Helper to deduplicate addresses and return unique list plus redundant IDs to clean up in Firestore
@@ -93,9 +94,6 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
       db.caracteristicas_fisicas = infratores
         .filter((i: any) => i.fisicas)
         .map((i: any) => i.fisicas);
-    } else {
-      db.infratores = [];
-      db.caracteristicas_fisicas = [];
     }
 
     // Filter and clean orphaned addresses (addresses for suspects that were deleted)
@@ -191,6 +189,8 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
     }
     if (gangAreas.length > 0) {
       db.gang_areas = gangAreas;
+    } else if (db.gang_areas.length === 0) {
+      db.gang_areas = DEFAULT_GANG_AREAS_35BPM;
     }
 
     if (onDataChange) {

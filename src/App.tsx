@@ -48,6 +48,7 @@ import {
   Edit3
 } from 'lucide-react';
 import TacticalMap from './components/TacticalMap';
+import { TacticalGangSidebar } from './components/TacticalGangSidebar';
 import NetworkGraph from './components/NetworkGraph';
 import Logo35BPM from './components/Logo35BPM';
 import { OrcrimWindow } from './components/OrcrimWindow';
@@ -62,8 +63,10 @@ import {
   IntelligenceAnalysisResult,
   OcorrenciaProcessada,
   CruzamentoSuspeito,
-  AlertaReincidenciaPerimetro
+  AlertaReincidenciaPerimetro,
+  GangAreaZone,
 } from './types';
+import { DEFAULT_GANG_AREAS_35BPM } from './utils/kmlGeoJsonParser';
 import { db } from './backend/db';
 import { openSuspectDossier } from './utils/dossierGenerator';
 import { analyzeCrimeIntelligenceLocally } from './utils/intelligenceEngine';
@@ -89,6 +92,8 @@ export default function App() {
   const [suspects, setSuspects] = useState<any[]>([]);
   const [occurrences, setOccurrences] = useState<OcorrenciaCriminal[]>([]);
   const [addresses, setAddresses] = useState<EnderecoAtuacao[]>([]);
+  const [gangAreas, setGangAreas] = useState<GangAreaZone[]>([]);
+  const [selectedGangZone, setSelectedGangZone] = useState<GangAreaZone | null>(null);
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>({
     lat: -19.7712,
     lng: -43.8564, // Santa Luzia / 35º BPM default coordinates
@@ -365,7 +370,53 @@ export default function App() {
   });
 
   // Fetch core telemetry lists
+  const loadGangAreasState = async () => {
+    try {
+      const resGang = await fetch('/api/gang-areas').catch(() => null);
+      if (resGang && resGang.ok) {
+        const dataGang = await resGang.json();
+        if (Array.isArray(dataGang) && dataGang.length > 0) {
+          setGangAreas(dataGang);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    try {
+      const saved = localStorage.getItem('tactical_gang_areas_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setGangAreas(parsed);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    setGangAreas(DEFAULT_GANG_AREAS_35BPM);
+  };
+
+  const syncStateFromDatabase = () => {
+    const listS = db.infratores;
+    const listO = db.ocorrencias_criminais;
+    const listA = db.enderecos_atuacao;
+    const { unique: uniqueA } = deduplicateAddresses(listA);
+
+    setSuspects([...listS]);
+    setOccurrences([...listO]);
+    setAddresses(uniqueA);
+
+    if (db.gang_areas && db.gang_areas.length > 0) {
+      setGangAreas([...db.gang_areas]);
+    }
+
+    setTotalSuspects(listS.length);
+    setActiveWarrants(listS.filter((s: any) => s.status_mandado_prisao).length);
+    setTotalIncidents(listO.length);
+  };
+
   const fetchTelemetry = async () => {
+    loadGangAreasState();
     try {
       const [resS, resO, resA] = await Promise.all([
         fetch('/api/infratores').catch(() => null),
@@ -378,41 +429,34 @@ export default function App() {
         const listO = await resO.json();
         const listA = await resA.json();
 
-        const { unique: uniqueA } = deduplicateAddresses(listA);
+        if (Array.isArray(listS) && listS.length > 0) {
+          db.infratores = listS;
+          const { unique: uniqueA } = deduplicateAddresses(listA);
+          db.enderecos_atuacao = uniqueA;
+          db.ocorrencias_criminais = listO;
 
-        setSuspects(listS);
-        setOccurrences(listO);
-        setAddresses(uniqueA);
+          setSuspects(listS);
+          setOccurrences(listO);
+          setAddresses(uniqueA);
 
-        // Stats calculation
-        setTotalSuspects(listS.length);
-        setActiveWarrants(listS.filter((s: any) => s.status_mandado_prisao).length);
-        setTotalIncidents(listO.length);
-        return;
+          setTotalSuspects(listS.length);
+          setActiveWarrants(listS.filter((s: any) => s.status_mandado_prisao).length);
+          setTotalIncidents(listO.length);
+          return;
+        }
       }
     } catch (err) {
       console.warn('API backend indisponível, inicializando dados locais de inteligência:', err);
     }
 
-    // Static fallback for GitHub Pages / client-side execution
-    const listS = db.infratores;
-    const listO = db.ocorrencias_criminais;
-    const listA = db.enderecos_atuacao;
-    const { unique: uniqueA } = deduplicateAddresses(listA);
-
-    setSuspects([...listS]);
-    setOccurrences([...listO]);
-    setAddresses(uniqueA);
-
-    setTotalSuspects(listS.length);
-    setActiveWarrants(listS.filter((s: any) => s.status_mandado_prisao).length);
-    setTotalIncidents(listO.length);
+    // Static fallback for client-side execution / in-memory database
+    syncStateFromDatabase();
   };
 
   useEffect(() => {
     fetchTelemetry();
     initFirebaseSync(() => {
-      fetchTelemetry();
+      syncStateFromDatabase();
     });
   }, []);
 
@@ -2288,141 +2332,59 @@ export default function App() {
                   addressesList={addresses}
                   suspectsList={suspects}
                   onRefresh={fetchTelemetry}
+                  selectedGangZone={selectedGangZone}
+                  onSelectGangZone={setSelectedGangZone}
+                  gangAreasProp={gangAreas}
+                  onGangAreasChange={setGangAreas}
                 />
               </div>
 
-              {/* Sidebar Quick-Action Menu */}
-              <div className="bg-[#0F0F12] border border-zinc-800 rounded p-5 flex flex-col justify-between shadow-2xl tactical-corner">
-                <div>
-                  <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5 mb-4">
-                    <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest font-mono flex items-center gap-1.5">
-                      <Crosshair className="w-3.5 h-3.5 text-amber-500" />
-                      Painel Operacional // Alvo
-                    </h3>
-                    <span className="text-[9px] font-mono bg-zinc-800/80 px-1.5 py-0.5 rounded text-zinc-400">
-                      SYS:READY
-                    </span>
-                  </div>
-
-                  {selectedCoords ? (
-                    <div className="space-y-4">
-                      {/* Show active coordinate focus */}
-                      <div className="bg-[#0A0A0B] p-3 rounded border border-zinc-800/90 font-mono">
-                        <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block">
-                          COORDENADAS EM FOCO [WGS84]
-                        </span>
-                        <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between">
-                          <span className="flex items-center gap-1.5">
-                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                            LAT: {selectedCoords.lat.toFixed(6)}
-                          </span>
-                          <span className="text-zinc-400">|</span>
-                          <span>LNG: {selectedCoords.lng.toFixed(6)}</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <button
-                          onClick={() => {
-                            setActiveTab('ai');
-                            handleMatchSuspects();
-                          }}
-                          className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black rounded text-xs transition uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 font-mono border border-amber-300/40 cursor-pointer"
-                        >
-                          <BrainCircuit className="w-4 h-4" /> Executar Varredura IA
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            setNewIncidentForm((prev) => ({
-                              ...prev,
-                              lat: selectedCoords.lat.toString(),
-                              lng: selectedCoords.lng.toString(),
-                            }));
-                            setIsAddingOccurrence(true);
-                            setActiveTab('db');
-                          }}
-                          className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700 text-xs font-mono font-bold rounded transition flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          <PlusCircle className="w-3.5 h-3.5 text-cyan-400" /> Registrar Ocorrência Aqui
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            setNewAddressForm((prev) => ({
-                              ...prev,
-                              lat: selectedCoords.lat.toString(),
-                              lng: selectedCoords.lng.toString(),
-                            }));
-                            setIsAddingAddress(true);
-                            setActiveTab('db');
-                          }}
-                          className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700 text-xs font-mono font-bold rounded transition flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          <MapPin className="w-3.5 h-3.5 text-amber-400" /> Registrar Área de Atuação
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center p-6 bg-[#0A0A0B] rounded border border-zinc-800 font-mono">
-                      <p className="text-zinc-500 text-xs">
-                        Clique em qualquer ponto do mapa tático para travar mira e habilitar ações de inteligência geográfica.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Highlights of active warrants listed in the area */}
-                  <div className="mt-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest font-mono">
-                        Perfis com Mandados Ativos ({suspects.filter((s) => s.status_mandado_prisao).length})
-                      </h4>
-                      <span className="text-[9px] font-mono text-red-400 bg-red-950/40 px-1 py-0.5 border border-red-900/40 rounded">
-                        ALERTA VERMELHO
-                      </span>
-                    </div>
-                    <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1 font-mono">
-                      {suspects
-                        .filter((s) => s.status_mandado_prisao)
-                        .map((s) => (
-                          <div
-                            key={s.id}
-                            onClick={() => {
-                              setHighlightedSuspectId(s.id);
-                              // focus coord
-                              const primaryAddr = s.enderecos?.[0] || addresses.find((a) => a.infrator_id === s.id);
-                              if (primaryAddr) {
-                                setSelectedCoords({
-                                  lat: primaryAddr.geom_ponto.lat,
-                                  lng: primaryAddr.geom_ponto.lng,
-                                });
-                              }
-                            }}
-                            className={`p-2 rounded border text-xs cursor-pointer flex items-center justify-between transition ${
-                              highlightedSuspectId === s.id
-                                ? 'bg-amber-950/40 border-amber-500/80 shadow-md'
-                                : 'bg-[#0A0A0B] border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900/40'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <img src={s.foto_url} alt={s.vulgo} className="w-7 h-7 rounded object-cover border border-zinc-700" />
-                              <div>
-                                <span className="font-bold text-zinc-200 block text-xs">{s.nome_completo}</span>
-                                <span className="text-[10px] text-amber-400/90 block">"{s.vulgo}" // {s.gangue_faccao}</span>
-                              </div>
-                            </div>
-                            <span className="text-[9px] bg-red-950/80 text-red-400 px-1.5 py-0.5 rounded font-bold border border-red-900 uppercase">
-                              M.P. ATIVO
-                            </span>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="text-[10px] text-zinc-500 border-t border-zinc-800/80 pt-3 mt-4 leading-relaxed font-mono">
-                  *As áreas de influência representadas pelos círculos tracejados delimitam o raio espacial de atuação de cada investigado.
-                </div>
+              {/* Sidebar: Tactical Gangs & Intelligence Details */}
+              <div className="h-[740px] xl:h-[840px] flex flex-col">
+                <TacticalGangSidebar
+                  gangAreas={gangAreas}
+                  selectedGangZone={selectedGangZone}
+                  onSelectGangZone={setSelectedGangZone}
+                  suspects={suspects}
+                  addresses={addresses}
+                  occurrences={occurrences}
+                  onFocusCoordinates={(coords) => {
+                    handleMapCoordinatePick(coords);
+                  }}
+                  onViewSuspectDetail={(suspect) => {
+                    setHighlightedSuspectId(suspect.id);
+                    openSuspectDossier(suspect.id, suspect);
+                  }}
+                  onRunAiSweep={(zone) => {
+                    if (zone) {
+                      setSelectedGangZone(zone);
+                    }
+                    setActiveTab('ai');
+                    handleMatchSuspects();
+                  }}
+                  onRegisterOccurrence={(coords) => {
+                    if (coords) {
+                      setNewIncidentForm((prev) => ({
+                        ...prev,
+                        lat: coords.lat.toString(),
+                        lng: coords.lng.toString(),
+                      }));
+                    }
+                    setIsAddingOccurrence(true);
+                    setActiveTab('db');
+                  }}
+                  onRegisterAddress={(coords) => {
+                    if (coords) {
+                      setNewAddressForm((prev) => ({
+                        ...prev,
+                        lat: coords.lat.toString(),
+                        lng: coords.lng.toString(),
+                      }));
+                    }
+                    setIsAddingAddress(true);
+                    setActiveTab('db');
+                  }}
+                />
               </div>
             </motion.div>
           )}

@@ -5,6 +5,22 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { db } from './src/backend/db.js';
 import { analyzeCrimeIntelligenceLocally } from './src/utils/intelligenceEngine.js';
 import { analyzeFacialRecognitionLocally } from './src/utils/facialForensicsEngine.js';
+import {
+  ensureServerDataLoaded,
+  saveDatabaseToDiskCache,
+  syncServerWithFirestore,
+} from './src/backend/serverPersistence.js';
+import {
+  saveInfrator,
+  removeInfrator,
+  saveEndereco,
+  removeEndereco,
+  saveOcorrencia,
+  removeOcorrencia,
+  saveGangArea,
+  saveGangAreasBatch,
+  removeGangArea,
+} from './src/services/firestoreService.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -65,8 +81,9 @@ function getGeminiClient(): GoogleGenAI {
 // ==========================================
 
 // 1. Infratores (Suspects) CRUD
-app.get('/api/infratores', (req, res) => {
+app.get('/api/infratores', async (req, res) => {
   try {
+    await ensureServerDataLoaded();
     const list = db.infratores.map(i => {
       const fisicas = db.caracteristicas_fisicas.find(cf => cf.infrator_id === i.id);
       return { ...i, fisicas };
@@ -77,8 +94,9 @@ app.get('/api/infratores', (req, res) => {
   }
 });
 
-app.get('/api/infratores/:id', (req, res) => {
+app.get('/api/infratores/:id', async (req, res) => {
   try {
+    await ensureServerDataLoaded();
     const infrator = db.getInfratorFull(req.params.id);
     if (!infrator) {
       res.status(404).json({ error: 'Infrator não encontrado.' });
@@ -248,7 +266,12 @@ app.post('/api/infratores', (req, res) => {
       }
     }
 
-    res.status(201).json(db.getInfratorFull(id));
+    const created = db.getInfratorFull(id);
+    saveDatabaseToDiskCache();
+    if (created) {
+      saveInfrator(created).catch(() => null);
+    }
+    res.status(201).json(created);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -435,7 +458,12 @@ app.put('/api/infratores/:id', (req, res) => {
       }
     }
 
-    res.json(db.getInfratorFull(id));
+    const updatedFull = db.getInfratorFull(id);
+    saveDatabaseToDiskCache();
+    if (updatedFull) {
+      saveInfrator(updatedFull).catch(() => null);
+    }
+    res.json(updatedFull);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -455,6 +483,8 @@ app.post('/api/infratores/:id/fotos', (req, res) => {
       res.status(404).json({ error: 'Infrator não encontrado.' });
       return;
     }
+    saveDatabaseToDiskCache();
+    saveInfrator(updated).catch(() => null);
     res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -469,6 +499,8 @@ app.put('/api/infratores/:id/fotos/:foto_id/principal', (req, res) => {
       res.status(404).json({ error: 'Infrator ou foto não encontrada.' });
       return;
     }
+    saveDatabaseToDiskCache();
+    saveInfrator(updated).catch(() => null);
     res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -483,6 +515,8 @@ app.delete('/api/infratores/:id/fotos/:foto_id', (req, res) => {
       res.status(404).json({ error: 'Infrator não encontrado.' });
       return;
     }
+    saveDatabaseToDiskCache();
+    saveInfrator(updated).catch(() => null);
     res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -501,6 +535,8 @@ app.delete('/api/infratores/:id', (req, res) => {
     // Explicitly guarantee all addresses and links for this suspect are removed from memory
     db.enderecos_atuacao = db.enderecos_atuacao.filter(ea => ea.infrator_id !== id);
     db.infrator_ocorrencia = db.infrator_ocorrencia.filter(io => io.infrator_id !== id);
+    saveDatabaseToDiskCache();
+    removeInfrator(id).catch(() => null);
     res.json({ success: true, message: 'Infrator, ocorrências vinculadas e endereços excluídos com sucesso.' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -508,8 +544,9 @@ app.delete('/api/infratores/:id', (req, res) => {
 });
 
 // 2. Ocorrências (Criminal Incidents) CRUD
-app.get('/api/ocorrencias', (req, res) => {
+app.get('/api/ocorrencias', async (req, res) => {
   try {
+    await ensureServerDataLoaded();
     const list = db.ocorrencias_criminais.map(o => {
       const envolvidos = db.infrator_ocorrencia
         .filter(io => io.ocorrencia_id === o.id)
@@ -570,6 +607,8 @@ app.post('/api/ocorrencias', (req, res) => {
       }
     }
 
+    saveDatabaseToDiskCache();
+    saveOcorrencia(newOcorrencia).catch(() => null);
     res.status(201).json(newOcorrencia);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -584,6 +623,8 @@ app.delete('/api/ocorrencias/:id', (req, res) => {
       res.status(404).json({ error: 'Ocorrência (B.O.) não encontrada.' });
       return;
     }
+    saveDatabaseToDiskCache();
+    removeOcorrencia(id).catch(() => null);
     res.json({ success: true, message: 'Ocorrência (B.O.) excluída com sucesso.' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -591,8 +632,9 @@ app.delete('/api/ocorrencias/:id', (req, res) => {
 });
 
 // 3. Endereços de Atuação (Operational Addresses) CRUD
-app.get('/api/enderecos', (req, res) => {
+app.get('/api/enderecos', async (req, res) => {
   try {
+    await ensureServerDataLoaded();
     const validSuspectIds = new Set(db.infratores.map(i => i.id));
     // Filter and prune orphaned addresses of deleted suspects
     db.enderecos_atuacao = db.enderecos_atuacao.filter(
@@ -649,6 +691,8 @@ app.post('/api/enderecos', (req, res) => {
     };
 
     db.enderecos_atuacao.push(newEndereco);
+    saveDatabaseToDiskCache();
+    saveEndereco(newEndereco).catch(() => null);
     res.status(201).json(newEndereco);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -664,6 +708,8 @@ app.delete('/api/enderecos/:id', (req, res) => {
       res.status(404).json({ error: 'Endereço não encontrado.' });
       return;
     }
+    saveDatabaseToDiskCache();
+    removeEndereco(id).catch(() => null);
     res.json({ success: true, message: 'Endereço excluído com sucesso.' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -674,8 +720,9 @@ app.delete('/api/enderecos/:id', (req, res) => {
 // GANG AREAS / TERRITORIAL MAPS (KML, KMZ, GEOJSON)
 // ==========================================
 
-app.get('/api/gang-areas', (req, res) => {
+app.get('/api/gang-areas', async (req, res) => {
   try {
+    await ensureServerDataLoaded();
     res.json(db.getGangAreas());
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -695,6 +742,8 @@ app.post('/api/gang-areas', (req, res) => {
       visible: zone.visible !== undefined ? zone.visible : true,
     };
     db.addGangArea(newZone);
+    saveDatabaseToDiskCache();
+    saveGangArea(newZone).catch(() => null);
     res.status(201).json(newZone);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -720,6 +769,9 @@ app.post('/api/gang-areas/import', (req, res) => {
       }
     }
 
+    saveDatabaseToDiskCache();
+    saveGangAreasBatch(zones, replaceAll).catch(() => null);
+
     res.json({
       success: true,
       message: `${zones.length} área(s) de gangues importadas com sucesso.`,
@@ -741,6 +793,8 @@ app.put('/api/gang-areas/:id', (req, res) => {
       return;
     }
     db.gang_areas[idx] = { ...db.gang_areas[idx], ...updates };
+    saveDatabaseToDiskCache();
+    saveGangArea(db.gang_areas[idx]).catch(() => null);
     res.json(db.gang_areas[idx]);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -755,6 +809,8 @@ app.delete('/api/gang-areas/:id', (req, res) => {
       res.status(404).json({ error: 'Área de gangue não encontrada.' });
       return;
     }
+    saveDatabaseToDiskCache();
+    removeGangArea(id).catch(() => null);
     res.json({ success: true, message: 'Área de gangue excluída com sucesso.' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -2474,6 +2530,12 @@ app.get('/api/orcrim/:id/dossier', (req, res) => {
 // VITE CLIENT MIDDLEWARE & ROUTING INTEGRATION
 // ==========================================
 async function startServer() {
+  try {
+    await syncServerWithFirestore();
+  } catch (err) {
+    console.warn('Falha na sincronização inicial do Firestore no boot do servidor:', err);
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

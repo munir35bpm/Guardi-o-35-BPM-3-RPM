@@ -72,14 +72,22 @@ export async function fetchInfratores(): Promise<Infrator[]> {
 }
 
 export async function saveInfrator(infrator: Infrator | (Partial<Infrator> & { id: string; [key: string]: any })): Promise<void> {
-  const docRef = doc(firestore, COLLECTIONS.INFRATORES, infrator.id);
-  const sanitized = sanitizeForFirestore(infrator);
-  await setDoc(docRef, sanitized, { merge: true });
+  try {
+    const docRef = doc(firestore, COLLECTIONS.INFRATORES, infrator.id);
+    const sanitized = sanitizeForFirestore(infrator);
+    await setDoc(docRef, sanitized, { merge: true });
+  } catch (err) {
+    console.warn('Erro ao salvar infrator no Firestore (persistido localmente):', err);
+  }
 }
 
 export async function removeInfrator(id: string): Promise<void> {
-  const docRef = doc(firestore, COLLECTIONS.INFRATORES, id);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(firestore, COLLECTIONS.INFRATORES, id);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.warn('Erro ao remover infrator do Firestore:', err);
+  }
 }
 
 // ==========================================
@@ -102,14 +110,22 @@ export async function fetchEnderecos(): Promise<EnderecoAtuacao[]> {
 }
 
 export async function saveEndereco(endereco: EnderecoAtuacao): Promise<void> {
-  const docRef = doc(firestore, COLLECTIONS.ENDERECOS, endereco.id);
-  const sanitized = sanitizeForFirestore(endereco);
-  await setDoc(docRef, sanitized, { merge: true });
+  try {
+    const docRef = doc(firestore, COLLECTIONS.ENDERECOS, endereco.id);
+    const sanitized = sanitizeForFirestore(endereco);
+    await setDoc(docRef, sanitized, { merge: true });
+  } catch (err) {
+    console.warn('Erro ao salvar endereço no Firestore:', err);
+  }
 }
 
 export async function removeEndereco(id: string): Promise<void> {
-  const docRef = doc(firestore, COLLECTIONS.ENDERECOS, id);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(firestore, COLLECTIONS.ENDERECOS, id);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.warn('Erro ao remover endereço do Firestore:', err);
+  }
 }
 
 // ==========================================
@@ -313,10 +329,14 @@ export async function fetchVinculos(): Promise<VinculoComparsa[]> {
 }
 
 export async function saveVinculo(vinculo: VinculoComparsa): Promise<void> {
-  const id = `${vinculo.infrator_origem_id}_${vinculo.infrator_destino_id}`;
-  const docRef = doc(firestore, COLLECTIONS.VINCULOS_COMPARSAS, id);
-  const sanitized = sanitizeForFirestore(vinculo);
-  await setDoc(docRef, sanitized, { merge: true });
+  try {
+    const id = `${vinculo.infrator_origem_id}_${vinculo.infrator_destino_id}`;
+    const docRef = doc(firestore, COLLECTIONS.VINCULOS_COMPARSAS, id);
+    const sanitized = sanitizeForFirestore(vinculo);
+    await setDoc(docRef, sanitized, { merge: true });
+  } catch (err) {
+    console.warn('Erro ao salvar vínculo no Firestore:', err);
+  }
 }
 
 export async function removeVinculo(origemId: string, destinoId: string): Promise<void> {
@@ -332,13 +352,59 @@ export async function removeVinculo(origemId: string, destinoId: string): Promis
 // ÁREAS DE GANGUES / TERRITÓRIOS
 // ==========================================
 
+export function serializeGangAreaForFirestore(area: GangAreaZone): any {
+  const points = (area.coordinates || []).map((pt) => {
+    if (Array.isArray(pt)) return { lat: Number(pt[0]), lng: Number(pt[1]) };
+    if (pt && typeof pt === 'object') return { lat: Number((pt as any).lat), lng: Number((pt as any).lng) };
+    return { lat: 0, lng: 0 };
+  });
+
+  return {
+    ...area,
+    coordinates: points,
+    rawCoordinatesJson: JSON.stringify(area.coordinates || []),
+    rawInnerHolesJson: area.innerHoles ? JSON.stringify(area.innerHoles) : null,
+    innerHoles: null, // Avoid Firestore nested array error
+  };
+}
+
+export function deserializeGangAreaFromFirestore(data: any): GangAreaZone {
+  if (!data) return data;
+  let coordinates: [number, number][] = [];
+  if (data.rawCoordinatesJson) {
+    try {
+      coordinates = JSON.parse(data.rawCoordinatesJson);
+    } catch (e) {}
+  }
+  if ((!coordinates || coordinates.length === 0) && Array.isArray(data.coordinates)) {
+    coordinates = data.coordinates.map((pt: any) => {
+      if (Array.isArray(pt)) return [Number(pt[0]), Number(pt[1])];
+      if (pt && typeof pt === 'object') return [Number(pt.lat), Number(pt.lng)];
+      return [0, 0];
+    });
+  }
+
+  let innerHoles: [number, number][][] | undefined = undefined;
+  if (data.rawInnerHolesJson) {
+    try {
+      innerHoles = JSON.parse(data.rawInnerHolesJson);
+    } catch (e) {}
+  }
+
+  return {
+    ...data,
+    coordinates,
+    innerHoles: innerHoles || undefined,
+  };
+}
+
 export async function fetchGangAreas(): Promise<GangAreaZone[]> {
   try {
     const colRef = collection(firestore, COLLECTIONS.GANG_AREAS);
     const snapshot = await getDocs(colRef);
     const list: GangAreaZone[] = [];
     snapshot.forEach((docSnap) => {
-      list.push(docSnap.data() as GangAreaZone);
+      list.push(deserializeGangAreaFromFirestore(docSnap.data()));
     });
     return list;
   } catch (error) {
@@ -348,8 +414,13 @@ export async function fetchGangAreas(): Promise<GangAreaZone[]> {
 }
 
 export async function saveGangArea(area: GangAreaZone): Promise<void> {
-  const docRef = doc(firestore, COLLECTIONS.GANG_AREAS, area.id);
-  await setDoc(docRef, area, { merge: true });
+  try {
+    const docRef = doc(firestore, COLLECTIONS.GANG_AREAS, area.id);
+    const serialized = serializeGangAreaForFirestore(area);
+    await setDoc(docRef, sanitizeForFirestore(serialized), { merge: true });
+  } catch (err) {
+    console.warn('Erro ao salvar gang area no Firestore:', err);
+  }
 }
 
 export async function saveGangAreasBatch(areas: GangAreaZone[], replaceAll = false): Promise<void> {
@@ -358,7 +429,9 @@ export async function saveGangAreasBatch(areas: GangAreaZone[], replaceAll = fal
       // Clear existing
       const existing = await fetchGangAreas();
       for (const ex of existing) {
-        await deleteDoc(doc(firestore, COLLECTIONS.GANG_AREAS, ex.id)).catch(() => null);
+        if (ex.id) {
+          await deleteDoc(doc(firestore, COLLECTIONS.GANG_AREAS, ex.id)).catch(() => null);
+        }
       }
     }
     for (const area of areas) {
@@ -370,8 +443,12 @@ export async function saveGangAreasBatch(areas: GangAreaZone[], replaceAll = fal
 }
 
 export async function removeGangArea(id: string): Promise<void> {
-  const docRef = doc(firestore, COLLECTIONS.GANG_AREAS, id);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(firestore, COLLECTIONS.GANG_AREAS, id);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.warn('Erro ao remover gang area do Firestore:', err);
+  }
 }
 
 // ==========================================
@@ -434,7 +511,7 @@ export function subscribeToDatabase(callbacks: {
   if (callbacks.onGangAreasChange) {
     const unsub = onSnapshot(collection(firestore, COLLECTIONS.GANG_AREAS), (snap) => {
       const list: GangAreaZone[] = [];
-      snap.forEach((d) => list.push(d.data() as GangAreaZone));
+      snap.forEach((d) => list.push(deserializeGangAreaFromFirestore(d.data())));
       callbacks.onGangAreasChange!(list);
     }, (err) => {
       console.warn('Firestore Gang Areas onSnapshot error:', err);
