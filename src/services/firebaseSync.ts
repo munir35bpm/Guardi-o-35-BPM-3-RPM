@@ -11,6 +11,11 @@ import {
   fetchVinculos,
   saveVinculo,
   removeVinculo,
+  fetchInfratorOcorrencias,
+  saveInfratorOcorrencia,
+  removeInfratorOcorrencia,
+  removeInfratorOcorrenciasByInfrator,
+  removeInfratorOcorrenciasByOcorrencia,
   fetchGangAreas,
   saveGangArea,
   saveGangAreasBatch,
@@ -24,7 +29,8 @@ import {
   OcorrenciaCriminal,
   VinculoComparsa,
   GangAreaZone,
-  SuspectWithDetails
+  SuspectWithDetails,
+  InfratorOcorrencia
 } from '../types';
 
 /**
@@ -72,12 +78,13 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
 
   try {
     // 1. Fetch current data from Firestore
-    const [infratores, enderecos, ocorrencias, vinculos, gangAreas] = await Promise.all([
+    const [infratores, enderecos, ocorrencias, vinculos, gangAreas, infratorOcorrencias] = await Promise.all([
       fetchInfratores().catch(() => []),
       fetchEnderecos().catch(() => []),
       fetchOcorrencias().catch(() => []),
       fetchVinculos().catch(() => []),
       fetchGangAreas().catch(() => []),
+      fetchInfratorOcorrencias().catch(() => []),
     ]);
 
     // Populate local in-memory DB with Firestore data
@@ -95,11 +102,10 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
     const validSuspectIds = new Set((infratores || []).map((i: any) => i.id));
     const activeEnderecos = (enderecos || []).filter((addr: EnderecoAtuacao) => {
       if (!addr) return false;
-      // If the address belongs to a specific infrator, verify that infrator exists
       if (addr.infrator_id) {
         return validSuspectIds.has(addr.infrator_id);
       }
-      return false; // Do not keep anonymous/detached residency pins
+      return false;
     });
 
     // Clean up orphaned address records from Firestore
@@ -108,7 +114,6 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
       return !addr.infrator_id || !validSuspectIds.has(addr.infrator_id);
     });
     if (orphanedAddrs.length > 0) {
-      console.log(`🧹 [Firestore] Removendo ${orphanedAddrs.length} endereços residenciais de infratores excluídos...`);
       for (const orphan of orphanedAddrs) {
         if (orphan.id) {
           removeEndereco(orphan.id).catch(() => null);
@@ -124,11 +129,63 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
       }
     }
 
-    if (ocorrencias.length > 0) {
-      db.ocorrencias_criminais = ocorrencias;
-    } else {
-      db.ocorrencias_criminais = [];
+    // Occurrences
+    const ocMap = new Map<string, OcorrenciaCriminal>();
+    for (const oc of ocorrencias) {
+      if (oc && oc.id) {
+        ocMap.set(oc.id, oc);
+      }
     }
+
+    // Infrator-Ocorrencia links
+    const linkList: InfratorOcorrencia[] = [...infratorOcorrencias];
+
+    // For any infrator with embedded ocorrencias, sync them into occurrence and link state
+    for (const inf of infratores) {
+      const embeddedOcs = (inf as any).ocorrencias;
+      if (Array.isArray(embeddedOcs) && embeddedOcs.length > 0) {
+        for (const emb of embeddedOcs) {
+          if (!emb) continue;
+          const ocId = emb.id || `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          if (!ocMap.has(ocId)) {
+            const newOc: OcorrenciaCriminal = {
+              id: ocId,
+              numero_bo: emb.numero_bo || 'S/N',
+              data_hora: emb.data_hora || new Date().toISOString(),
+              tipificacao_penal: emb.tipificacao_penal || 'Não informada',
+              descricao_fato: emb.descricao_fato || '',
+              modus_operandi: emb.modus_operandi || '',
+              armas_utilizadas: emb.armas_utilizadas || '',
+              veiculo_utilizado: emb.veiculo_utilizado || '',
+              geom_crime: emb.geom_crime || {
+                lat: emb.lat !== undefined ? Number(emb.lat) : -19.7712,
+                lng: emb.lng !== undefined ? Number(emb.lng) : -43.8564,
+              }
+            };
+            ocMap.set(ocId, newOc);
+            // Save to firestore in background
+            saveOcorrencia(newOc).catch(() => null);
+          }
+
+          const alreadyLinked = linkList.some(
+            (l) => l.infrator_id === inf.id && (l.ocorrencia_id === ocId || l.ocorrencia_id === emb.numero_bo)
+          );
+          if (!alreadyLinked) {
+            const newLink: InfratorOcorrencia = {
+              infrator_id: inf.id,
+              ocorrencia_id: ocId,
+              papel_no_crime: emb.papel || emb.papel_no_crime || 'Autor',
+            };
+            linkList.push(newLink);
+            saveInfratorOcorrencia(inf.id, ocId, newLink.papel_no_crime).catch(() => null);
+          }
+        }
+      }
+    }
+
+    db.ocorrencias_criminais = Array.from(ocMap.values());
+    db.infrator_ocorrencia = linkList;
+
     if (vinculos.length > 0) {
       db.vinculos_comparsas = vinculos;
     }
@@ -154,6 +211,37 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
           db.enderecos_atuacao = db.enderecos_atuacao.filter(
             (a) => a.infrator_id && currentValidIds.has(a.infrator_id)
           );
+
+          // Also check embedded occurrences from incoming snapshot
+          for (const inf of list) {
+            const embedded = (inf as any).ocorrencias;
+            if (Array.isArray(embedded) && embedded.length > 0) {
+              for (const emb of embedded) {
+                if (!emb) continue;
+                const ocId = emb.id;
+                if (ocId && !db.ocorrencias_criminais.some((o) => o.id === ocId)) {
+                  db.ocorrencias_criminais.push({
+                    id: ocId,
+                    numero_bo: emb.numero_bo || 'S/N',
+                    data_hora: emb.data_hora || new Date().toISOString(),
+                    tipificacao_penal: emb.tipificacao_penal || 'Não informada',
+                    descricao_fato: emb.descricao_fato || '',
+                    modus_operandi: emb.modus_operandi || '',
+                    armas_utilizadas: emb.armas_utilizadas || '',
+                    veiculo_utilizado: emb.veiculo_utilizado || '',
+                    geom_crime: emb.geom_crime || {
+                      lat: emb.lat !== undefined ? Number(emb.lat) : -19.7712,
+                      lng: emb.lng !== undefined ? Number(emb.lng) : -43.8564,
+                    }
+                  });
+                }
+                if (ocId && !db.infrator_ocorrencia.some((l) => l.infrator_id === inf.id && l.ocorrencia_id === ocId)) {
+                  db.linkInfratorOcorrencia(inf.id, ocId, emb.papel || emb.papel_no_crime || 'Autor');
+                }
+              }
+            }
+          }
+
           if (onDataChange) onDataChange();
         }
       },
@@ -179,6 +267,12 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
           if (onDataChange) onDataChange();
         }
       },
+      onInfratorOcorrenciasChange: (list) => {
+        if (list) {
+          db.infrator_ocorrencia = list;
+          if (onDataChange) onDataChange();
+        }
+      },
       onGangAreasChange: (list) => {
         if (list && list.length > 0) {
           db.gang_areas = list;
@@ -199,8 +293,25 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
 export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails): Promise<void> {
   if (!suspectFull || !suspectFull.id) return;
   try {
-    // 1. Save Infrator doc
-    const infratorData: Infrator = {
+    // Normalize occurrences
+    const normalizedOccurrences = (suspectFull.ocorrencias || []).map((oc: any, idx: number) => ({
+      id: oc.id || `oc-${Date.now()}-${idx}`,
+      numero_bo: (oc.numero_bo || 'S/N').trim(),
+      data_hora: oc.data_hora || new Date().toISOString(),
+      tipificacao_penal: (oc.tipificacao_penal || 'Não informada').trim(),
+      descricao_fato: oc.descricao_fato || '',
+      modus_operandi: oc.modus_operandi || '',
+      armas_utilizadas: oc.armas_utilizadas || '',
+      veiculo_utilizado: oc.veiculo_utilizado || '',
+      papel: oc.papel || oc.papel_no_crime || 'Autor',
+      geom_crime: {
+        lat: oc.geom_crime?.lat !== undefined ? Number(oc.geom_crime.lat) : (oc.lat !== undefined ? Number(oc.lat) : -19.7712),
+        lng: oc.geom_crime?.lng !== undefined ? Number(oc.geom_crime.lng) : (oc.lng !== undefined ? Number(oc.lng) : -43.8564)
+      }
+    }));
+
+    // 1. Save Infrator doc (with embedded occurrences for instantaneous single-document retrieval)
+    const infratorData: Infrator & { fisicas?: any; enderecos?: any; ocorrencias?: any } = {
       id: suspectFull.id,
       nome_completo: suspectFull.nome_completo || 'Infrator',
       vulgo: suspectFull.vulgo || '',
@@ -214,9 +325,10 @@ export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails):
       situacao_prisional: suspectFull.situacao_atual || suspectFull.situacao_prisional || (suspectFull.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE'),
       periculosidade: suspectFull.periculosidade || 'Média',
       created_at: suspectFull.created_at || new Date().toISOString(),
+      ocorrencias: normalizedOccurrences,
     };
     if (suspectFull.fisicas) {
-      (infratorData as any).fisicas = suspectFull.fisicas;
+      infratorData.fisicas = suspectFull.fisicas;
     }
     await saveInfrator(infratorData);
 
@@ -245,30 +357,109 @@ export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails):
       }
     }
 
-    // 3. Save associated occurrences
-    if (suspectFull.ocorrencias && suspectFull.ocorrencias.length > 0) {
-      for (const oc of suspectFull.ocorrencias) {
-        if (!oc) continue;
-        const anyOc = oc as any;
-        const ocId = oc.id || `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-        await saveOcorrencia({
-          id: ocId,
-          numero_bo: oc.numero_bo || 'S/N',
-          data_hora: oc.data_hora || new Date().toISOString(),
-          tipificacao_penal: oc.tipificacao_penal || 'Não informada',
-          descricao_fato: oc.descricao_fato || '',
-          modus_operandi: oc.modus_operandi || '',
-          armas_utilizadas: oc.armas_utilizadas || '',
-          veiculo_utilizado: oc.veiculo_utilizado || '',
-          geom_crime: {
-            lat: oc.geom_crime?.lat !== undefined ? Number(oc.geom_crime.lat) : (anyOc.lat !== undefined ? Number(anyOc.lat) : -19.7712),
-            lng: oc.geom_crime?.lng !== undefined ? Number(oc.geom_crime.lng) : (anyOc.lng !== undefined ? Number(anyOc.lng) : -43.8564)
-          }
-        });
+    // 3. Save associated occurrences and linkages to collections
+    for (const oc of normalizedOccurrences) {
+      const ocObj: OcorrenciaCriminal = {
+        id: oc.id,
+        numero_bo: oc.numero_bo,
+        data_hora: oc.data_hora,
+        tipificacao_penal: oc.tipificacao_penal,
+        descricao_fato: oc.descricao_fato,
+        modus_operandi: oc.modus_operandi,
+        armas_utilizadas: oc.armas_utilizadas,
+        veiculo_utilizado: oc.veiculo_utilizado,
+        geom_crime: oc.geom_crime
+      };
+      await saveOcorrencia(ocObj);
+      await saveInfratorOcorrencia(suspectFull.id, oc.id, oc.papel);
+      db.linkInfratorOcorrencia(suspectFull.id, oc.id, oc.papel);
+      if (!db.ocorrencias_criminais.some((o) => o.id === oc.id)) {
+        db.ocorrencias_criminais.push(ocObj);
       }
     }
   } catch (err) {
     console.error('Erro ao persistir infrator no Firestore:', err);
+  }
+}
+
+/**
+ * Links or creates an occurrence directly linked to a suspect and saves everything to Firestore.
+ */
+export async function linkOccurrenceToSuspectInFirebase(
+  infratorId: string,
+  occurrenceData: Partial<OcorrenciaCriminal> & { papel_no_crime?: string; papel?: string; lat?: string | number; lng?: string | number }
+): Promise<SuspectWithDetails | null> {
+  try {
+    const ocId = occurrenceData.id || `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const papel = occurrenceData.papel_no_crime || occurrenceData.papel || 'Autor';
+
+    const ocObj: OcorrenciaCriminal = {
+      id: ocId,
+      numero_bo: (occurrenceData.numero_bo || 'S/N').trim(),
+      data_hora: occurrenceData.data_hora || new Date().toISOString(),
+      tipificacao_penal: (occurrenceData.tipificacao_penal || 'Roubo / Ocorrência').trim(),
+      descricao_fato: occurrenceData.descricao_fato || '',
+      modus_operandi: occurrenceData.modus_operandi || '',
+      armas_utilizadas: occurrenceData.armas_utilizadas || '',
+      veiculo_utilizado: occurrenceData.veiculo_utilizado || '',
+      geom_crime: {
+        lat: occurrenceData.geom_crime?.lat !== undefined ? Number(occurrenceData.geom_crime.lat) : (occurrenceData.lat !== undefined ? Number(occurrenceData.lat) : -19.7712),
+        lng: occurrenceData.geom_crime?.lng !== undefined ? Number(occurrenceData.geom_crime.lng) : (occurrenceData.lng !== undefined ? Number(occurrenceData.lng) : -43.8564),
+      }
+    };
+
+    // 1. Save occurrence to Firestore
+    await saveOcorrencia(ocObj);
+
+    // 2. Save link to Firestore
+    await saveInfratorOcorrencia(infratorId, ocId, papel);
+
+    // 3. Update in-memory DB
+    const existingOcIdx = db.ocorrencias_criminais.findIndex((o) => o.id === ocId);
+    if (existingOcIdx >= 0) {
+      db.ocorrencias_criminais[existingOcIdx] = ocObj;
+    } else {
+      db.ocorrencias_criminais.unshift(ocObj);
+    }
+    db.linkInfratorOcorrencia(infratorId, ocId, papel);
+
+    // 4. Update full suspect in Firestore
+    const fullSuspect = db.getInfratorFull(infratorId);
+    if (fullSuspect) {
+      await persistSuspectToFirebase(fullSuspect);
+    }
+
+    return fullSuspect;
+  } catch (err) {
+    console.error('Erro ao vincular ocorrência ao infrator no Firebase:', err);
+    throw err;
+  }
+}
+
+/**
+ * Unlinks an occurrence from a suspect in Firestore.
+ */
+export async function unlinkOccurrenceFromSuspectInFirebase(
+  infratorId: string,
+  ocorrenciaId: string
+): Promise<SuspectWithDetails | null> {
+  try {
+    // 1. Remove link from Firestore
+    await removeInfratorOcorrencia(infratorId, ocorrenciaId);
+
+    // 2. Update local db
+    db.unlinkInfratorOcorrencia(infratorId, ocorrenciaId);
+
+    // 3. Update full suspect in Firestore
+    const fullSuspect = db.getInfratorFull(infratorId);
+    if (fullSuspect) {
+      await persistSuspectToFirebase(fullSuspect);
+    }
+
+    return fullSuspect;
+  } catch (err) {
+    console.error('Erro ao desvincular ocorrência do infrator no Firebase:', err);
+    throw err;
   }
 }
 
@@ -278,6 +469,7 @@ export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails):
 export async function deleteSuspectFromFirebase(suspectId: string, addressIds?: string[]): Promise<void> {
   try {
     await removeInfrator(suspectId);
+    await removeInfratorOcorrenciasByInfrator(suspectId);
     
     // 1. Fetch current addresses directly from Firestore to ensure no orphans remain
     const firestoreAddrs = await fetchEnderecos().catch(() => []);
@@ -298,9 +490,7 @@ export async function deleteSuspectFromFirebase(suspectId: string, addressIds?: 
     }
 
     // 3. Clean local memory state
-    db.enderecos_atuacao = db.enderecos_atuacao.filter(
-      (a) => a.infrator_id !== suspectId && (!addressIds || !addressIds.includes(a.id))
-    );
+    db.deleteInfrator(suspectId);
   } catch (err) {
     console.error('Erro ao excluir infrator e endereços do Firestore:', err);
   }
@@ -345,18 +535,29 @@ export async function persistOccurrenceToFirebase(occurrence: OcorrenciaCriminal
 export async function deleteOccurrenceFromFirebase(occurrenceId: string, numeroBo?: string): Promise<void> {
   try {
     await removeOcorrencia(occurrenceId);
+    await removeInfratorOcorrenciasByOcorrencia(occurrenceId);
+
     if (numeroBo) {
       const allOcs = await fetchOcorrencias().catch(() => []);
       const matches = allOcs.filter((o) => o.numero_bo === numeroBo && o.id !== occurrenceId);
       for (const m of matches) {
         if (m.id) {
           await removeOcorrencia(m.id);
+          await removeInfratorOcorrenciasByOcorrencia(m.id);
         }
       }
     }
-    db.ocorrencias_criminais = db.ocorrencias_criminais.filter(
-      (o) => o.id !== occurrenceId && (!numeroBo || o.numero_bo !== numeroBo)
-    );
+
+    db.deleteOcorrencia(occurrenceId);
+
+    // Update all suspects in Firestore that had this occurrence embedded
+    const currentInfratores = db.infratores;
+    for (const inf of currentInfratores) {
+      const full = db.getInfratorFull(inf.id);
+      if (full) {
+        await persistSuspectToFirebase(full);
+      }
+    }
   } catch (err) {
     console.error('Erro ao excluir ocorrência do Firestore:', err);
   }
@@ -372,3 +573,4 @@ export async function persistGangAreasToFirebase(gangAreas: GangAreaZone[], repl
     console.error('Erro ao persistir áreas de gangues no Firestore:', err);
   }
 }
+

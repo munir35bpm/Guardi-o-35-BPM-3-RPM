@@ -76,6 +76,8 @@ import {
   deleteAddressFromFirebase,
   persistOccurrenceToFirebase,
   deleteOccurrenceFromFirebase,
+  linkOccurrenceToSuspectInFirebase,
+  unlinkOccurrenceFromSuspectInFirebase,
   deduplicateAddresses,
 } from './services/firebaseSync';
 
@@ -1341,7 +1343,12 @@ export default function App() {
           alert('Selecione uma ocorrência para vincular.');
           return;
         }
-        bodyData.ocorrencia_id = directOcExistingId;
+        const existingOc = occurrences.find((o) => o.id === directOcExistingId || o.numero_bo === directOcExistingId);
+        bodyData = {
+          ...(existingOc || {}),
+          ocorrencia_id: directOcExistingId,
+          papel_no_crime: directOcPapel || 'Autor',
+        };
       } else {
         if (!directNewOcData.numero_bo.trim() || !directNewOcData.tipificacao_penal.trim()) {
           alert('Informe o Número do B.O. e a Tipificação Penal.');
@@ -1353,7 +1360,7 @@ export default function App() {
         };
       }
 
-      // Try server API first
+      // Try server API
       let updatedSuspect: any = null;
       try {
         const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias`, {
@@ -1366,6 +1373,19 @@ export default function App() {
         }
       } catch (e) {
         console.warn('Backend link endpoint not available, falling back to local DB', e);
+      }
+
+      // Persist to Firebase Firestore
+      try {
+        const persisted = await linkOccurrenceToSuspectInFirebase(selectedSuspectDetail.id, {
+          id: bodyData.ocorrencia_id,
+          ...bodyData,
+        });
+        if (persisted) {
+          updatedSuspect = persisted;
+        }
+      } catch (fireErr) {
+        console.warn('Erro ao salvar vínculo no Firestore:', fireErr);
       }
 
       // Local DB fallback
@@ -1386,6 +1406,7 @@ export default function App() {
 
       if (updatedSuspect) {
         setSelectedSuspectDetail(updatedSuspect);
+        await persistSuspectToFirebase(updatedSuspect).catch(() => null);
       }
 
       setIsLinkingDirectOccurrence(false);
@@ -1401,8 +1422,8 @@ export default function App() {
         lat: '-19.7712',
         lng: '-43.8564',
       });
-      fetchTelemetry();
-      setToastMessage('Ocorrência vinculada com sucesso.');
+      await fetchTelemetry();
+      setToastMessage('B.O. cadastrado e salvo com sucesso no banco de dados!');
       setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
       console.error('Error linking occurrence directly:', err);
@@ -1417,6 +1438,13 @@ export default function App() {
       const bodyData = {
         ocorrencia_id: oc.id,
         numero_bo: oc.numero_bo,
+        tipificacao_penal: oc.tipificacao_penal,
+        data_hora: oc.data_hora,
+        descricao_fato: oc.descricao_fato,
+        modus_operandi: oc.modus_operandi,
+        armas_utilizadas: oc.armas_utilizadas,
+        veiculo_utilizado: oc.veiculo_utilizado,
+        geom_crime: oc.geom_crime,
         papel_no_crime: papel || directOcPapel || 'Autor',
       };
 
@@ -1434,6 +1462,20 @@ export default function App() {
         console.warn('Backend link endpoint not available, falling back to local DB', e);
       }
 
+      // Persist to Firebase Firestore
+      try {
+        const persisted = await linkOccurrenceToSuspectInFirebase(selectedSuspectDetail.id, {
+          id: oc.id,
+          ...oc,
+          papel_no_crime: papel || directOcPapel || 'Autor',
+        });
+        if (persisted) {
+          updatedSuspect = persisted;
+        }
+      } catch (fireErr) {
+        console.warn('Erro ao salvar vínculo no Firestore:', fireErr);
+      }
+
       if (!updatedSuspect) {
         db.linkInfratorOcorrencia(selectedSuspectDetail.id, oc.id, papel || directOcPapel || 'Autor');
         updatedSuspect = db.getInfratorFull(selectedSuspectDetail.id);
@@ -1441,10 +1483,11 @@ export default function App() {
 
       if (updatedSuspect) {
         setSelectedSuspectDetail(updatedSuspect);
+        await persistSuspectToFirebase(updatedSuspect).catch(() => null);
       }
 
       setIsLinkingDirectOccurrence(false);
-      fetchTelemetry();
+      await fetchTelemetry();
       setToastMessage(`B.O. Nº ${oc.numero_bo} vinculado como ${papel || directOcPapel}!`);
       setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
@@ -1489,6 +1532,16 @@ export default function App() {
         console.warn('Backend unlink endpoint not available, falling back to local DB', e);
       }
 
+      // Unlink in Firebase Firestore
+      try {
+        const persisted = await unlinkOccurrenceFromSuspectInFirebase(selectedSuspectDetail.id, ocorrenciaId);
+        if (persisted) {
+          updatedSuspect = persisted;
+        }
+      } catch (fireErr) {
+        console.warn('Erro ao desvincular no Firestore:', fireErr);
+      }
+
       if (!updatedSuspect) {
         db.unlinkInfratorOcorrencia(selectedSuspectDetail.id, ocorrenciaId);
         updatedSuspect = db.getInfratorFull(selectedSuspectDetail.id);
@@ -1496,8 +1549,9 @@ export default function App() {
 
       if (updatedSuspect) {
         setSelectedSuspectDetail(updatedSuspect);
+        await persistSuspectToFirebase(updatedSuspect).catch(() => null);
       }
-      fetchTelemetry();
+      await fetchTelemetry();
       setToastMessage('Ocorrência desvinculada com sucesso.');
       setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
@@ -1905,33 +1959,36 @@ export default function App() {
       return;
     }
     try {
-      let created = false;
+      const newOcId = `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const ocObj: OcorrenciaCriminal = {
+        id: newOcId,
+        numero_bo: newIncidentForm.numero_bo.trim(),
+        tipificacao_penal: newIncidentForm.tipificacao_penal.trim(),
+        data_hora: newIncidentForm.data_hora || new Date().toISOString(),
+        descricao_fato: newIncidentForm.descricao_fato || '',
+        modus_operandi: newIncidentForm.modus_operandi || '',
+        armas_utilizadas: newIncidentForm.armas_utilizadas || '',
+        veiculo_utilizado: newIncidentForm.veiculo_utilizado || '',
+        geom_crime: {
+          lat: Number(newIncidentForm.lat) || -19.7712,
+          lng: Number(newIncidentForm.lng) || -43.8564,
+        }
+      };
+
       try {
-        const res = await fetch('/api/ocorrencias', {
+        await fetch('/api/ocorrencias', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newIncidentForm),
+          body: JSON.stringify(ocObj),
         });
-        if (res.ok) {
-          created = true;
-        }
       } catch (e) {
         console.warn('Backend API unavailable, saving to local in-memory DB', e);
       }
 
-      if (!created) {
-        db.addOcorrencia(newIncidentForm);
-      }
+      db.addOcorrencia(ocObj);
 
       // Persist to Firebase Firestore
-      await persistOccurrenceToFirebase({
-        id: `oc-${Date.now()}`,
-        ...newIncidentForm,
-        geom_crime: {
-          lat: Number(newIncidentForm.lat),
-          lng: Number(newIncidentForm.lng)
-        }
-      });
+      await persistOccurrenceToFirebase(ocObj);
 
       setIsAddingOccurrence(false);
       setNewIncidentForm({
@@ -1945,8 +2002,8 @@ export default function App() {
         lat: '-19.7712',
         lng: '-43.8564',
       });
-      fetchTelemetry();
-      setToastMessage('Ocorrência registrada com sucesso.');
+      await fetchTelemetry();
+      setToastMessage('Ocorrência registrada e salva com sucesso!');
       setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
       console.error('Error adding incident:', err);

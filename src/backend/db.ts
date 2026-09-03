@@ -134,14 +134,36 @@ class CrimIntelDatabase {
     if (!infrator) return null;
     const fisicas = this.caracteristicas_fisicas.find(cf => cf.infrator_id === id);
     const enderecos = this.enderecos_atuacao.filter(ea => ea.infrator_id === id);
+    
+    // Resolve occurrences from both relation table and embedded data
     const ocorrenciasRel = this.infrator_ocorrencia.filter(io => io.infrator_id === id);
-    const ocorrencias = ocorrenciasRel.map(rel => {
-      const oc = this.ocorrencias_criminais.find(o => o.id === rel.ocorrencia_id);
-      return {
-        ...oc,
-        papel: rel.papel_no_crime
-      };
-    }).filter(Boolean);
+    const ocorrenciasMap = new Map<string, any>();
+
+    ocorrenciasRel.forEach(rel => {
+      const oc = this.ocorrencias_criminais.find(o => o.id === rel.ocorrencia_id || (o.numero_bo && o.numero_bo === rel.ocorrencia_id));
+      if (oc) {
+        ocorrenciasMap.set(oc.id, {
+          ...oc,
+          papel: rel.papel_no_crime || 'Autor'
+        });
+      }
+    });
+
+    const embedded = (infrator as any).ocorrencias;
+    if (Array.isArray(embedded) && embedded.length > 0) {
+      embedded.forEach((emb: any) => {
+        if (!emb) return;
+        const ocId = emb.id || emb.numero_bo;
+        if (ocId && !ocorrenciasMap.has(ocId)) {
+          ocorrenciasMap.set(ocId, {
+            ...emb,
+            papel: emb.papel || emb.papel_no_crime || 'Autor'
+          });
+        }
+      });
+    }
+
+    const ocorrencias = Array.from(ocorrenciasMap.values());
 
     const comparsasOrigem = this.vinculos_comparsas.filter(v => v.infrator_origem_id === id).map(v => {
       const comp = this.infratores.find(i => i.id === v.infrator_destino_id);

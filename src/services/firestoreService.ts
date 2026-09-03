@@ -143,6 +143,81 @@ export async function removeOcorrencia(id: string): Promise<void> {
 }
 
 // ==========================================
+// VÍNCULOS DE INFRATOR COM OCORRÊNCIAS / BO
+// ==========================================
+
+export async function fetchInfratorOcorrencias(): Promise<InfratorOcorrencia[]> {
+  try {
+    const colRef = collection(firestore, COLLECTIONS.VINCULOS_CRIMES);
+    const snapshot = await getDocs(colRef);
+    const list: InfratorOcorrencia[] = [];
+    snapshot.forEach((docSnap) => {
+      list.push(docSnap.data() as InfratorOcorrencia);
+    });
+    return list;
+  } catch (error) {
+    console.error('Erro ao buscar vínculos infrator-ocorrência do Firestore:', error);
+    return [];
+  }
+}
+
+export async function saveInfratorOcorrencia(
+  infrator_id: string,
+  ocorrencia_id: string,
+  papel_no_crime: string = 'Autor'
+): Promise<void> {
+  const id = `${infrator_id}_${ocorrencia_id}`;
+  const docRef = doc(firestore, COLLECTIONS.VINCULOS_CRIMES, id);
+  const data: InfratorOcorrencia = {
+    infrator_id,
+    ocorrencia_id,
+    papel_no_crime: papel_no_crime || 'Autor',
+  };
+  const sanitized = sanitizeForFirestore(data);
+  await setDoc(docRef, sanitized, { merge: true });
+}
+
+export async function removeInfratorOcorrencia(infrator_id: string, ocorrencia_id: string): Promise<void> {
+  const id = `${infrator_id}_${ocorrencia_id}`;
+  const docRef = doc(firestore, COLLECTIONS.VINCULOS_CRIMES, id);
+  await deleteDoc(docRef);
+}
+
+export async function removeInfratorOcorrenciasByInfrator(infrator_id: string): Promise<void> {
+  try {
+    const colRef = collection(firestore, COLLECTIONS.VINCULOS_CRIMES);
+    const snapshot = await getDocs(colRef);
+    const promises: Promise<void>[] = [];
+    snapshot.forEach((docSnap) => {
+      const d = docSnap.data() as InfratorOcorrencia;
+      if (d.infrator_id === infrator_id) {
+        promises.push(deleteDoc(doc(firestore, COLLECTIONS.VINCULOS_CRIMES, docSnap.id)));
+      }
+    });
+    await Promise.all(promises);
+  } catch (err) {
+    console.warn('Erro ao remover vínculos do infrator:', err);
+  }
+}
+
+export async function removeInfratorOcorrenciasByOcorrencia(ocorrencia_id: string): Promise<void> {
+  try {
+    const colRef = collection(firestore, COLLECTIONS.VINCULOS_CRIMES);
+    const snapshot = await getDocs(colRef);
+    const promises: Promise<void>[] = [];
+    snapshot.forEach((docSnap) => {
+      const d = docSnap.data() as InfratorOcorrencia;
+      if (d.ocorrencia_id === ocorrencia_id) {
+        promises.push(deleteDoc(doc(firestore, COLLECTIONS.VINCULOS_CRIMES, docSnap.id)));
+      }
+    });
+    await Promise.all(promises);
+  } catch (err) {
+    console.warn('Erro ao remover vínculos da ocorrência:', err);
+  }
+}
+
+// ==========================================
 // VÍNCULOS DE COMPARSAS CRUD
 // ==========================================
 
@@ -231,6 +306,7 @@ export function subscribeToDatabase(callbacks: {
   onInfratoresChange?: (data: Infrator[]) => void;
   onEnderecosChange?: (data: EnderecoAtuacao[]) => void;
   onOcorrenciasChange?: (data: OcorrenciaCriminal[]) => void;
+  onInfratorOcorrenciasChange?: (data: InfratorOcorrencia[]) => void;
   onGangAreasChange?: (data: GangAreaZone[]) => void;
 }) {
   const unsubs: (() => void)[] = [];
@@ -264,6 +340,17 @@ export function subscribeToDatabase(callbacks: {
       callbacks.onOcorrenciasChange!(list);
     }, (err) => {
       console.warn('Firestore Ocorrências onSnapshot error:', err);
+    });
+    unsubs.push(unsub);
+  }
+
+  if (callbacks.onInfratorOcorrenciasChange) {
+    const unsub = onSnapshot(collection(firestore, COLLECTIONS.VINCULOS_CRIMES), (snap) => {
+      const list: InfratorOcorrencia[] = [];
+      snap.forEach((d) => list.push(d.data() as InfratorOcorrencia));
+      callbacks.onInfratorOcorrenciasChange!(list);
+    }, (err) => {
+      console.warn('Firestore Infrator-Ocorrência onSnapshot error:', err);
     });
     unsubs.push(unsub);
   }
