@@ -777,11 +777,29 @@ class CrimIntelDatabase {
 
     // Add Suspect Nodes
     this.infratores.forEach(i => {
+      const cleanGang = (i.gangue_faccao || '').trim();
+      const lower = cleanGang.toLowerCase();
+      const hasGangAffiliation = Boolean(
+        cleanGang &&
+        lower !== 'nenhuma' &&
+        lower !== 'sem facção' &&
+        lower !== 'sem faccao' &&
+        lower !== 'sem facção informada' &&
+        lower !== 'não informada' &&
+        lower !== 'nao informada' &&
+        lower !== 'apurando vínculo' &&
+        lower !== 'apurando vinculo' &&
+        lower !== 'infratores sem gangue' &&
+        lower !== 'sem gangue'
+      );
+      const gangDisplayName = hasGangAffiliation ? cleanGang : 'Infratores sem gangue';
+
       nodes.push({
         id: i.id,
         label: `${i.nome_completo} (${i.vulgo})`,
         type: 'suspect',
-        gang: i.gangue_faccao,
+        gang: gangDisplayName,
+        has_gang: hasGangAffiliation,
         periculosidade: i.periculosidade,
         mandado: i.status_mandado_prisao,
         foto_url: i.foto_url

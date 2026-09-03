@@ -99,6 +99,7 @@ export interface NetworkNode {
   label: string;
   type: 'suspect' | 'incident';
   gang?: string;
+  has_gang?: boolean;
   periculosidade?: string;
   mandado?: boolean;
   foto_url?: string;
