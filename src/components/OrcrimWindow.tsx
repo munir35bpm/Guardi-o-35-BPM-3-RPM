@@ -82,6 +82,16 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
   const [orcrimToDelete, setOrcrimToDelete] = useState<OrcrimData | null>(null);
   const [isDeletingOrcrim, setIsDeletingOrcrim] = useState<boolean>(false);
 
+  // Create New ORCRIM Modal state
+  const [showCreateOrcrimModal, setShowCreateOrcrimModal] = useState<boolean>(false);
+  const [newOrcrimName, setNewOrcrimName] = useState<string>('');
+  const [newOrcrimTerritory, setNewOrcrimTerritory] = useState<string>('Santa Luzia / 35º BPM');
+  const [newOrcrimResumo, setNewOrcrimResumo] = useState<string>('');
+  const [newOrcrimLeaderId, setNewOrcrimLeaderId] = useState<string>('');
+  const [newOrcrimLeaderRole, setNewOrcrimLeaderRole] = useState<string>('Líder Geral / Sintonia de Rua');
+  const [newOrcrimLeaderSituacao, setNewOrcrimLeaderSituacao] = useState<SituacaoPrisional>('EM_LIBERDADE');
+  const [isSavingOrcrim, setIsSavingOrcrim] = useState<boolean>(false);
+
   // Load existing organograms from backend
   const fetchOrganogramas = async () => {
     try {
@@ -419,6 +429,119 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
     }
   };
 
+  // Reset New ORCRIM Form
+  const resetNewOrcrimForm = () => {
+    setNewOrcrimName('');
+    setNewOrcrimTerritory('Santa Luzia / 35º BPM');
+    setNewOrcrimResumo('');
+    setNewOrcrimLeaderId('');
+    setNewOrcrimLeaderRole('Líder Geral / Sintonia de Rua');
+    setNewOrcrimLeaderSituacao('EM_LIBERDADE');
+  };
+
+  // Create New ORCRIM Handler
+  const handleCreateNewOrcrim = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+
+    const nameTrimmed = newOrcrimName.trim();
+    if (!nameTrimmed) {
+      alert('Por favor, informe o Nome da Organização Criminosa / Facção / Gangue.');
+      return;
+    }
+
+    // Check if organogram with this name already exists
+    const existing = organogramas.find(
+      o => o.gangue_info && o.gangue_info.nome_gangue.toLowerCase() === nameTrimmed.toLowerCase()
+    );
+    if (existing) {
+      const confirmOpen = window.confirm(
+        `A organização "${nameTrimmed}" já possui um organograma cadastrado. Deseja abrir o organograma existente?`
+      );
+      if (confirmOpen) {
+        setSelectedOrcrimId(existing.id || existing.gangue_info.nome_gangue);
+        setCurrentOrcrim(existing);
+        setShowCreateOrcrimModal(false);
+      }
+      return;
+    }
+
+    setIsSavingOrcrim(true);
+
+    try {
+      const cleanSlug = nameTrimmed
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'orcrim';
+      const orcrimId = `${cleanSlug}-${Date.now().toString().slice(-6)}`;
+
+      const initialLideranca: MembroEstruturaOrcrim[] = [];
+      if (newOrcrimLeaderId) {
+        const suspect = registeredSuspects.find(s => s.id === newOrcrimLeaderId);
+        if (suspect) {
+          initialLideranca.push({
+            infrator_id: suspect.id,
+            nome_completo: suspect.nome_completo,
+            vulgo: suspect.vulgo,
+            funcao_especifica: newOrcrimLeaderRole.trim() || 'Líder Geral / Sintonia de Rua',
+            foto_url: suspect.foto_url,
+            status_mandado: suspect.status_mandado_prisao,
+            situacao_atual: newOrcrimLeaderSituacao,
+            area_responsabilidade: newOrcrimTerritory.trim() || undefined,
+          });
+        }
+      }
+
+      const newOrcrim: OrcrimData = {
+        id: orcrimId,
+        gangue_info: {
+          nome_gangue: nameTrimmed,
+          territorio_principal: newOrcrimTerritory.trim() || 'Santa Luzia / 35º BPM',
+          total_integrantes_mapeados: initialLideranca.length,
+          resumo_atuacao: newOrcrimResumo.trim() || `Organização criminosa mapeada pela Seção de Inteligência do 35º BPM.`,
+        },
+        estrutura_piramidal: {
+          nivel_1_lideranca: initialLideranca,
+          nivel_2_gerencia_tatica: [],
+          ['nivel_2_gerencia_tática']: [],
+          nivel_3_operacionais_e_linha_de_frente: [],
+        },
+      };
+
+      const res = await fetch('/api/orcrim/organogramas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newOrcrim),
+      }).catch(() => null);
+
+      let savedData = newOrcrim;
+      if (res && res.ok) {
+        savedData = await res.json();
+      } else {
+        savedData = db.saveOrcrim(newOrcrim);
+      }
+
+      setOrganogramas(prev => {
+        const filtered = prev.filter(
+          o => o.id !== savedData.id && o.gangue_info.nome_gangue !== savedData.gangue_info.nome_gangue
+        );
+        return [...filtered, savedData];
+      });
+
+      setSelectedOrcrimId(savedData.id || savedData.gangue_info.nome_gangue);
+      setCurrentOrcrim(savedData);
+      setShowCreateOrcrimModal(false);
+      resetNewOrcrimForm();
+      setToastMessage(`Organização Criminosa "${savedData.gangue_info.nome_gangue}" cadastrada com sucesso!`);
+    } catch (err: any) {
+      console.error('Erro ao cadastrar nova ORCRIM:', err);
+      alert(`Erro ao cadastrar nova ORCRIM: ${err.message || 'Falha na requisição'}`);
+    } finally {
+      setIsSavingOrcrim(false);
+    }
+  };
+
   // Helper to extract Level 2 array safely
   const getNivel2Members = (orcrim: OrcrimData): MembroEstruturaOrcrim[] => {
     if (!orcrim || !orcrim.estrutura_piramidal) return [];
@@ -470,13 +593,18 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
 
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* BOTÃO CADASTRAR NOVA ORCRIM */}
             <button
-              onClick={() => setShowAiModal(true)}
-              disabled={analyzingAi}
-              className="px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-md flex items-center gap-2 transition-all"
+              type="button"
+              onClick={() => {
+                resetNewOrcrimForm();
+                setShowCreateOrcrimModal(true);
+              }}
+              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs uppercase tracking-wider rounded-lg border border-emerald-500/50 flex items-center gap-2 transition-all shadow-md cursor-pointer"
+              title="Cadastrar uma nova organização criminosa, facção ou gangue"
             >
-              <Sparkles className="w-4 h-4 text-amber-200 animate-pulse" />
-              <span>Gerar / Classificar com IA</span>
+              <Plus className="w-4 h-4 text-emerald-200" />
+              <span>Cadastrar Nova ORCRIM</span>
             </button>
 
             <button
@@ -489,6 +617,15 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
             >
               <Plus className="w-4 h-4 text-blue-300" />
               <span>Cadastrar Infrator na ORCRIM</span>
+            </button>
+
+            <button
+              onClick={() => setShowAiModal(true)}
+              disabled={analyzingAi}
+              className="px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-md flex items-center gap-2 transition-all cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-amber-200 animate-pulse" />
+              <span>Gerar / Classificar com IA</span>
             </button>
 
             {currentOrcrim && (
@@ -553,6 +690,20 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
               </button>
             );
           })}
+
+          {/* Botão rápido + Nova ORCRIM na barra de abas */}
+          <button
+            type="button"
+            onClick={() => {
+              resetNewOrcrimForm();
+              setShowCreateOrcrimModal(true);
+            }}
+            className="px-3 py-1.5 bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 hover:text-white rounded-lg text-xs font-bold transition-all border border-emerald-700/60 flex items-center gap-1.5 cursor-pointer shadow-xs"
+            title="Cadastrar Nova ORCRIM"
+          >
+            <Plus className="w-3.5 h-3.5 text-emerald-400" />
+            <span>+ Nova ORCRIM</span>
+          </button>
         </div>
       </div>
 
@@ -837,14 +988,219 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
           <ShieldAlert className="w-12 h-12 text-slate-300 mx-auto mb-3" />
           <h3 className="text-base font-bold text-slate-700">Nenhum organograma carregado</h3>
           <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-            Utilize o botão &quot;Gerar / Classificar com IA&quot; para criar e organizar a estrutura piramidal de uma facção ou gangue.
+            Cadastre uma nova organização criminosa manualmente ou utilize a inteligência artificial para estruturar a hierarquia piramidal.
           </p>
-          <button
-            onClick={() => setShowAiModal(true)}
-            className="mt-4 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-sm"
-          >
-            Criar com Inteligência Artificial
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
+            <button
+              type="button"
+              onClick={() => {
+                resetNewOrcrimForm();
+                setShowCreateOrcrimModal(true);
+              }}
+              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-2 cursor-pointer transition-all"
+            >
+              <Plus className="w-4 h-4 text-emerald-200" />
+              <span>Cadastrar Nova ORCRIM</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAiModal(true)}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-2 cursor-pointer transition-all"
+            >
+              <Sparkles className="w-4 h-4 text-amber-200" />
+              <span>Criar com Inteligência Artificial</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CADASTRAR NOVA ORCRIM / ORGANOGRAMA */}
+      {/* ========================================================================= */}
+      {showCreateOrcrimModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto font-sans">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-emerald-500/10 text-emerald-700 rounded-xl">
+                  <ShieldAlert className="w-6 h-6 text-emerald-700" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 bg-emerald-700 text-white rounded tracking-wider">
+                      NOVA ORCRIM
+                    </span>
+                    <h3 className="text-lg font-black text-slate-900">
+                      Cadastrar Organização Criminosa
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Criação de novo organograma piramidal tático do 35º BPM
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateOrcrimModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateNewOrcrim} className="space-y-4 my-5">
+              {/* Nome da ORCRIM */}
+              <div>
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
+                  Nome da Organização Criminosa / Facção / Gangue *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Comando Vermelho - Alto das Velhas, PCC - Santa Luzia, Gangue do Pombo..."
+                  value={newOrcrimName}
+                  onChange={(e) => setNewOrcrimName(e.target.value)}
+                  className="w-full px-3.5 py-2 text-sm bg-slate-50 text-slate-900 font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white placeholder:text-slate-400 shadow-xs"
+                />
+                {/* Sugestões rápidas de siglas / nomes comuns na região */}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase mr-1 self-center">Sugestões:</span>
+                  {[
+                    'Comando Vermelho (CV)',
+                    'Primeiro Comando da Capital (PCC)',
+                    'Terceiro Comando Puro (TCP)',
+                    'Gangue 31 de Janeiro',
+                    'Gangue do Palmital',
+                    'Gangue do Muleta',
+                    'Gangue da Linha',
+                    'Bonde do Morro'
+                  ].map((sug) => (
+                    <button
+                      key={sug}
+                      type="button"
+                      onClick={() => setNewOrcrimName(sug)}
+                      className="px-2 py-0.5 text-[10px] font-semibold bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-600 rounded border border-slate-200 transition-all cursor-pointer"
+                    >
+                      {sug}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Território de Domínio Principal */}
+              <div>
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
+                  Território de Domínio Principal / Bairros de Atuação *
+                </label>
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Bairro Palmital / Frimisa / 35º BPM, Santa Luzia"
+                    value={newOrcrimTerritory}
+                    onChange={(e) => setNewOrcrimTerritory(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 text-slate-900 font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white placeholder:text-slate-400 shadow-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Doutrina / Histórico da Facção */}
+              <div>
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block mb-1.5">
+                  Doutrina, Modus Operandi & Histórico Delitivo (Opcional)
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Descreva a atuação da facção, pontos de venda de drogas (biqueiras), armamentos típicos, rivalidades conhecidas ou histórico no 35º BPM..."
+                  value={newOrcrimResumo}
+                  onChange={(e) => setNewOrcrimResumo(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 text-slate-900 font-medium border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white placeholder:text-slate-400 shadow-xs"
+                />
+              </div>
+
+              {/* Bloco Opcional: Integrante Inicial para Liderança (Nível 1) */}
+              <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-slate-800 uppercase tracking-wide">
+                    <Crown className="w-4 h-4 text-amber-600" />
+                    <span>Designar Líder Geral Inicial (Nível 1) • Opcional</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-semibold">Pode ser alocado depois</span>
+                </div>
+
+                <div>
+                  <select
+                    value={newOrcrimLeaderId}
+                    onChange={(e) => setNewOrcrimLeaderId(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 font-semibold shadow-xs"
+                  >
+                    <option value="" className="text-slate-500">-- Nenhum líder designado agora (cadastrar depois) --</option>
+                    {registeredSuspects.map((s) => (
+                      <option key={s.id} value={s.id} className="text-slate-900 font-semibold">
+                        {s.nome_completo} ({s.vulgo}) {s.gangue_faccao ? `• Facção: ${s.gangue_faccao}` : ''} {s.status_mandado_prisao ? '⚠️ [MANDADO]' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {newOrcrimLeaderId && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">
+                        Função do Líder
+                      </label>
+                      <input
+                        type="text"
+                        value={newOrcrimLeaderRole}
+                        onChange={(e) => setNewOrcrimLeaderRole(e.target.value)}
+                        placeholder="Ex: Líder Geral / Sintonia de Rua"
+                        className="w-full px-2.5 py-1.5 text-xs bg-white text-slate-900 font-semibold border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">
+                        Situação Prisional
+                      </label>
+                      <select
+                        value={newOrcrimLeaderSituacao}
+                        onChange={(e) => setNewOrcrimLeaderSituacao(e.target.value as SituacaoPrisional)}
+                        className="w-full px-2.5 py-1.5 text-xs bg-white text-slate-900 font-bold border border-slate-300 rounded-lg"
+                      >
+                        <option value="EM_LIBERDADE">EM LIBERDADE (Na rua)</option>
+                        <option value="FORAGIDO">FORAGIDO (Mandado pendente)</option>
+                        <option value="PRESO">PRESO (No sistema penitenciário)</option>
+                        <option value="MORTO">MORTO / FALECIDO</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateOrcrimModal(false)}
+                  disabled={isSavingOrcrim}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingOrcrim}
+                  className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-md flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingOrcrim ? (
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 text-white" />
+                  )}
+                  <span>{isSavingOrcrim ? 'Cadastrando...' : 'Cadastrar ORCRIM'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

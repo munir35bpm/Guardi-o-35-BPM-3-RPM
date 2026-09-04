@@ -62,6 +62,7 @@ export function saveDatabaseToDiskCache(): void {
       infrator_ocorrencia: db.infrator_ocorrencia,
       vinculos_comparsas: db.vinculos_comparsas,
       gang_areas: db.gang_areas,
+      orcrim_organogramas: db.orcrim_organogramas,
     };
     fs.writeFileSync(CACHE_FILE, JSON.stringify(payload, null, 2), 'utf-8');
   } catch (err) {
@@ -86,6 +87,9 @@ export function loadDatabaseFromDiskCache(): boolean {
         db.vinculos_comparsas = data.vinculos_comparsas || [];
         if (Array.isArray(data.gang_areas) && data.gang_areas.length > 0) {
           db.gang_areas = data.gang_areas;
+        }
+        if (Array.isArray(data.orcrim_organogramas) && data.orcrim_organogramas.length > 0) {
+          db.orcrim_organogramas = data.orcrim_organogramas;
         }
         console.log(`💾 Banco carregado do cache em disco: ${db.infratores.length} infratores, ${db.ocorrencias_criminais.length} ocorrências.`);
         return true;

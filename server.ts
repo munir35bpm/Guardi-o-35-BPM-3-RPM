@@ -1517,6 +1517,7 @@ app.post('/api/orcrim/organogramas', (req, res) => {
       return;
     }
     const saved = db.saveOrcrim(data);
+    saveDatabaseToDiskCache();
     res.status(201).json(saved);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -1531,6 +1532,7 @@ app.delete('/api/orcrim/organogramas/:id', (req, res) => {
       res.status(404).json({ error: 'Organograma não encontrado.' });
       return;
     }
+    saveDatabaseToDiskCache();
     res.json({ success: true, message: 'Organograma excluído com sucesso.' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
