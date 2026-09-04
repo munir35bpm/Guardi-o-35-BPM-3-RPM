@@ -421,6 +421,41 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
     );
   };
 
+  // Find matching full incident from database for maximum data richness
+  const matchingIncident = useMemo(() => {
+    if (!selectedNode || selectedNode.type !== 'incident') return null;
+    return (
+      (db.ocorrencias_criminais || []).find(
+        (o) =>
+          o.id === selectedNode.id ||
+          o.numero_bo === selectedNode.id ||
+          (selectedNode.numero_bo && o.numero_bo === selectedNode.numero_bo) ||
+          (selectedNode.label && o.numero_bo && selectedNode.label.includes(o.numero_bo))
+      ) || null
+    );
+  }, [selectedNode]);
+
+  // Connected suspects in this incident
+  const connectedIncidentSuspects = useMemo(() => {
+    if (!selectedNode || selectedNode.type !== 'incident') return [];
+    return edges
+      .filter(
+        (e) =>
+          (e.source === selectedNode.id || e.target === selectedNode.id) &&
+          e.type === 'participated'
+      )
+      .map((e) => {
+        const suspectId = e.source === selectedNode.id ? e.target : e.source;
+        const suspectNode = nodes.find((n) => n.id === suspectId) || rawNodes.find((n) => n.id === suspectId);
+        return {
+          id: suspectId,
+          suspectNode,
+          papel: e.label || 'Autor / Envolvido',
+        };
+      })
+      .filter((item) => Boolean(item.suspectNode));
+  }, [selectedNode, edges, nodes, rawNodes]);
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-96 bg-slate-900 border border-slate-800 rounded-lg">
@@ -445,20 +480,6 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
   const currentVisibleSuspectsCount = nodes.filter((n) => n.type === 'suspect').length;
   const currentVisibleIncidentsCount = nodes.filter((n) => n.type === 'incident').length;
 
-  // Find matching full incident from database for maximum data richness
-  const matchingIncident = useMemo(() => {
-    if (!selectedNode || selectedNode.type !== 'incident') return null;
-    return (
-      (db.ocorrencias_criminais || []).find(
-        (o) =>
-          o.id === selectedNode.id ||
-          o.numero_bo === selectedNode.id ||
-          (selectedNode.numero_bo && o.numero_bo === selectedNode.numero_bo) ||
-          (selectedNode.label && o.numero_bo && selectedNode.label.includes(o.numero_bo))
-      ) || null
-    );
-  }, [selectedNode]);
-
   const incidentBoNumber =
     selectedNode?.numero_bo || matchingIncident?.numero_bo || selectedNode?.label?.split(' - ')[0] || 'S/N';
   const incidentTipificacao =
@@ -473,27 +494,6 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
     selectedNode?.armas_utilizadas || matchingIncident?.armas_utilizadas || '';
   const incidentVeiculo =
     selectedNode?.veiculo_utilizado || matchingIncident?.veiculo_utilizado || '';
-
-  // Connected suspects in this incident
-  const connectedIncidentSuspects = useMemo(() => {
-    if (!selectedNode || selectedNode.type !== 'incident') return [];
-    return edges
-      .filter(
-        (e) =>
-          (e.source === selectedNode.id || e.target === selectedNode.id) &&
-          e.type === 'participated'
-      )
-      .map((e) => {
-        const suspectId = e.source === selectedNode.id ? e.target : e.source;
-        const suspectNode = nodes.find((n) => n.id === suspectId) || rawNodes.find((n) => n.id === suspectId);
-        return {
-          id: suspectId,
-          suspectNode,
-          papel: e.label || 'Autor / Envolvido',
-        };
-      })
-      .filter((item) => Boolean(item.suspectNode));
-  }, [selectedNode, edges, nodes, rawNodes]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 font-sans">
