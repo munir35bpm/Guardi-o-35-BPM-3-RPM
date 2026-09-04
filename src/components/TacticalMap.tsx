@@ -23,6 +23,8 @@ import {
   Globe,
   Radio,
   X,
+  Edit3,
+  Plus,
 } from 'lucide-react';
 import { db } from '../backend/db';
 import GangMapImporterModal from './GangMapImporterModal';
@@ -73,6 +75,8 @@ interface TacticalMapProps {
   onSelectGangZone?: (zone: GangAreaZone | null) => void;
   gangAreasProp?: GangAreaZone[];
   onGangAreasChange?: (areas: GangAreaZone[]) => void;
+  onEditGangZone?: (zone: GangAreaZone) => void;
+  onCreateGangZone?: () => void;
 }
 
 // Helper to compute centroid of polygon coordinates for tactical label placement
@@ -154,6 +158,8 @@ export default function TacticalMap({
   onSelectGangZone,
   gangAreasProp,
   onGangAreasChange,
+  onEditGangZone,
+  onCreateGangZone,
 }: TacticalMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -605,10 +611,26 @@ export default function TacticalMap({
 
             ${suspectsHTML}
             ${occurrencesHTML}
+
+            <div style="margin-top: 8px; border-top: 1px solid #334155; padding-top: 6px; display: flex; justify-content: flex-end;">
+              <button id="btn-edit-zone-${zone.id}" type="button" style="background: #1e293b; color: #fbbf24; border: 1px solid #d97706; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                ✏️ Editar Gangue e Território
+              </button>
+            </div>
           </div>
         `;
 
         polygon.bindPopup(popupContent);
+
+        polygon.on('popupopen', () => {
+          const btn = document.getElementById(`btn-edit-zone-${zone.id}`);
+          if (btn) {
+            btn.onclick = (e) => {
+              e.stopPropagation();
+              if (onEditGangZone) onEditGangZone(zone);
+            };
+          }
+        });
 
         polygon.on('click', () => {
           if (onSelectGangZone) {
@@ -1285,6 +1307,16 @@ export default function TacticalMap({
                   Modo Clean Ativo
                 </span>
               </div>
+              {onEditGangZone && (
+                <button
+                  type="button"
+                  onClick={() => onEditGangZone(selectedGangZone)}
+                  className="p-1 hover:bg-slate-800 text-amber-400 hover:text-amber-300 rounded border border-slate-700 transition cursor-pointer"
+                  title="Editar nome da gangue e território"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onSelectGangZone && onSelectGangZone(null)}
@@ -1455,6 +1487,19 @@ export default function TacticalMap({
             )}
           </div>
 
+          {/* Add / Create Gang Button */}
+          {onCreateGangZone && (
+            <button
+              type="button"
+              onClick={onCreateGangZone}
+              className="px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 border border-amber-500/40 rounded text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 transition cursor-pointer shadow-md"
+              title="Cadastrar nova gangue e demarcar território"
+            >
+              <Plus className="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
+              <span className="hidden sm:inline">Nova Gangue</span>
+            </button>
+          )}
+
           {/* Import KML / GeoJSON Button */}
           <button
             type="button"
@@ -1569,6 +1614,18 @@ export default function TacticalMap({
                       </div>
 
                       <div className="flex items-center gap-1">
+                        {/* Edit Zone Button */}
+                        {onEditGangZone && (
+                          <button
+                            type="button"
+                            onClick={() => onEditGangZone(zone)}
+                            className="p-1 text-slate-400 hover:text-amber-300 rounded transition cursor-pointer"
+                            title="Editar nome da gangue e território"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+                          </button>
+                        )}
+
                         {/* Fly To Button */}
                         <button
                           type="button"

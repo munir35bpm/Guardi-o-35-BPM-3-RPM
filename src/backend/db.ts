@@ -129,6 +129,16 @@ class CrimIntelDatabase {
     return area;
   }
 
+  public updateGangArea(area: GangAreaZone): GangAreaZone {
+    const idx = this.gang_areas.findIndex((a) => a.id === area.id);
+    if (idx !== -1) {
+      this.gang_areas[idx] = area;
+    } else {
+      this.gang_areas.push(area);
+    }
+    return area;
+  }
+
   public removeGangArea(id: string): boolean {
     const prevLen = this.gang_areas.length;
     this.gang_areas = this.gang_areas.filter((a) => a.id !== id);

@@ -54,6 +54,7 @@ import Logo35BPM from './components/Logo35BPM';
 import { OrcrimWindow } from './components/OrcrimWindow';
 import FacialRecognitionModule from './components/FacialRecognitionModule';
 import OccurrencePickerFromSuspects from './components/OccurrencePickerFromSuspects';
+import { GangAreaEditModal } from './components/GangAreaEditModal';
 import {
   SuspectWithDetails,
   OcorrenciaCriminal,
@@ -82,6 +83,7 @@ import {
   linkOccurrenceToSuspectInFirebase,
   unlinkOccurrenceFromSuspectInFirebase,
   deduplicateAddresses,
+  persistGangAreasToFirebase,
 } from './services/firebaseSync';
 
 export default function App() {
@@ -94,6 +96,8 @@ export default function App() {
   const [addresses, setAddresses] = useState<EnderecoAtuacao[]>([]);
   const [gangAreas, setGangAreas] = useState<GangAreaZone[]>([]);
   const [selectedGangZone, setSelectedGangZone] = useState<GangAreaZone | null>(null);
+  const [isGangEditModalOpen, setIsGangEditModalOpen] = useState(false);
+  const [gangZoneToEdit, setGangZoneToEdit] = useState<GangAreaZone | null>(null);
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>({
     lat: -19.7712,
     lng: -43.8564, // Santa Luzia / 35º BPM default coordinates
@@ -394,6 +398,100 @@ export default function App() {
     } catch (e) {}
 
     setGangAreas(DEFAULT_GANG_AREAS_35BPM);
+  };
+
+  const handleOpenEditGangZone = (zone: GangAreaZone) => {
+    setGangZoneToEdit(zone);
+    setIsGangEditModalOpen(true);
+  };
+
+  const handleOpenCreateGangZone = () => {
+    setGangZoneToEdit(null);
+    setIsGangEditModalOpen(true);
+  };
+
+  const handleSaveGangZone = async (zone: GangAreaZone, isNew: boolean) => {
+    try {
+      if (isNew) {
+        db.addGangArea(zone);
+      } else {
+        db.updateGangArea(zone);
+      }
+
+      let updatedList: GangAreaZone[];
+      if (isNew) {
+        updatedList = [...gangAreas, zone];
+      } else {
+        updatedList = gangAreas.map((g) => (g.id === zone.id ? zone : g));
+      }
+      setGangAreas(updatedList);
+
+      if (selectedGangZone && selectedGangZone.id === zone.id) {
+        setSelectedGangZone(zone);
+      }
+
+      if (isNew) {
+        await fetch('/api/gang-areas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(zone),
+        }).catch(() => null);
+      } else {
+        await fetch(`/api/gang-areas/${encodeURIComponent(zone.id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(zone),
+        }).catch(() => null);
+      }
+
+      try {
+        localStorage.setItem('tactical_gang_areas_v1', JSON.stringify(updatedList));
+        await persistGangAreasToFirebase(updatedList);
+      } catch (e) {}
+
+      setIsGangEditModalOpen(false);
+      setGangZoneToEdit(null);
+      setToastMessage(
+        isNew
+          ? `Gangue "${zone.gangName || zone.name}" cadastrada com sucesso!`
+          : `Dados e território de "${zone.gangName || zone.name}" atualizados com sucesso!`
+      );
+      setTimeout(() => setToastMessage(null), 4000);
+    } catch (error) {
+      console.error('Erro ao salvar zona de gangue:', error);
+    }
+  };
+
+  const handleDeleteGangZone = async (zoneId: string) => {
+    try {
+      const removedZone = gangAreas.find((g) => g.id === zoneId);
+      const zoneName = removedZone?.gangName || removedZone?.name || 'Gangue';
+
+      db.removeGangArea(zoneId);
+
+      const updatedList = gangAreas.filter((g) => g.id !== zoneId);
+      setGangAreas(updatedList);
+
+      if (selectedGangZone && selectedGangZone.id === zoneId) {
+        setSelectedGangZone(null);
+      }
+
+      await fetch(`/api/gang-areas/${encodeURIComponent(zoneId)}`, {
+        method: 'DELETE',
+      }).catch(() => null);
+
+      try {
+        localStorage.setItem('tactical_gang_areas_v1', JSON.stringify(updatedList));
+        await persistGangAreasToFirebase(updatedList, true);
+      } catch (e) {}
+
+      setIsGangEditModalOpen(false);
+      setGangZoneToEdit(null);
+      setToastMessage(`Área e território de "${zoneName}" excluídos.`);
+      setTimeout(() => setToastMessage(null), 4000);
+    } catch (error) {
+      console.error('Erro ao excluir zona de gangue:', error);
+    }
   };
 
   const syncStateFromDatabase = () => {
@@ -2336,6 +2434,8 @@ export default function App() {
                   onSelectGangZone={setSelectedGangZone}
                   gangAreasProp={gangAreas}
                   onGangAreasChange={setGangAreas}
+                  onEditGangZone={handleOpenEditGangZone}
+                  onCreateGangZone={handleOpenCreateGangZone}
                 />
               </div>
 
@@ -2348,6 +2448,8 @@ export default function App() {
                   suspects={suspects}
                   addresses={addresses}
                   occurrences={occurrences}
+                  onEditGangZone={handleOpenEditGangZone}
+                  onCreateGangZone={handleOpenCreateGangZone}
                   onFocusCoordinates={(coords) => {
                     handleMapCoordinatePick(coords);
                   }}
@@ -6187,6 +6289,20 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Modal de Cadastro & Edição de Nome da Gangue e Território */}
+      <GangAreaEditModal
+        isOpen={isGangEditModalOpen}
+        onClose={() => {
+          setIsGangEditModalOpen(false);
+          setGangZoneToEdit(null);
+        }}
+        zoneToEdit={gangZoneToEdit}
+        existingGangAreas={gangAreas}
+        selectedCoords={selectedCoords}
+        onSave={handleSaveGangZone}
+        onDelete={handleDeleteGangZone}
+      />
 
       {/* Toast Notification */}
       {toastMessage && (

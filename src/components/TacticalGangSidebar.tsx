@@ -22,7 +22,8 @@ import {
   CheckCircle2,
   Layers,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Edit3
 } from 'lucide-react';
 import { GangAreaZone, Infrator, EnderecoAtuacao, OcorrenciaCriminal } from '../types';
 import { getGangIntelligenceDetails, GangIntelligenceData } from '../utils/gangIntelligence';
@@ -39,6 +40,8 @@ interface TacticalGangSidebarProps {
   onRunAiSweep?: (gangZone?: GangAreaZone) => void;
   onRegisterOccurrence?: (coords?: { lat: number; lng: number }) => void;
   onRegisterAddress?: (coords?: { lat: number; lng: number }) => void;
+  onEditGangZone?: (zone: GangAreaZone) => void;
+  onCreateGangZone?: () => void;
 }
 
 export const TacticalGangSidebar: React.FC<TacticalGangSidebarProps> = ({
@@ -53,6 +56,8 @@ export const TacticalGangSidebar: React.FC<TacticalGangSidebarProps> = ({
   onRunAiSweep,
   onRegisterOccurrence,
   onRegisterAddress,
+  onEditGangZone,
+  onCreateGangZone,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'integrantes' | 'residencias' | 'ocorrencias' | 'operacoes'>('integrantes');
@@ -119,22 +124,36 @@ export const TacticalGangSidebar: React.FC<TacticalGangSidebarProps> = ({
           </div>
         </div>
 
-        {/* Reset / All Gangs Button */}
-        {selectedGangZone ? (
-          <button
-            type="button"
-            onClick={() => onSelectGangZone(null)}
-            className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded border border-zinc-700 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 transition cursor-pointer"
-            title="Limpar seleção e exibir todas as demarcações no mapa"
-          >
-            <Eye className="w-3 h-3 text-amber-400" />
-            <span>Ver Todas</span>
-          </button>
-        ) : (
-          <span className="text-[10px] bg-amber-950/60 border border-amber-800/60 text-amber-300 px-2 py-0.5 rounded font-bold">
-            {gangAreas.length} Áreas
-          </span>
-        )}
+        {/* Action Buttons: Cadastrar Nova Gangue & Reset/All Gangs */}
+        <div className="flex items-center gap-1.5">
+          {onCreateGangZone && (
+            <button
+              type="button"
+              onClick={onCreateGangZone}
+              className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 rounded border border-amber-500/40 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 transition cursor-pointer"
+              title="Cadastrar nova gangue e demarcar território"
+            >
+              <Plus className="w-3 h-3 text-amber-400" />
+              <span>Nova Gangue</span>
+            </button>
+          )}
+
+          {selectedGangZone ? (
+            <button
+              type="button"
+              onClick={() => onSelectGangZone(null)}
+              className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded border border-zinc-700 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 transition cursor-pointer"
+              title="Limpar seleção e exibir todas as demarcações no mapa"
+            >
+              <Eye className="w-3 h-3 text-amber-400" />
+              <span>Ver Todas</span>
+            </button>
+          ) : (
+            <span className="text-[10px] bg-amber-950/60 border border-amber-800/60 text-amber-300 px-2 py-0.5 rounded font-bold">
+              {gangAreas.length} Áreas
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Search Input */}
@@ -229,12 +248,27 @@ export const TacticalGangSidebar: React.FC<TacticalGangSidebarProps> = ({
                       </span>
                     </div>
 
-                    {isSelected && (
-                      <span className="shrink-0 flex items-center gap-1 text-[9px] bg-amber-500 text-black font-extrabold px-1.5 py-0.2 rounded uppercase">
-                        <CheckCircle2 className="w-2.5 h-2.5 stroke-[3]" />
-                        <span>Foco Ativo</span>
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {onEditGangZone && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditGangZone(zone);
+                          }}
+                          className="p-1 text-zinc-400 hover:text-amber-300 hover:bg-zinc-800 rounded transition cursor-pointer"
+                          title="Editar nome da gangue e território"
+                        >
+                          <Edit3 className="w-3 h-3 text-amber-400" />
+                        </button>
+                      )}
+                      {isSelected && (
+                        <span className="shrink-0 flex items-center gap-1 text-[9px] bg-amber-500 text-black font-extrabold px-1.5 py-0.2 rounded uppercase">
+                          <CheckCircle2 className="w-2.5 h-2.5 stroke-[3]" />
+                          <span>Foco</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Badges / Metrics row */}
@@ -292,16 +326,31 @@ export const TacticalGangSidebar: React.FC<TacticalGangSidebarProps> = ({
                 </p>
               </div>
 
-              {/* Focus Map Button */}
-              <button
-                type="button"
-                onClick={handleFocusGangTerritory}
-                className="p-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/30 rounded transition cursor-pointer flex items-center gap-1"
-                title="Centralizar e aproximar mapa neste território"
-              >
-                <Crosshair className="w-3.5 h-3.5" />
-                <span className="text-[9px] font-bold uppercase hidden sm:inline">Focar</span>
-              </button>
+              {/* Action Buttons: Editar & Focar */}
+              <div className="flex items-center gap-1.5">
+                {onEditGangZone && (
+                  <button
+                    type="button"
+                    onClick={() => onEditGangZone(selectedGangZone)}
+                    className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-amber-400 hover:text-amber-300 border border-zinc-700 hover:border-amber-500/50 rounded transition cursor-pointer flex items-center gap-1"
+                    title="Editar nome da gangue, território e parâmetros táticos"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span className="text-[9px] font-bold uppercase hidden sm:inline">Editar</span>
+                  </button>
+                )}
+
+                {/* Focus Map Button */}
+                <button
+                  type="button"
+                  onClick={handleFocusGangTerritory}
+                  className="p-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/30 rounded transition cursor-pointer flex items-center gap-1"
+                  title="Centralizar e aproximar mapa neste território"
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
+                  <span className="text-[9px] font-bold uppercase hidden sm:inline">Focar</span>
+                </button>
+              </div>
             </div>
 
             {/* General Gang Stats Row */}
