@@ -1381,21 +1381,8 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
         <!-- TEXTO BRUTO FORMATADO PARA CÓPIA (OCULTO NA TELA) -->
         <pre id="raw-technical-report-text" style="display: none;">${dossierSummary.textoFormatadoPoliciaJudiciaria}</pre>
 
-        <!-- Síntese Circunstanciada Consolidada em até 5 Linhas com Riqueza de Detalhes -->
-        <div class="rich-summary-box">
-          <div class="rich-summary-header">
-            <span>📋 Resumo Circunstanciado de Inteligência • Análise Consolidada dos Registros</span>
-            <span style="font-size: 6.8pt; font-weight: 700; color: #64748b;">Síntese Integrada</span>
-          </div>
-          <div>
-            ${dossierSummary.rich5Lines.map((line: string) => `
-              <div class="rich-line-item">${line}</div>
-            `).join('')}
-          </div>
-        </div>
-
         <!-- Indicadores Técnicos: Tipificações Recorrentes & Meios Empregados -->
-        <div class="dossier-grid">
+        <div class="dossier-grid" style="margin-top: 6px; margin-bottom: 0;">
           <!-- Bloco A: Tipificações Recorrentes -->
           <div class="dossier-card">
             <div class="dossier-card-title">
@@ -1429,36 +1416,6 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Bloco C: Quadro Sinóptico dos Registros Policiais (Linha do Tempo Compacta) -->
-        <div class="dossier-card" style="margin-top: 4px;">
-          <div class="dossier-card-title" style="color: #9a3412;">
-            <span>Quadro Sinóptico dos Registros Policiais Vinculados (B.O.s)</span>
-            <span style="color: #9a3412; font-size: 6.5pt; font-weight: 700;">${dossierSummary.diligencePoints.length} B.O.(s)</span>
-          </div>
-          <table style="margin-bottom: 0;">
-            <thead>
-              <tr>
-                <th style="width: 140px;">B.O. Nº / Data</th>
-                <th style="width: 130px;">Tipificação Penal</th>
-                <th style="width: 70px;">Papel</th>
-                <th style="width: 120px;">Bairro / Local</th>
-                <th>Destaque do Fato / Modus Operandi</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${dossierSummary.diligencePoints.map((p: any) => `
-                <tr>
-                  <td><strong>${p.bo}</strong><br/><span style="color: #64748b; font-size: 7pt;">${p.data}</span></td>
-                  <td><span style="font-weight: 700; color: #991b1b;">${p.tipificacao}</span></td>
-                  <td><span style="background: #fef3c7; color: #92400e; font-weight: 700; font-size: 6.8pt; padding: 1px 4px; border-radius: 2px; border: 1px solid #fde68a;">${p.papel}</span></td>
-                  <td>${p.local}</td>
-                  <td style="color: #334155; line-height: 1.25;">${p.pontoChave}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
         </div>
       </div>
     `}
