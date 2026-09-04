@@ -45,7 +45,11 @@ import {
   Star,
   Eye,
   Maximize2,
-  Edit3
+  Edit3,
+  Lock,
+  Unlock,
+  KeyRound,
+  ShieldCheck
 } from 'lucide-react';
 import TacticalMap from './components/TacticalMap';
 import { TacticalGangSidebar } from './components/TacticalGangSidebar';
@@ -55,6 +59,9 @@ import { OrcrimWindow } from './components/OrcrimWindow';
 import FacialRecognitionModule from './components/FacialRecognitionModule';
 import OccurrencePickerFromSuspects from './components/OccurrencePickerFromSuspects';
 import { GangAreaEditModal } from './components/GangAreaEditModal';
+import { AdminPinModal } from './components/AdminPinModal';
+import { ChangePinModal } from './components/ChangePinModal';
+import { isAdminAuthenticated, logoutAdmin } from './services/adminAuth';
 import {
   SuspectWithDetails,
   OcorrenciaCriminal,
@@ -103,6 +110,42 @@ export default function App() {
     lng: -43.8564, // Santa Luzia / 35º BPM default coordinates
   });
   const [highlightedSuspectId, setHighlightedSuspectId] = useState<string | null>(null);
+
+  // Admin PIN Protection (Apenas Administrador Autenticado pode alimentar ou editar dados)
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => isAdminAuthenticated());
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [isChangePinModalOpen, setIsChangePinModalOpen] = useState(false);
+  const [adminActionTitle, setAdminActionTitle] = useState<string>('');
+  const [pendingAdminAction, setPendingAdminAction] = useState<(() => void) | null>(null);
+
+  const requireAdmin = (actionTitle: string, actionCallback: () => void) => {
+    if (isAdminAuthenticated()) {
+      setIsAdmin(true);
+      actionCallback();
+    } else {
+      setIsAdmin(false);
+      setAdminActionTitle(actionTitle);
+      setPendingAdminAction(() => actionCallback);
+      setIsAdminModalOpen(true);
+    }
+  };
+
+  const handleAdminUnlocked = () => {
+    setIsAdmin(true);
+    setIsAdminModalOpen(false);
+    if (pendingAdminAction) {
+      const action = pendingAdminAction;
+      setPendingAdminAction(null);
+      action();
+    }
+  };
+
+  const handleAdminLock = () => {
+    logoutAdmin();
+    setIsAdmin(false);
+    setToastMessage('Modo Administrador encerrado. O sistema agora opera em MODO CONSULTA.');
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   // Stats Counters
   const [totalSuspects, setTotalSuspects] = useState(0);
@@ -401,97 +444,105 @@ export default function App() {
   };
 
   const handleOpenEditGangZone = (zone: GangAreaZone) => {
-    setGangZoneToEdit(zone);
-    setIsGangEditModalOpen(true);
+    requireAdmin(`Editar Território (${zone.gangName || zone.name})`, () => {
+      setGangZoneToEdit(zone);
+      setIsGangEditModalOpen(true);
+    });
   };
 
   const handleOpenCreateGangZone = () => {
-    setGangZoneToEdit(null);
-    setIsGangEditModalOpen(true);
+    requireAdmin('Cadastrar Território de Gangue', () => {
+      setGangZoneToEdit(null);
+      setIsGangEditModalOpen(true);
+    });
   };
 
   const handleSaveGangZone = async (zone: GangAreaZone, isNew: boolean) => {
-    try {
-      if (isNew) {
-        db.addGangArea(zone);
-      } else {
-        db.updateGangArea(zone);
-      }
-
-      let updatedList: GangAreaZone[];
-      if (isNew) {
-        updatedList = [...gangAreas, zone];
-      } else {
-        updatedList = gangAreas.map((g) => (g.id === zone.id ? zone : g));
-      }
-      setGangAreas(updatedList);
-
-      if (selectedGangZone && selectedGangZone.id === zone.id) {
-        setSelectedGangZone(zone);
-      }
-
-      if (isNew) {
-        await fetch('/api/gang-areas', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(zone),
-        }).catch(() => null);
-      } else {
-        await fetch(`/api/gang-areas/${encodeURIComponent(zone.id)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(zone),
-        }).catch(() => null);
-      }
-
+    requireAdmin(isNew ? 'Cadastrar Território de Gangue' : 'Editar Território de Gangue', async () => {
       try {
-        localStorage.setItem('tactical_gang_areas_v1', JSON.stringify(updatedList));
-        await persistGangAreasToFirebase(updatedList);
-      } catch (e) {}
+        if (isNew) {
+          db.addGangArea(zone);
+        } else {
+          db.updateGangArea(zone);
+        }
 
-      setIsGangEditModalOpen(false);
-      setGangZoneToEdit(null);
-      setToastMessage(
-        isNew
-          ? `Gangue "${zone.gangName || zone.name}" cadastrada com sucesso!`
-          : `Dados e território de "${zone.gangName || zone.name}" atualizados com sucesso!`
-      );
-      setTimeout(() => setToastMessage(null), 4000);
-    } catch (error) {
-      console.error('Erro ao salvar zona de gangue:', error);
-    }
+        let updatedList: GangAreaZone[];
+        if (isNew) {
+          updatedList = [...gangAreas, zone];
+        } else {
+          updatedList = gangAreas.map((g) => (g.id === zone.id ? zone : g));
+        }
+        setGangAreas(updatedList);
+
+        if (selectedGangZone && selectedGangZone.id === zone.id) {
+          setSelectedGangZone(zone);
+        }
+
+        if (isNew) {
+          await fetch('/api/gang-areas', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(zone),
+          }).catch(() => null);
+        } else {
+          await fetch(`/api/gang-areas/${encodeURIComponent(zone.id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(zone),
+          }).catch(() => null);
+        }
+
+        try {
+          localStorage.setItem('tactical_gang_areas_v1', JSON.stringify(updatedList));
+          await persistGangAreasToFirebase(updatedList);
+        } catch (e) {}
+
+        setIsGangEditModalOpen(false);
+        setGangZoneToEdit(null);
+        setToastMessage(
+          isNew
+            ? `Gangue "${zone.gangName || zone.name}" cadastrada com sucesso!`
+            : `Dados e território de "${zone.gangName || zone.name}" atualizados com sucesso!`
+        );
+        setTimeout(() => setToastMessage(null), 4000);
+      } catch (error) {
+        console.error('Erro ao salvar zona de gangue:', error);
+      }
+    });
   };
 
   const handleDeleteGangZone = async (zoneId: string) => {
-    try {
-      const removedZone = gangAreas.find((g) => g.id === zoneId);
-      const zoneName = removedZone?.gangName || removedZone?.name || 'Gangue';
-
-      db.removeGangArea(zoneId);
-
-      const updatedList = gangAreas.filter((g) => g.id !== zoneId);
-      setGangAreas(updatedList);
-
-      if (selectedGangZone && selectedGangZone.id === zoneId) {
-        setSelectedGangZone(null);
-      }
-
-      await fetch(`/api/gang-areas/${encodeURIComponent(zoneId)}`, {
-        method: 'DELETE',
-      }).catch(() => null);
-
+    requireAdmin('Excluir Território de Gangue', async () => {
       try {
-        localStorage.setItem('tactical_gang_areas_v1', JSON.stringify(updatedList));
-        await persistGangAreasToFirebase(updatedList, true);
-      } catch (e) {}
+        const removedZone = gangAreas.find((g) => g.id === zoneId);
+        const zoneName = removedZone?.gangName || removedZone?.name || 'Gangue';
 
-      setIsGangEditModalOpen(false);
-      setGangZoneToEdit(null);
-      setToastMessage(`Área e território de "${zoneName}" excluídos.`);
-      setTimeout(() => setToastMessage(null), 4000);
-    } catch (error) {
-      console.error('Erro ao excluir zona de gangue:', error);
-    }
+        db.removeGangArea(zoneId);
+
+        const updatedList = gangAreas.filter((g) => g.id !== zoneId);
+        setGangAreas(updatedList);
+
+        if (selectedGangZone && selectedGangZone.id === zoneId) {
+          setSelectedGangZone(null);
+        }
+
+        await fetch(`/api/gang-areas/${encodeURIComponent(zoneId)}`, {
+          method: 'DELETE',
+        }).catch(() => null);
+
+        try {
+          localStorage.setItem('tactical_gang_areas_v1', JSON.stringify(updatedList));
+          await persistGangAreasToFirebase(updatedList, true);
+        } catch (e) {}
+
+        setIsGangEditModalOpen(false);
+        setGangZoneToEdit(null);
+        setToastMessage(`Área e território de "${zoneName}" excluídos.`);
+        setTimeout(() => setToastMessage(null), 4000);
+      } catch (error) {
+        console.error('Erro ao excluir zona de gangue:', error);
+      }
+    });
   };
 
   const syncStateFromDatabase = () => {
@@ -785,76 +836,64 @@ export default function App() {
 
   // Start editing existing suspect
   const handleStartEditSuspect = async (id: string) => {
-    let target: any = null;
-    try {
-      const res = await fetch(`/api/infratores/${id}`).catch(() => null);
-      if (res && res.ok) {
-        target = await res.json();
+    requireAdmin('Editar Ficha de Infrator', async () => {
+      let target: any = null;
+      try {
+        const res = await fetch(`/api/infratores/${id}`).catch(() => null);
+        if (res && res.ok) {
+          target = await res.json();
+        }
+      } catch (err) {
+        console.warn('Error fetching suspect from API for edit, fallback local:', err);
       }
-    } catch (err) {
-      console.warn('Error fetching suspect from API for edit, fallback local:', err);
-    }
 
-    if (!target) {
-      target = db.getInfratorFull(id) || suspects.find(s => s.id === id);
-    }
+      if (!target) {
+        target = db.getInfratorFull(id) || suspects.find(s => s.id === id);
+      }
 
-    if (!target) {
-      alert('Infrator não encontrado para edição.');
-      return;
-    }
+      if (!target) {
+        alert('Infrator não encontrado para edição.');
+        return;
+      }
 
-    setEditingSuspectId(id);
-    setNewSuspectForm({
-      nome_completo: target.nome_completo || '',
-      vulgo: target.vulgo || '',
-      data_nascimento: target.data_nascimento ? target.data_nascimento.slice(0, 10) : '1995-01-01',
-      cpf: target.cpf || '',
-      foto_url: target.foto_url || '',
-      gangue_faccao: target.gangue_faccao || '',
-      situacao_atual: target.situacao_atual || target.situacao_prisional || (target.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE'),
-      status_mandado_prisao: !!target.status_mandado_prisao,
-      periculosidade: target.periculosidade || 'Média',
-      altura_estimada: String(target.fisicas?.altura_estimada ?? '1.75'),
-      cor_pele: target.fisicas?.cor_pele || 'Parda',
-      compleicao: target.fisicas?.compleicao || 'Média',
-      tatuagens_detalhes: target.fisicas?.tatuagens_detalhes || '',
-      cicatrizes: target.fisicas?.cicatrizes || '',
-      sinais_particulares: target.fisicas?.sinais_particulares || '',
-    });
+      setEditingSuspectId(id);
+      setNewSuspectForm({
+        nome_completo: target.nome_completo || '',
+        vulgo: target.vulgo || '',
+        data_nascimento: target.data_nascimento ? target.data_nascimento.slice(0, 10) : '1995-01-01',
+        cpf: target.cpf || '',
+        foto_url: target.foto_url || '',
+        gangue_faccao: target.gangue_faccao || '',
+        situacao_atual: target.situacao_atual || target.situacao_prisional || (target.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE'),
+        status_mandado_prisao: !!target.status_mandado_prisao,
+        periculosidade: target.periculosidade || 'Média',
+        altura_estimada: String(target.fisicas?.altura_estimada ?? '1.75'),
+        cor_pele: target.fisicas?.cor_pele || 'Parda',
+        compleicao: target.fisicas?.compleicao || 'Média',
+        tatuagens_detalhes: target.fisicas?.tatuagens_detalhes || '',
+        cicatrizes: target.fisicas?.cicatrizes || '',
+        sinais_particulares: target.fisicas?.sinais_particulares || '',
+      });
 
-    // Populate gallery photos
-    if (target.galeria_fotos && target.galeria_fotos.length > 0) {
-      setSuspectPhotosList(target.galeria_fotos);
-    } else if (target.foto_url) {
-      setSuspectPhotosList([{
-        id: `foto-${target.id}-main`,
-        url: target.foto_url,
-        tipo: 'ROSTO',
-        descricao: 'Foto Principal',
-        principal: true,
-        data_inclusao: new Date().toISOString()
-      }]);
-    } else {
-      setSuspectPhotosList([]);
-    }
+      // Populate gallery photos
+      if (target.galeria_fotos && target.galeria_fotos.length > 0) {
+        setSuspectPhotosList(target.galeria_fotos);
+      } else if (target.foto_url) {
+        setSuspectPhotosList([{
+          id: `foto-${target.id}-main`,
+          url: target.foto_url,
+          tipo: 'ROSTO',
+          descricao: 'Foto Principal',
+          principal: true,
+          data_inclusao: new Date().toISOString()
+        }]);
+      } else {
+        setSuspectPhotosList([]);
+      }
 
-    // Populate operational addresses
-    if (target.enderecos && target.enderecos.length > 0) {
-      setSuspectAddressesList(target.enderecos.map((a: any) => ({
-        tempId: a.id || `addr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        tipo_endereco: a.tipo_endereco || 'Residência',
-        logradouro: a.logradouro || '',
-        bairro: a.bairro || 'Centro',
-        cidade: a.cidade || 'Santa Luzia',
-        raio_influencia_km: String(a.raio_influencia_km || '2.5'),
-        lat: String(a.geom_ponto?.lat ?? a.lat ?? '-19.7712'),
-        lng: String(a.geom_ponto?.lng ?? a.lng ?? '-43.8564'),
-      })));
-    } else {
-      const currentAddrs = addresses.filter(a => a.infrator_id === target.id);
-      if (currentAddrs.length > 0) {
-        setSuspectAddressesList(currentAddrs.map((a: any) => ({
+      // Populate operational addresses
+      if (target.enderecos && target.enderecos.length > 0) {
+        setSuspectAddressesList(target.enderecos.map((a: any) => ({
           tempId: a.id || `addr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           tipo_endereco: a.tipo_endereco || 'Residência',
           logradouro: a.logradouro || '',
@@ -865,36 +904,50 @@ export default function App() {
           lng: String(a.geom_ponto?.lng ?? a.lng ?? '-43.8564'),
         })));
       } else {
-        setSuspectAddressesList([]);
+        const currentAddrs = addresses.filter(a => a.infrator_id === target.id);
+        if (currentAddrs.length > 0) {
+          setSuspectAddressesList(currentAddrs.map((a: any) => ({
+            tempId: a.id || `addr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            tipo_endereco: a.tipo_endereco || 'Residência',
+            logradouro: a.logradouro || '',
+            bairro: a.bairro || 'Centro',
+            cidade: a.cidade || 'Santa Luzia',
+            raio_influencia_km: String(a.raio_influencia_km || '2.5'),
+            lat: String(a.geom_ponto?.lat ?? a.lat ?? '-19.7712'),
+            lng: String(a.geom_ponto?.lng ?? a.lng ?? '-43.8564'),
+          })));
+        } else {
+          setSuspectAddressesList([]);
+        }
       }
-    }
 
-    // Populate occurrences
-    if (target.ocorrencias_relacionadas && target.ocorrencias_relacionadas.length > 0) {
-      setSuspectOccurrencesList(target.ocorrencias_relacionadas.map((oc: any) => ({
-        tempId: `tmp-oc-${oc.id || oc.numero_bo}-${Math.random().toString(36).substring(2, 6)}`,
-        isNew: false,
-        ocorrencia_id: oc.id,
-        numero_bo: oc.numero_bo,
-        tipificacao_penal: oc.tipificacao_penal,
-        papel_no_crime: oc.papel || oc.papel_no_crime || 'Autor',
-        data_hora: oc.data_hora,
-        descricao_fato: oc.descricao_fato,
-        modus_operandi: oc.modus_operandi,
-        armas_utilizadas: oc.armas_utilizadas,
-        veiculo_utilizado: oc.veiculo_utilizado,
-      })));
-    } else {
-      setSuspectOccurrencesList([]);
-    }
+      // Populate occurrences
+      if (target.ocorrencias_relacionadas && target.ocorrencias_relacionadas.length > 0) {
+        setSuspectOccurrencesList(target.ocorrencias_relacionadas.map((oc: any) => ({
+          tempId: `tmp-oc-${oc.id || oc.numero_bo}-${Math.random().toString(36).substring(2, 6)}`,
+          isNew: false,
+          ocorrencia_id: oc.id,
+          numero_bo: oc.numero_bo,
+          tipificacao_penal: oc.tipificacao_penal,
+          papel_no_crime: oc.papel || oc.papel_no_crime || 'Autor',
+          data_hora: oc.data_hora,
+          descricao_fato: oc.descricao_fato,
+          modus_operandi: oc.modus_operandi,
+          armas_utilizadas: oc.armas_utilizadas,
+          veiculo_utilizado: oc.veiculo_utilizado,
+        })));
+      } else {
+        setSuspectOccurrencesList([]);
+      }
 
-    setIsAddingSuspect(true);
-    setIsAddingOccurrence(false);
-    setIsAddingAddress(false);
-    setActiveTab('db');
+      setIsAddingSuspect(true);
+      setIsAddingOccurrence(false);
+      setIsAddingAddress(false);
+      setActiveTab('db');
 
-    // Scroll to top where the form is opened
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+      // Scroll to top where the form is opened
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
   };
 
   // Cancel suspect edit
@@ -1085,120 +1138,124 @@ export default function App() {
   // Direct address addition in suspect detail drawer
   const handleAddAddressDirectly = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedSuspectDetail) return;
-    if (!directNewAddrData.logradouro.trim()) {
-      alert('Informe o Logradouro / Endereço.');
-      return;
-    }
-    const logrNorm = directNewAddrData.logradouro.trim().toLowerCase();
-    const tipoNorm = (directNewAddrData.tipo_endereco || 'Residência').toLowerCase();
-    const existing = db.enderecos_atuacao.find(
-      (ea) =>
-        ea.infrator_id === selectedSuspectDetail.id &&
-        (ea.tipo_endereco || 'Residência').toLowerCase() === tipoNorm &&
-        (ea.logradouro || '').trim().toLowerCase() === logrNorm
-    );
-    if (existing) {
-      setToastMessage('Este endereço já está cadastrado para este infrator.');
-      setTimeout(() => setToastMessage(null), 3500);
-      setIsAddingDirectAddress(false);
-      return;
-    }
+    requireAdmin('Cadastrar Endereço para o Infrator', async () => {
+      if (!selectedSuspectDetail) return;
+      if (!directNewAddrData.logradouro.trim()) {
+        alert('Informe o Logradouro / Endereço.');
+        return;
+      }
+      const logrNorm = directNewAddrData.logradouro.trim().toLowerCase();
+      const tipoNorm = (directNewAddrData.tipo_endereco || 'Residência').toLowerCase();
+      const existing = db.enderecos_atuacao.find(
+        (ea) =>
+          ea.infrator_id === selectedSuspectDetail.id &&
+          (ea.tipo_endereco || 'Residência').toLowerCase() === tipoNorm &&
+          (ea.logradouro || '').trim().toLowerCase() === logrNorm
+      );
+      if (existing) {
+        setToastMessage('Este endereço já está cadastrado para este infrator.');
+        setTimeout(() => setToastMessage(null), 3500);
+        setIsAddingDirectAddress(false);
+        return;
+      }
 
-    try {
-      const payload = {
-        infrator_id: selectedSuspectDetail.id,
-        tipo_endereco: directNewAddrData.tipo_endereco,
-        logradouro: directNewAddrData.logradouro.trim(),
-        bairro: directNewAddrData.bairro.trim() || 'Centro',
-        cidade: directNewAddrData.cidade.trim() || 'Santa Luzia',
-        raio_influencia_km: directNewAddrData.raio_influencia_km || '2.5',
-        lat: directNewAddrData.lat,
-        lng: directNewAddrData.lng,
-      };
-
-      let createdAddr: any = null;
       try {
-        const res = await fetch('/api/enderecos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (res.ok) {
-          createdAddr = await res.json();
-        }
-      } catch (err) {
-        console.warn('Backend API unavailable, saving to local in-memory DB', err);
-      }
-
-      if (!createdAddr) {
-        createdAddr = db.addEndereco(payload);
-      }
-
-      // Persist to Firebase Firestore
-      if (createdAddr && createdAddr.id) {
-        await persistAddressToFirebase({
-          id: createdAddr.id,
+        const payload = {
           infrator_id: selectedSuspectDetail.id,
-          tipo_endereco: (createdAddr.tipo_endereco || directNewAddrData.tipo_endereco) as any,
-          logradouro: createdAddr.logradouro || directNewAddrData.logradouro.trim(),
-          bairro: createdAddr.bairro || directNewAddrData.bairro.trim() || 'Centro',
-          cidade: createdAddr.cidade || directNewAddrData.cidade.trim() || 'Santa Luzia',
-          geom_ponto: {
-            lat: Number(directNewAddrData.lat),
-            lng: Number(directNewAddrData.lng)
-          },
-          raio_influencia_km: Number(directNewAddrData.raio_influencia_km) || 2.5
+          tipo_endereco: directNewAddrData.tipo_endereco,
+          logradouro: directNewAddrData.logradouro.trim(),
+          bairro: directNewAddrData.bairro.trim() || 'Centro',
+          cidade: directNewAddrData.cidade.trim() || 'Santa Luzia',
+          raio_influencia_km: directNewAddrData.raio_influencia_km || '2.5',
+          lat: directNewAddrData.lat,
+          lng: directNewAddrData.lng,
+        };
+
+        let createdAddr: any = null;
+        try {
+          const res = await fetch('/api/enderecos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (res.ok) {
+            createdAddr = await res.json();
+          }
+        } catch (err) {
+          console.warn('Backend API unavailable, saving to local in-memory DB', err);
+        }
+
+        if (!createdAddr) {
+          createdAddr = db.addEndereco(payload);
+        }
+
+        // Persist to Firebase Firestore
+        if (createdAddr && createdAddr.id) {
+          await persistAddressToFirebase({
+            id: createdAddr.id,
+            infrator_id: selectedSuspectDetail.id,
+            tipo_endereco: (createdAddr.tipo_endereco || directNewAddrData.tipo_endereco) as any,
+            logradouro: createdAddr.logradouro || directNewAddrData.logradouro.trim(),
+            bairro: createdAddr.bairro || directNewAddrData.bairro.trim() || 'Centro',
+            cidade: createdAddr.cidade || directNewAddrData.cidade.trim() || 'Santa Luzia',
+            geom_ponto: {
+              lat: Number(directNewAddrData.lat),
+              lng: Number(directNewAddrData.lng)
+            },
+            raio_influencia_km: Number(directNewAddrData.raio_influencia_km) || 2.5
+          });
+        }
+
+        // Refresh suspect detail
+        const updated = db.getInfratorFull(selectedSuspectDetail.id);
+        if (updated) {
+          setSelectedSuspectDetail(updated);
+        }
+
+        setIsAddingDirectAddress(false);
+        setDirectNewAddrData({
+          tipo_endereco: 'Residência',
+          logradouro: '',
+          bairro: '',
+          cidade: 'Santa Luzia',
+          raio_influencia_km: '2.5',
+          lat: '-19.7712',
+          lng: '-43.8564',
         });
+        fetchTelemetry();
+        setToastMessage('Novo endereço vinculado com sucesso.');
+        setTimeout(() => setToastMessage(null), 3500);
+      } catch (err) {
+        console.error('Error adding address directly:', err);
+        alert('Erro ao cadastrar endereço.');
       }
-
-      // Refresh suspect detail
-      const updated = db.getInfratorFull(selectedSuspectDetail.id);
-      if (updated) {
-        setSelectedSuspectDetail(updated);
-      }
-
-      setIsAddingDirectAddress(false);
-      setDirectNewAddrData({
-        tipo_endereco: 'Residência',
-        logradouro: '',
-        bairro: '',
-        cidade: 'Santa Luzia',
-        raio_influencia_km: '2.5',
-        lat: '-19.7712',
-        lng: '-43.8564',
-      });
-      fetchTelemetry();
-      setToastMessage('Novo endereço vinculado com sucesso.');
-      setTimeout(() => setToastMessage(null), 3500);
-    } catch (err) {
-      console.error('Error adding address directly:', err);
-      alert('Erro ao cadastrar endereço.');
-    }
+    });
   };
 
   const handleDeleteAddressDirectly = async (enderecoId: string) => {
-    if (!selectedSuspectDetail) return;
-    try {
+    requireAdmin('Remover Endereço do Infrator', async () => {
+      if (!selectedSuspectDetail) return;
       try {
-        await fetch(`/api/enderecos/${enderecoId}`, { method: 'DELETE' });
-      } catch (e) {
-        console.warn('Backend delete address failed, using local DB fallback', e);
+        try {
+          await fetch(`/api/enderecos/${enderecoId}`, { method: 'DELETE' });
+        } catch (e) {
+          console.warn('Backend delete address failed, using local DB fallback', e);
+        }
+        db.enderecos_atuacao = db.enderecos_atuacao.filter((ea) => ea.id !== enderecoId);
+        setAddresses((prev) => prev.filter((a) => a.id !== enderecoId));
+        // Delete from Firebase Firestore
+        await deleteAddressFromFirebase(enderecoId);
+        const updated = db.getInfratorFull(selectedSuspectDetail.id);
+        if (updated) {
+          setSelectedSuspectDetail(updated);
+        }
+        fetchTelemetry();
+        setToastMessage('Endereço removido com sucesso.');
+        setTimeout(() => setToastMessage(null), 3500);
+      } catch (err) {
+        console.error('Error deleting address:', err);
       }
-      db.enderecos_atuacao = db.enderecos_atuacao.filter((ea) => ea.id !== enderecoId);
-      setAddresses((prev) => prev.filter((a) => a.id !== enderecoId));
-      // Delete from Firebase Firestore
-      await deleteAddressFromFirebase(enderecoId);
-      const updated = db.getInfratorFull(selectedSuspectDetail.id);
-      if (updated) {
-        setSelectedSuspectDetail(updated);
-      }
-      fetchTelemetry();
-      setToastMessage('Endereço removido com sucesso.');
-      setTimeout(() => setToastMessage(null), 3500);
-    } catch (err) {
-      console.error('Error deleting address:', err);
-    }
+    });
   };
 
   // Photo handlers for Registration Form (Unlimited photos)
@@ -1354,120 +1411,126 @@ export default function App() {
 
   const handleSaveDirectPhotoForm = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedSuspectDetail || !directPhotoDraft.url.trim()) {
-      alert('Informe a URL da foto ou selecione uma imagem.');
-      return;
-    }
-    const suspectId = selectedSuspectDetail.id;
-    try {
-      let updated: any = null;
+    requireAdmin('Adicionar Foto ao Infrator', async () => {
+      if (!selectedSuspectDetail || !directPhotoDraft.url.trim()) {
+        alert('Informe a URL da foto ou selecione uma imagem.');
+        return;
+      }
+      const suspectId = selectedSuspectDetail.id;
       try {
-        const res = await fetch(`/api/infratores/${suspectId}/fotos`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(directPhotoDraft),
-        });
-        if (res.ok) {
-          updated = await res.json();
+        let updated: any = null;
+        try {
+          const res = await fetch(`/api/infratores/${suspectId}/fotos`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(directPhotoDraft),
+          });
+          if (res.ok) {
+            updated = await res.json();
+          }
+        } catch (err) {
+          console.warn('API error, saving photo locally:', err);
         }
+
+        if (!updated) {
+          updated = db.addPhotoToInfrator(suspectId, directPhotoDraft);
+        }
+
+        if (updated) {
+          await persistSuspectToFirebase(updated);
+          setSelectedSuspectDetail(updated);
+          setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
+        }
+
+        setIsAddingDirectPhoto(false);
+        setDirectPhotoDraft({
+          url: '',
+          tipo: 'TATUAGEM',
+          descricao: '',
+          principal: false,
+        });
+        fetchTelemetry();
+        setToastMessage('Foto registrada com sucesso!');
+        setTimeout(() => setToastMessage(null), 3000);
       } catch (err) {
-        console.warn('API error, saving photo locally:', err);
+        console.error('Error saving direct photo:', err);
+        alert('Erro ao salvar foto.');
       }
-
-      if (!updated) {
-        updated = db.addPhotoToInfrator(suspectId, directPhotoDraft);
-      }
-
-      if (updated) {
-        await persistSuspectToFirebase(updated);
-        setSelectedSuspectDetail(updated);
-        setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
-      }
-
-      setIsAddingDirectPhoto(false);
-      setDirectPhotoDraft({
-        url: '',
-        tipo: 'TATUAGEM',
-        descricao: '',
-        principal: false,
-      });
-      fetchTelemetry();
-      setToastMessage('Foto registrada com sucesso!');
-      setTimeout(() => setToastMessage(null), 3000);
-    } catch (err) {
-      console.error('Error saving direct photo:', err);
-      alert('Erro ao salvar foto.');
-    }
+    });
   };
 
   const handleAddDirectPhotoSubmit = handleSaveDirectPhotoForm;
 
   const handleSetDirectPrimaryPhoto = async (fotoId: string) => {
-    if (!selectedSuspectDetail) return;
-    const suspectId = selectedSuspectDetail.id;
-    try {
-      let updated: any = null;
+    requireAdmin('Definir Foto Principal', async () => {
+      if (!selectedSuspectDetail) return;
+      const suspectId = selectedSuspectDetail.id;
       try {
-        const res = await fetch(`/api/infratores/${suspectId}/fotos/${fotoId}/principal`, {
-          method: 'PUT',
-        });
-        if (res.ok) {
-          updated = await res.json();
+        let updated: any = null;
+        try {
+          const res = await fetch(`/api/infratores/${suspectId}/fotos/${fotoId}/principal`, {
+            method: 'PUT',
+          });
+          if (res.ok) {
+            updated = await res.json();
+          }
+        } catch (err) {
+          console.warn('API error setting primary photo:', err);
         }
+
+        if (!updated) {
+          updated = db.setPrimaryPhotoInfrator(suspectId, fotoId);
+        }
+
+        if (updated) {
+          await persistSuspectToFirebase(updated);
+          setSelectedSuspectDetail(updated);
+          setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
+        }
+
+        fetchTelemetry();
+        setToastMessage('Foto principal do infrator atualizada!');
+        setTimeout(() => setToastMessage(null), 3000);
       } catch (err) {
-        console.warn('API error setting primary photo:', err);
+        console.error('Error setting primary photo:', err);
       }
-
-      if (!updated) {
-        updated = db.setPrimaryPhotoInfrator(suspectId, fotoId);
-      }
-
-      if (updated) {
-        await persistSuspectToFirebase(updated);
-        setSelectedSuspectDetail(updated);
-        setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
-      }
-
-      fetchTelemetry();
-      setToastMessage('Foto principal do infrator atualizada!');
-      setTimeout(() => setToastMessage(null), 3000);
-    } catch (err) {
-      console.error('Error setting primary photo:', err);
-    }
+    });
   };
 
   const handleDeleteDirectPhoto = async (fotoId: string) => {
-    if (!selectedSuspectDetail) return;
-    const suspectId = selectedSuspectDetail.id;
-    try {
-      let updated: any = null;
+    requireAdmin('Excluir Foto da Galeria', async () => {
+      if (!selectedSuspectDetail) return;
+      const suspectId = selectedSuspectDetail.id;
       try {
-        const res = await fetch(`/api/infratores/${suspectId}/fotos/${fotoId}`, {
-          method: 'DELETE',
-        });
-        if (res.ok) {
-          updated = await res.json();
+        let updated: any = null;
+        try {
+          const res = await fetch(`/api/infratores/${suspectId}/fotos/${fotoId}`, {
+            method: 'DELETE',
+          });
+          if (res.ok) {
+            updated = await res.json();
+          }
+        } catch (err) {
+          console.warn('API error deleting photo:', err);
         }
+
+        if (!updated) {
+          updated = db.removePhotoFromInfrator(suspectId, fotoId);
+        }
+
+        if (updated) {
+          await persistSuspectToFirebase(updated);
+          setSelectedSuspectDetail(updated);
+          setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
+        }
+
+        fetchTelemetry();
+        setToastMessage('Foto removida da galeria.');
+        setTimeout(() => setToastMessage(null), 3000);
       } catch (err) {
-        console.warn('API error deleting photo:', err);
+        console.error('Error deleting photo:', err);
       }
-
-      if (!updated) {
-        updated = db.removePhotoFromInfrator(suspectId, fotoId);
-      }
-
-      if (updated) {
-        await persistSuspectToFirebase(updated);
-        setSelectedSuspectDetail(updated);
-        setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
-      }
-
-      fetchTelemetry();
-      setToastMessage('Foto removida da galeria.');
-      setTimeout(() => setToastMessage(null), 3000);
-    } catch (err) {
-      console.error('Error deleting photo:', err);
-    }
+    });
   };
 
   const handleRemoveDirectPhoto = handleDeleteDirectPhoto;
@@ -1475,167 +1538,171 @@ export default function App() {
   // Direct linkage from suspect detail drawer
   const handleLinkOccurrenceDirectly = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedSuspectDetail) return;
-    try {
-      let bodyData: any = {
-        papel_no_crime: directOcPapel || 'Autor',
-      };
-      if (directOcMode === 'existing') {
-        if (!directOcExistingId) {
-          alert('Selecione uma ocorrência para vincular.');
-          return;
-        }
-        const existingOc = occurrences.find((o) => o.id === directOcExistingId || o.numero_bo === directOcExistingId);
-        bodyData = {
-          ...(existingOc || {}),
-          ocorrencia_id: directOcExistingId,
+    requireAdmin('Vincular Ocorrência ao Infrator', async () => {
+      if (!selectedSuspectDetail) return;
+      try {
+        let bodyData: any = {
           papel_no_crime: directOcPapel || 'Autor',
         };
-      } else {
-        if (!directNewOcData.numero_bo.trim() || !directNewOcData.tipificacao_penal.trim()) {
-          alert('Informe o Número do B.O. e a Tipificação Penal.');
-          return;
-        }
-        bodyData = {
-          ...bodyData,
-          ...directNewOcData,
-        };
-      }
-
-      // Try server API
-      let updatedSuspect: any = null;
-      try {
-        const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(bodyData),
-        });
-        if (res.ok) {
-          updatedSuspect = await res.json();
-        }
-      } catch (e) {
-        console.warn('Backend link endpoint not available, falling back to local DB', e);
-      }
-
-      // Persist to Firebase Firestore
-      try {
-        const persisted = await linkOccurrenceToSuspectInFirebase(selectedSuspectDetail.id, {
-          id: bodyData.ocorrencia_id,
-          ...bodyData,
-        });
-        if (persisted) {
-          updatedSuspect = persisted;
-        }
-      } catch (fireErr) {
-        console.warn('Erro ao salvar vínculo no Firestore:', fireErr);
-      }
-
-      // Local DB fallback
-      if (!updatedSuspect) {
         if (directOcMode === 'existing') {
-          db.linkInfratorOcorrencia(selectedSuspectDetail.id, directOcExistingId, directOcPapel || 'Autor');
+          if (!directOcExistingId) {
+            alert('Selecione uma ocorrência para vincular.');
+            return;
+          }
+          const existingOc = occurrences.find((o) => o.id === directOcExistingId || o.numero_bo === directOcExistingId);
+          bodyData = {
+            ...(existingOc || {}),
+            ocorrencia_id: directOcExistingId,
+            papel_no_crime: directOcPapel || 'Autor',
+          };
         } else {
-          const newOc = db.addOcorrencia({
+          if (!directNewOcData.numero_bo.trim() || !directNewOcData.tipificacao_penal.trim()) {
+            alert('Informe o Número do B.O. e a Tipificação Penal.');
+            return;
+          }
+          bodyData = {
+            ...bodyData,
             ...directNewOcData,
-            numero_bo: directNewOcData.numero_bo.trim(),
-            tipificacao_penal: directNewOcData.tipificacao_penal.trim(),
-            data_hora: directNewOcData.data_hora || new Date().toISOString(),
-          });
-          db.linkInfratorOcorrencia(selectedSuspectDetail.id, newOc.id, directOcPapel || 'Autor');
+          };
         }
-        updatedSuspect = db.getInfratorFull(selectedSuspectDetail.id);
-      }
 
-      if (updatedSuspect) {
-        setSelectedSuspectDetail(updatedSuspect);
-        await persistSuspectToFirebase(updatedSuspect).catch(() => null);
-      }
+        // Try server API
+        let updatedSuspect: any = null;
+        try {
+          const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(bodyData),
+          });
+          if (res.ok) {
+            updatedSuspect = await res.json();
+          }
+        } catch (e) {
+          console.warn('Backend link endpoint not available, falling back to local DB', e);
+        }
 
-      setIsLinkingDirectOccurrence(false);
-      setDirectOcExistingId('');
-      setDirectNewOcData({
-        numero_bo: '',
-        tipificacao_penal: 'Roubo a Mão Armada',
-        data_hora: new Date().toISOString().slice(0, 16),
-        descricao_fato: '',
-        modus_operandi: '',
-        armas_utilizadas: 'Pistola 9mm',
-        veiculo_utilizado: 'Motocicleta',
-        lat: '-19.7712',
-        lng: '-43.8564',
-      });
-      await fetchTelemetry();
-      setToastMessage('B.O. cadastrado e salvo com sucesso no banco de dados!');
-      setTimeout(() => setToastMessage(null), 3500);
-    } catch (err) {
-      console.error('Error linking occurrence directly:', err);
-      alert('Erro ao vincular ocorrência.');
-    }
+        // Persist to Firebase Firestore
+        try {
+          const persisted = await linkOccurrenceToSuspectInFirebase(selectedSuspectDetail.id, {
+            id: bodyData.ocorrencia_id,
+            ...bodyData,
+          });
+          if (persisted) {
+            updatedSuspect = persisted;
+          }
+        } catch (fireErr) {
+          console.warn('Erro ao salvar vínculo no Firestore:', fireErr);
+        }
+
+        // Local DB fallback
+        if (!updatedSuspect) {
+          if (directOcMode === 'existing') {
+            db.linkInfratorOcorrencia(selectedSuspectDetail.id, directOcExistingId, directOcPapel || 'Autor');
+          } else {
+            const newOc = db.addOcorrencia({
+              ...directNewOcData,
+              numero_bo: directNewOcData.numero_bo.trim(),
+              tipificacao_penal: directNewOcData.tipificacao_penal.trim(),
+              data_hora: directNewOcData.data_hora || new Date().toISOString(),
+            });
+            db.linkInfratorOcorrencia(selectedSuspectDetail.id, newOc.id, directOcPapel || 'Autor');
+          }
+          updatedSuspect = db.getInfratorFull(selectedSuspectDetail.id);
+        }
+
+        if (updatedSuspect) {
+          setSelectedSuspectDetail(updatedSuspect);
+          await persistSuspectToFirebase(updatedSuspect).catch(() => null);
+        }
+
+        setIsLinkingDirectOccurrence(false);
+        setDirectOcExistingId('');
+        setDirectNewOcData({
+          numero_bo: '',
+          tipificacao_penal: 'Roubo a Mão Armada',
+          data_hora: new Date().toISOString().slice(0, 16),
+          descricao_fato: '',
+          modus_operandi: '',
+          armas_utilizadas: 'Pistola 9mm',
+          veiculo_utilizado: 'Motocicleta',
+          lat: '-19.7712',
+          lng: '-43.8564',
+        });
+        await fetchTelemetry();
+        setToastMessage('B.O. cadastrado e salvo com sucesso no banco de dados!');
+        setTimeout(() => setToastMessage(null), 3500);
+      } catch (err) {
+        console.error('Error linking occurrence directly:', err);
+        alert('Erro ao vincular ocorrência.');
+      }
+    });
   };
 
   // Direct link from the other suspects / global picker for selectedSuspectDetail
   const handleDirectLinkOccurrenceFromPicker = async (oc: OcorrenciaCriminal, papel: string) => {
-    if (!selectedSuspectDetail) return;
-    try {
-      const bodyData = {
-        ocorrencia_id: oc.id,
-        numero_bo: oc.numero_bo,
-        tipificacao_penal: oc.tipificacao_penal,
-        data_hora: oc.data_hora,
-        descricao_fato: oc.descricao_fato,
-        modus_operandi: oc.modus_operandi,
-        armas_utilizadas: oc.armas_utilizadas,
-        veiculo_utilizado: oc.veiculo_utilizado,
-        geom_crime: oc.geom_crime,
-        papel_no_crime: papel || directOcPapel || 'Autor',
-      };
-
-      let updatedSuspect: any = null;
+    requireAdmin(`Vincular B.O. Nº ${oc.numero_bo}`, async () => {
+      if (!selectedSuspectDetail) return;
       try {
-        const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(bodyData),
-        });
-        if (res.ok) {
-          updatedSuspect = await res.json();
-        }
-      } catch (e) {
-        console.warn('Backend link endpoint not available, falling back to local DB', e);
-      }
-
-      // Persist to Firebase Firestore
-      try {
-        const persisted = await linkOccurrenceToSuspectInFirebase(selectedSuspectDetail.id, {
-          id: oc.id,
-          ...oc,
+        const bodyData = {
+          ocorrencia_id: oc.id,
+          numero_bo: oc.numero_bo,
+          tipificacao_penal: oc.tipificacao_penal,
+          data_hora: oc.data_hora,
+          descricao_fato: oc.descricao_fato,
+          modus_operandi: oc.modus_operandi,
+          armas_utilizadas: oc.armas_utilizadas,
+          veiculo_utilizado: oc.veiculo_utilizado,
+          geom_crime: oc.geom_crime,
           papel_no_crime: papel || directOcPapel || 'Autor',
-        });
-        if (persisted) {
-          updatedSuspect = persisted;
+        };
+
+        let updatedSuspect: any = null;
+        try {
+          const res = await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(bodyData),
+          });
+          if (res.ok) {
+            updatedSuspect = await res.json();
+          }
+        } catch (e) {
+          console.warn('Backend link endpoint not available, falling back to local DB', e);
         }
-      } catch (fireErr) {
-        console.warn('Erro ao salvar vínculo no Firestore:', fireErr);
-      }
 
-      if (!updatedSuspect) {
-        db.linkInfratorOcorrencia(selectedSuspectDetail.id, oc.id, papel || directOcPapel || 'Autor');
-        updatedSuspect = db.getInfratorFull(selectedSuspectDetail.id);
-      }
+        // Persist to Firebase Firestore
+        try {
+          const persisted = await linkOccurrenceToSuspectInFirebase(selectedSuspectDetail.id, {
+            id: oc.id,
+            ...oc,
+            papel_no_crime: papel || directOcPapel || 'Autor',
+          });
+          if (persisted) {
+            updatedSuspect = persisted;
+          }
+        } catch (fireErr) {
+          console.warn('Erro ao salvar vínculo no Firestore:', fireErr);
+        }
 
-      if (updatedSuspect) {
-        setSelectedSuspectDetail(updatedSuspect);
-        await persistSuspectToFirebase(updatedSuspect).catch(() => null);
-      }
+        if (!updatedSuspect) {
+          db.linkInfratorOcorrencia(selectedSuspectDetail.id, oc.id, papel || directOcPapel || 'Autor');
+          updatedSuspect = db.getInfratorFull(selectedSuspectDetail.id);
+        }
 
-      setIsLinkingDirectOccurrence(false);
-      await fetchTelemetry();
-      setToastMessage(`B.O. Nº ${oc.numero_bo} vinculado como ${papel || directOcPapel}!`);
-      setTimeout(() => setToastMessage(null), 3500);
-    } catch (err) {
-      console.error('Error linking occurrence directly from picker:', err);
-      alert('Erro ao vincular ocorrência.');
-    }
+        if (updatedSuspect) {
+          setSelectedSuspectDetail(updatedSuspect);
+          await persistSuspectToFirebase(updatedSuspect).catch(() => null);
+        }
+
+        setIsLinkingDirectOccurrence(false);
+        await fetchTelemetry();
+        setToastMessage(`B.O. Nº ${oc.numero_bo} vinculado como ${papel || directOcPapel}!`);
+        setTimeout(() => setToastMessage(null), 3500);
+      } catch (err) {
+        console.error('Error linking occurrence directly from picker:', err);
+        alert('Erro ao vincular ocorrência.');
+      }
+    });
   };
 
   // Direct copy from picker to directNewOcData form in drawer
@@ -1657,97 +1724,103 @@ export default function App() {
   };
 
   const handleUnlinkOccurrence = async (ocorrenciaId: string) => {
-    if (!selectedSuspectDetail) return;
-    try {
-      const oc = (selectedSuspectDetail.ocorrencias || []).find((o: any) => o.id === ocorrenciaId || o.numero_bo === ocorrenciaId);
-      const boNum = oc?.numero_bo;
-
-      // 1. Local DB first for instant responsiveness
-      db.unlinkInfratorOcorrencia(selectedSuspectDetail.id, ocorrenciaId);
-      let updatedSuspect: any = db.getInfratorFull(selectedSuspectDetail.id);
-      if (updatedSuspect) {
-        setSelectedSuspectDetail(updatedSuspect);
-      }
-
-      // 2. Backend API
+    requireAdmin('Desvincular Ocorrência do Infrator', async () => {
+      if (!selectedSuspectDetail) return;
       try {
-        await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias/${ocorrenciaId}`, {
-          method: 'DELETE',
-        }).catch(() => null);
-      } catch (e) {
-        console.warn('Backend unlink endpoint not available', e);
-      }
+        const oc = (selectedSuspectDetail.ocorrencias || []).find((o: any) => o.id === ocorrenciaId || o.numero_bo === ocorrenciaId);
+        const boNum = oc?.numero_bo;
 
-      // 3. Unlink in Firebase Firestore
-      try {
-        const persisted = await unlinkOccurrenceFromSuspectInFirebase(selectedSuspectDetail.id, ocorrenciaId, boNum);
-        if (persisted) {
-          updatedSuspect = persisted;
-          setSelectedSuspectDetail(persisted as any);
+        // 1. Local DB first for instant responsiveness
+        db.unlinkInfratorOcorrencia(selectedSuspectDetail.id, ocorrenciaId);
+        let updatedSuspect: any = db.getInfratorFull(selectedSuspectDetail.id);
+        if (updatedSuspect) {
+          setSelectedSuspectDetail(updatedSuspect);
         }
-      } catch (fireErr) {
-        console.warn('Erro ao desvincular no Firestore:', fireErr);
-      }
 
-      await fetchTelemetry();
-      setToastMessage(`B.O. ${boNum ? `Nº ${boNum} ` : ''}desvinculado do investigado com sucesso.`);
-      setTimeout(() => setToastMessage(null), 3500);
-    } catch (err) {
-      console.error('Error unlinking occurrence:', err);
-    }
+        // 2. Backend API
+        try {
+          await fetch(`/api/infratores/${selectedSuspectDetail.id}/ocorrencias/${ocorrenciaId}`, {
+            method: 'DELETE',
+          }).catch(() => null);
+        } catch (e) {
+          console.warn('Backend unlink endpoint not available', e);
+        }
+
+        // 3. Unlink in Firebase Firestore
+        try {
+          const persisted = await unlinkOccurrenceFromSuspectInFirebase(selectedSuspectDetail.id, ocorrenciaId, boNum);
+          if (persisted) {
+            updatedSuspect = persisted;
+            setSelectedSuspectDetail(persisted as any);
+          }
+        } catch (fireErr) {
+          console.warn('Erro ao desvincular no Firestore:', fireErr);
+        }
+
+        await fetchTelemetry();
+        setToastMessage(`B.O. ${boNum ? `Nº ${boNum} ` : ''}desvinculado do investigado com sucesso.`);
+        setTimeout(() => setToastMessage(null), 3500);
+      } catch (err) {
+        console.error('Error unlinking occurrence:', err);
+      }
+    });
   };
 
   const handleInitiateDeleteSuspect = (id: string, nome: string, vulgo?: string) => {
-    setSuspectToDelete({ id, nome, vulgo });
+    requireAdmin(`Excluir Infrator (${vulgo || nome})`, () => {
+      setSuspectToDelete({ id, nome, vulgo });
+    });
   };
 
   // Quick update suspect status/situation
   const handleUpdateSelectedSuspectSituacao = async (newSituacao: 'EM_LIBERDADE' | 'FORAGIDO' | 'PRESO' | 'MORTO') => {
-    if (!selectedSuspectDetail) return;
-    const isMandado = newSituacao === 'FORAGIDO' ? true : (newSituacao === 'MORTO' || newSituacao === 'PRESO' ? false : selectedSuspectDetail.status_mandado_prisao);
-    
-    const updatedData = {
-      ...selectedSuspectDetail,
-      situacao_atual: newSituacao,
-      situacao_prisional: newSituacao,
-      status_mandado_prisao: isMandado
-    };
-
-    // Optimistic update in UI
-    setSelectedSuspectDetail(updatedData as any);
-    setSuspects(prev => prev.map(s => s.id === selectedSuspectDetail.id ? { 
-      ...s, 
-      situacao_atual: newSituacao, 
-      situacao_prisional: newSituacao, 
-      status_mandado_prisao: isMandado 
-    } : s));
-
-    try {
-      try {
-        await fetch(`/api/infratores/${selectedSuspectDetail.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updatedData),
-        });
-      } catch (e) {
-        console.warn('API error updating situation, using local DB', e);
-      }
-
-      db.updateInfrator(selectedSuspectDetail.id, updatedData);
-      await persistSuspectToFirebase(updatedData);
-      fetchTelemetry();
+    requireAdmin('Alterar Situação Prisional / Mandado', async () => {
+      if (!selectedSuspectDetail) return;
+      const isMandado = newSituacao === 'FORAGIDO' ? true : (newSituacao === 'MORTO' || newSituacao === 'PRESO' ? false : selectedSuspectDetail.status_mandado_prisao);
       
-      const sitLabels: Record<string, string> = {
-        EM_LIBERDADE: 'EM LIBERDADE',
-        FORAGIDO: 'FORAGIDO DA JUSTIÇA',
-        PRESO: 'PRESO / SISTEMA PENITENCIÁRIO',
-        MORTO: 'MORTO / FALECIDO'
+      const updatedData = {
+        ...selectedSuspectDetail,
+        situacao_atual: newSituacao,
+        situacao_prisional: newSituacao,
+        status_mandado_prisao: isMandado
       };
-      setToastMessage(`Situação de "${selectedSuspectDetail.nome_completo}" atualizada para: ${sitLabels[newSituacao] || newSituacao}`);
-      setTimeout(() => setToastMessage(null), 3500);
-    } catch (err) {
-      console.error('Error updating suspect status:', err);
-    }
+
+      // Optimistic update in UI
+      setSelectedSuspectDetail(updatedData as any);
+      setSuspects(prev => prev.map(s => s.id === selectedSuspectDetail.id ? { 
+        ...s, 
+        situacao_atual: newSituacao, 
+        situacao_prisional: newSituacao, 
+        status_mandado_prisao: isMandado 
+      } : s));
+
+      try {
+        try {
+          await fetch(`/api/infratores/${selectedSuspectDetail.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedData),
+          });
+        } catch (e) {
+          console.warn('API error updating situation, using local DB', e);
+        }
+
+        db.updateInfrator(selectedSuspectDetail.id, updatedData);
+        await persistSuspectToFirebase(updatedData);
+        fetchTelemetry();
+        
+        const sitLabels: Record<string, string> = {
+          EM_LIBERDADE: 'EM LIBERDADE',
+          FORAGIDO: 'FORAGIDO DA JUSTIÇA',
+          PRESO: 'PRESO / SISTEMA PENITENCIÁRIO',
+          MORTO: 'MORTO / FALECIDO'
+        };
+        setToastMessage(`Situação de "${selectedSuspectDetail.nome_completo}" atualizada para: ${sitLabels[newSituacao] || newSituacao}`);
+        setTimeout(() => setToastMessage(null), 3500);
+      } catch (err) {
+        console.error('Error updating suspect status:', err);
+      }
+    });
   };
 
   const handleConfirmDeleteSuspect = async () => {
@@ -1799,7 +1872,9 @@ export default function App() {
     data_hora?: string,
     envolvidosCount?: number
   ) => {
-    setBoToDelete({ id, numero_bo, tipificacao, data_hora, envolvidosCount });
+    requireAdmin(`Excluir B.O. Nº ${numero_bo}`, () => {
+      setBoToDelete({ id, numero_bo, tipificacao, data_hora, envolvidosCount });
+    });
   };
 
   const handleConfirmDeleteBo = async () => {
@@ -1858,11 +1933,12 @@ export default function App() {
   // Create suspect submit
   const handleAddSuspectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmittingSuspect) return;
-    if (!newSuspectForm.nome_completo.trim()) {
-      alert('Preencha o Nome Completo do infrator.');
-      return;
-    }
+    requireAdmin(editingSuspectId ? 'Salvar Alterações do Infrator' : 'Cadastrar Novo Infrator', async () => {
+      if (isSubmittingSuspect) return;
+      if (!newSuspectForm.nome_completo.trim()) {
+        alert('Preencha o Nome Completo do infrator.');
+        return;
+      }
 
     setIsSubmittingSuspect(true);
     try {
@@ -2099,121 +2175,126 @@ export default function App() {
     } finally {
       setIsSubmittingSuspect(false);
     }
+    });
   };
 
   // Create incident submit
   const handleAddIncidentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newIncidentForm.numero_bo.trim() || !newIncidentForm.tipificacao_penal.trim()) {
-      alert('Informe o Número do B.O. e a Tipificação Penal.');
-      return;
-    }
-    try {
-      const newOcId = `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-      const ocObj: OcorrenciaCriminal = {
-        id: newOcId,
-        numero_bo: newIncidentForm.numero_bo.trim(),
-        tipificacao_penal: newIncidentForm.tipificacao_penal.trim(),
-        data_hora: newIncidentForm.data_hora || new Date().toISOString(),
-        descricao_fato: newIncidentForm.descricao_fato || '',
-        modus_operandi: newIncidentForm.modus_operandi || '',
-        armas_utilizadas: newIncidentForm.armas_utilizadas || '',
-        veiculo_utilizado: newIncidentForm.veiculo_utilizado || '',
-        geom_crime: {
-          lat: Number(newIncidentForm.lat) || -19.7712,
-          lng: Number(newIncidentForm.lng) || -43.8564,
-        }
-      };
-
-      try {
-        await fetch('/api/ocorrencias', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(ocObj),
-        });
-      } catch (e) {
-        console.warn('Backend API unavailable, saving to local in-memory DB', e);
+    requireAdmin('Cadastrar B.O. / Ocorrência Criminal', async () => {
+      if (!newIncidentForm.numero_bo.trim() || !newIncidentForm.tipificacao_penal.trim()) {
+        alert('Informe o Número do B.O. e a Tipificação Penal.');
+        return;
       }
+      try {
+        const newOcId = `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        const ocObj: OcorrenciaCriminal = {
+          id: newOcId,
+          numero_bo: newIncidentForm.numero_bo.trim(),
+          tipificacao_penal: newIncidentForm.tipificacao_penal.trim(),
+          data_hora: newIncidentForm.data_hora || new Date().toISOString(),
+          descricao_fato: newIncidentForm.descricao_fato || '',
+          modus_operandi: newIncidentForm.modus_operandi || '',
+          armas_utilizadas: newIncidentForm.armas_utilizadas || '',
+          veiculo_utilizado: newIncidentForm.veiculo_utilizado || '',
+          geom_crime: {
+            lat: Number(newIncidentForm.lat) || -19.7712,
+            lng: Number(newIncidentForm.lng) || -43.8564,
+          }
+        };
 
-      db.addOcorrencia(ocObj);
+        try {
+          await fetch('/api/ocorrencias', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ocObj),
+          });
+        } catch (e) {
+          console.warn('Backend API unavailable, saving to local in-memory DB', e);
+        }
 
-      // Persist to Firebase Firestore
-      await persistOccurrenceToFirebase(ocObj);
+        db.addOcorrencia(ocObj);
 
-      setIsAddingOccurrence(false);
-      setNewIncidentForm({
-        numero_bo: '',
-        tipificacao_penal: '',
-        data_hora: new Date().toISOString().slice(0, 16),
-        descricao_fato: '',
-        modus_operandi: '',
-        armas_utilizadas: '',
-        veiculo_utilizado: '',
-        lat: '-19.7712',
-        lng: '-43.8564',
-      });
-      await fetchTelemetry();
-      setToastMessage('Ocorrência registrada e salva com sucesso!');
-      setTimeout(() => setToastMessage(null), 3500);
-    } catch (err) {
-      console.error('Error adding incident:', err);
-    }
+        // Persist to Firebase Firestore
+        await persistOccurrenceToFirebase(ocObj);
+
+        setIsAddingOccurrence(false);
+        setNewIncidentForm({
+          numero_bo: '',
+          tipificacao_penal: '',
+          data_hora: new Date().toISOString().slice(0, 16),
+          descricao_fato: '',
+          modus_operandi: '',
+          armas_utilizadas: '',
+          veiculo_utilizado: '',
+          lat: '-19.7712',
+          lng: '-43.8564',
+        });
+        await fetchTelemetry();
+        setToastMessage('Ocorrência registrada e salva com sucesso!');
+        setTimeout(() => setToastMessage(null), 3500);
+      } catch (err) {
+        console.error('Error adding incident:', err);
+      }
+    });
   };
 
   // Create address submit
   const handleAddAddressSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      let created = false;
+    requireAdmin('Cadastrar Endereço de Atuação', async () => {
       try {
-        const res = await fetch('/api/enderecos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newAddressForm),
-        });
-        if (res.ok) {
-          created = true;
+        let created = false;
+        try {
+          const res = await fetch('/api/enderecos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newAddressForm),
+          });
+          if (res.ok) {
+            created = true;
+          }
+        } catch (e) {
+          console.warn('Backend API unavailable, saving to local in-memory DB', e);
         }
-      } catch (e) {
-        console.warn('Backend API unavailable, saving to local in-memory DB', e);
+
+        if (!created) {
+          db.addEndereco(newAddressForm);
+        }
+
+        // Persist to Firebase Firestore
+        await persistAddressToFirebase({
+          id: `addr-${Date.now()}`,
+          infrator_id: newAddressForm.infrator_id,
+          tipo_endereco: newAddressForm.tipo_endereco as any,
+          logradouro: newAddressForm.logradouro,
+          bairro: newAddressForm.bairro || 'Centro',
+          cidade: newAddressForm.cidade || 'Santa Luzia',
+          geom_ponto: {
+            lat: Number(newAddressForm.lat),
+            lng: Number(newAddressForm.lng)
+          },
+          raio_influencia_km: Number(newAddressForm.raio_influencia_km) || 2.5
+        });
+
+        setIsAddingAddress(false);
+        setNewAddressForm({
+          infrator_id: '',
+          tipo_endereco: 'Residência',
+          logradouro: '',
+          bairro: '',
+          cidade: 'Santa Luzia',
+          lat: '-19.7712',
+          lng: '-43.8564',
+          raio_influencia_km: '2.5',
+        });
+        fetchTelemetry();
+        setToastMessage('Área de atuação cadastrada com sucesso.');
+        setTimeout(() => setToastMessage(null), 3500);
+      } catch (err) {
+        console.error('Error adding address:', err);
       }
-
-      if (!created) {
-        db.addEndereco(newAddressForm);
-      }
-
-      // Persist to Firebase Firestore
-      await persistAddressToFirebase({
-        id: `addr-${Date.now()}`,
-        infrator_id: newAddressForm.infrator_id,
-        tipo_endereco: newAddressForm.tipo_endereco as any,
-        logradouro: newAddressForm.logradouro,
-        bairro: newAddressForm.bairro || 'Centro',
-        cidade: newAddressForm.cidade || 'Santa Luzia',
-        geom_ponto: {
-          lat: Number(newAddressForm.lat),
-          lng: Number(newAddressForm.lng)
-        },
-        raio_influencia_km: Number(newAddressForm.raio_influencia_km) || 2.5
-      });
-
-      setIsAddingAddress(false);
-      setNewAddressForm({
-        infrator_id: '',
-        tipo_endereco: 'Residência',
-        logradouro: '',
-        bairro: '',
-        cidade: 'Santa Luzia',
-        lat: '-19.7712',
-        lng: '-43.8564',
-        raio_influencia_km: '2.5',
-      });
-      fetchTelemetry();
-      setToastMessage('Área de atuação cadastrada com sucesso.');
-      setTimeout(() => setToastMessage(null), 3500);
-    } catch (err) {
-      console.error('Error adding address:', err);
-    }
+    });
   };
 
   // Map Coordinate sync on click helper
@@ -2402,9 +2483,54 @@ export default function App() {
         </nav>
 
 
-        <div className="text-[11px] font-mono text-[#8E9BAE] hidden md:flex items-center gap-2">
-          <span className="inline-block w-1.5 h-1.5 bg-[#C4A76E] rounded-full animate-pulse"></span>
-          <span>GUARDIÃO DO ALTO RIO DAS VELHAS • 35º BPM</span>
+        <div className="flex items-center gap-3">
+          {/* Admin Mode Status & Toggle */}
+          {isAdmin ? (
+            <div className="flex items-center gap-2 bg-[#171E2D] border border-amber-500/40 px-2.5 py-1 rounded-md text-xs font-mono">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-[#DFC897] font-bold text-[11px] flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" /> Modo Administrador
+              </span>
+              <button
+                onClick={() => setIsChangePinModalOpen(true)}
+                className="ml-1 text-[10px] text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
+                title="Alterar PIN de Administrador"
+              >
+                Alterar PIN
+              </button>
+              <button
+                onClick={() => {
+                  logoutAdmin();
+                  setIsAdmin(false);
+                  setToastMessage('Modo Administrador bloqueado. Modo consulta ativado.');
+                  setTimeout(() => setToastMessage(null), 3000);
+                }}
+                className="ml-1 px-1.5 py-0.5 bg-red-950/50 hover:bg-red-900/70 text-red-300 border border-red-800/60 rounded text-[10px] font-bold cursor-pointer transition flex items-center gap-1"
+                title="Bloquear Modo Administrador"
+              >
+                <Lock className="w-2.5 h-2.5" /> Bloquear
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setAdminActionTitle('Acesso de Administrador');
+                setPendingAdminAction(null);
+                setIsAdminModalOpen(true);
+              }}
+              className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-amber-500/50 px-2.5 py-1 rounded-md text-xs font-mono text-zinc-300 hover:text-zinc-100 transition cursor-pointer"
+              title="Clique para desbloquear o Modo Administrador com seu PIN Mestre"
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-400/80" />
+              <span className="text-[11px]">Modo Consulta</span>
+              <span className="text-[9px] bg-zinc-800 text-zinc-400 px-1 py-0.2 rounded border border-zinc-700">PIN</span>
+            </button>
+          )}
+
+          <div className="text-[11px] font-mono text-[#8E9BAE] hidden xl:flex items-center gap-2">
+            <span className="inline-block w-1.5 h-1.5 bg-[#C4A76E] rounded-full animate-pulse"></span>
+            <span>GUARDIÃO DO ALTO RIO DAS VELHAS • 35º BPM</span>
+          </div>
         </div>
       </div>
 
@@ -3332,30 +3458,32 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-3 bg-[#0F0F12] border border-zinc-800 p-3.5 rounded shadow-xl font-mono">
                 <button
                   onClick={() => {
-                    setEditingSuspectId(null);
-                    setNewSuspectForm({
-                      nome_completo: '',
-                      vulgo: '',
-                      data_nascimento: '1995-01-01',
-                      cpf: '',
-                      foto_url: '',
-                      gangue_faccao: '',
-                      situacao_atual: 'EM_LIBERDADE',
-                      status_mandado_prisao: false,
-                      periculosidade: 'Média',
-                      altura_estimada: '1.75',
-                      cor_pele: 'Parda',
-                      compleicao: 'Média',
-                      tatuagens_detalhes: '',
-                      cicatrizes: '',
-                      sinais_particulares: '',
+                    requireAdmin('Cadastrar Novo Infrator', () => {
+                      setEditingSuspectId(null);
+                      setNewSuspectForm({
+                        nome_completo: '',
+                        vulgo: '',
+                        data_nascimento: '1995-01-01',
+                        cpf: '',
+                        foto_url: '',
+                        gangue_faccao: '',
+                        situacao_atual: 'EM_LIBERDADE',
+                        status_mandado_prisao: false,
+                        periculosidade: 'Média',
+                        altura_estimada: '1.75',
+                        cor_pele: 'Parda',
+                        compleicao: 'Média',
+                        tatuagens_detalhes: '',
+                        cicatrizes: '',
+                        sinais_particulares: '',
+                      });
+                      setSuspectOccurrencesList([]);
+                      setSuspectAddressesList([]);
+                      setSuspectPhotosList([]);
+                      setIsAddingSuspect(true);
+                      setIsAddingOccurrence(false);
+                      setIsAddingAddress(false);
                     });
-                    setSuspectOccurrencesList([]);
-                    setSuspectAddressesList([]);
-                    setSuspectPhotosList([]);
-                    setIsAddingSuspect(true);
-                    setIsAddingOccurrence(false);
-                    setIsAddingAddress(false);
                   }}
                   className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-100 font-bold text-xs rounded transition flex items-center gap-1.5 cursor-pointer"
                 >
@@ -3363,9 +3491,11 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => {
-                    setIsAddingOccurrence(true);
-                    setIsAddingSuspect(false);
-                    setIsAddingAddress(false);
+                    requireAdmin('Registrar Ocorrência (B.O.)', () => {
+                      setIsAddingOccurrence(true);
+                      setIsAddingSuspect(false);
+                      setIsAddingAddress(false);
+                    });
                   }}
                   className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-100 font-bold text-xs rounded transition flex items-center gap-1.5 cursor-pointer"
                 >
@@ -3373,9 +3503,11 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => {
-                    setIsAddingAddress(true);
-                    setIsAddingSuspect(false);
-                    setIsAddingOccurrence(false);
+                    requireAdmin('Cadastrar Área de Atuação', () => {
+                      setIsAddingAddress(true);
+                      setIsAddingSuspect(false);
+                      setIsAddingOccurrence(false);
+                    });
                   }}
                   className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-100 font-bold text-xs rounded transition flex items-center gap-1.5 cursor-pointer"
                 >
@@ -6302,6 +6434,27 @@ export default function App() {
         selectedCoords={selectedCoords}
         onSave={handleSaveGangZone}
         onDelete={handleDeleteGangZone}
+      />
+
+      {/* Admin PIN Validation Modal */}
+      <AdminPinModal
+        isOpen={isAdminModalOpen}
+        onClose={() => {
+          setIsAdminModalOpen(false);
+          setPendingAdminAction(null);
+        }}
+        onSuccess={handleAdminUnlocked}
+        pendingActionLabel={adminActionTitle}
+      />
+
+      {/* Change Admin PIN Modal */}
+      <ChangePinModal
+        isOpen={isChangePinModalOpen}
+        onClose={() => setIsChangePinModalOpen(false)}
+        onSuccess={() => {
+          setToastMessage('PIN Mestre atualizado com sucesso!');
+          setTimeout(() => setToastMessage(null), 3500);
+        }}
       />
 
       {/* Toast Notification */}

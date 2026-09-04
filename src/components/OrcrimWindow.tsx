@@ -41,6 +41,8 @@ interface OrcrimWindowProps {
   registeredSuspects?: Infrator[];
   onDeleteSuspect?: (id: string, nome: string, vulgo: string) => void;
   onRefreshSuspects?: () => void;
+  isAdmin?: boolean;
+  onRequireAdmin?: (actionName: string, cb: () => void) => void;
 }
 
 // Helper to synchronously get organograms from memory or localStorage cache
@@ -83,8 +85,18 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
   onSelectSuspect, 
   registeredSuspects = [],
   onDeleteSuspect,
-  onRefreshSuspects 
+  onRefreshSuspects,
+  isAdmin,
+  onRequireAdmin,
 }) => {
+  const executeWithAdmin = (actionName: string, actionFn: () => void) => {
+    if (onRequireAdmin) {
+      onRequireAdmin(actionName, actionFn);
+    } else {
+      actionFn();
+    }
+  };
+
   const [organogramas, setOrganogramas] = useState<OrcrimData[]>(getInitialOrganogramas);
   const [selectedOrcrimId, setSelectedOrcrimId] = useState<string>(() => {
     const list = getInitialOrganogramas();
@@ -450,8 +462,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
 
   // Delete / Remove Member from ORCRIM Handler
   const handleInitiateDeleteMember = (membro: MembroEstruturaOrcrim, level: 1 | 2 | 3) => {
-    setMemberToDelete({ membro, level });
-    setDeleteOption('remove_from_orcrim');
+    executeWithAdmin(`Remover Integrante ${membro.vulgo || membro.nome_completo}`, () => {
+      setMemberToDelete({ membro, level });
+      setDeleteOption('remove_from_orcrim');
+    });
   };
 
   const handleConfirmDeleteMember = async () => {
@@ -512,7 +526,9 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
   // Delete Organogram Handler
   const handleInitiateDeleteOrcrim = () => {
     if (!currentOrcrim) return;
-    setOrcrimToDelete(currentOrcrim);
+    executeWithAdmin(`Excluir Organograma ${currentOrcrim.gangue_info.nome_gangue}`, () => {
+      setOrcrimToDelete(currentOrcrim);
+    });
   };
 
   const handleConfirmDeleteOrcrim = async () => {
@@ -552,10 +568,12 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
   // Edit ORCRIM Details Handlers
   const handleInitiateEditOrcrim = () => {
     if (!currentOrcrim) return;
-    setEditOrcrimName(currentOrcrim.gangue_info.nome_gangue);
-    setEditOrcrimTerritory(currentOrcrim.gangue_info.territorio_principal || 'Santa Luzia / 35º BPM');
-    setEditOrcrimResumo(currentOrcrim.gangue_info.resumo_atuacao || '');
-    setShowEditOrcrimModal(true);
+    executeWithAdmin(`Editar Dados da ORCRIM ${currentOrcrim.gangue_info.nome_gangue}`, () => {
+      setEditOrcrimName(currentOrcrim.gangue_info.nome_gangue);
+      setEditOrcrimTerritory(currentOrcrim.gangue_info.territorio_principal || 'Santa Luzia / 35º BPM');
+      setEditOrcrimResumo(currentOrcrim.gangue_info.resumo_atuacao || '');
+      setShowEditOrcrimModal(true);
+    });
   };
 
   const handleSaveEditOrcrimDetails = async (e?: React.FormEvent) => {
@@ -584,13 +602,15 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
 
   // Edit Member Details Handlers
   const handleInitiateEditMember = (membro: MembroEstruturaOrcrim, level: 1 | 2 | 3) => {
-    setMemberToEdit({ membro, level });
-    setEditMemberFuncao(membro.funcao_especifica || '');
-    setEditMemberLevel(level);
-    setEditMemberSituacao(membro.situacao_atual || 'EM_LIBERDADE');
-    setEditMemberMandado(!!membro.status_mandado);
-    setEditMemberArea(membro.area_responsabilidade || '');
-    setEditMemberSubordinado(membro.subordinado_a_vulgo || '');
+    executeWithAdmin(`Editar Integrante ${membro.vulgo || membro.nome_completo}`, () => {
+      setMemberToEdit({ membro, level });
+      setEditMemberFuncao(membro.funcao_especifica || '');
+      setEditMemberLevel(level);
+      setEditMemberSituacao(membro.situacao_atual || 'EM_LIBERDADE');
+      setEditMemberMandado(!!membro.status_mandado);
+      setEditMemberArea(membro.area_responsabilidade || '');
+      setEditMemberSubordinado(membro.subordinado_a_vulgo || '');
+    });
   };
 
   const handleSaveEditMember = async (e?: React.FormEvent) => {
@@ -801,8 +821,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
             <button
               type="button"
               onClick={() => {
-                resetNewOrcrimForm();
-                setShowCreateOrcrimModal(true);
+                executeWithAdmin('Cadastrar Nova ORCRIM', () => {
+                  resetNewOrcrimForm();
+                  setShowCreateOrcrimModal(true);
+                });
               }}
               className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs uppercase tracking-wider rounded-lg border border-emerald-500/50 flex items-center gap-2 transition-all shadow-md cursor-pointer"
               title="Cadastrar uma nova organização criminosa, facção ou gangue"
@@ -813,9 +835,11 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
 
             <button
               onClick={() => {
-                setTargetLevel(1);
-                setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
-                setShowAddMemberModal(true);
+                executeWithAdmin('Cadastrar Infrator na ORCRIM', () => {
+                  setTargetLevel(1);
+                  setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
+                  setShowAddMemberModal(true);
+                });
               }}
               className="px-3.5 py-2 bg-[#1D356D] hover:bg-[#2A478C] text-white font-semibold text-xs rounded-lg border border-blue-400/30 flex items-center gap-2 transition-all shadow-sm cursor-pointer"
             >
@@ -824,7 +848,11 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
             </button>
 
             <button
-              onClick={() => setShowAiModal(true)}
+              onClick={() => {
+                executeWithAdmin('Gerar / Classificar ORCRIM com IA', () => {
+                  setShowAiModal(true);
+                });
+              }}
               disabled={analyzingAi}
               className="px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-md flex items-center gap-2 transition-all cursor-pointer"
             >
@@ -899,8 +927,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
           <button
             type="button"
             onClick={() => {
-              resetNewOrcrimForm();
-              setShowCreateOrcrimModal(true);
+              executeWithAdmin('Cadastrar Nova ORCRIM', () => {
+                resetNewOrcrimForm();
+                setShowCreateOrcrimModal(true);
+              });
             }}
             className="px-3 py-1.5 bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 hover:text-white rounded-lg text-xs font-bold transition-all border border-emerald-700/60 flex items-center gap-1.5 cursor-pointer shadow-xs"
             title="Cadastrar Nova ORCRIM"
@@ -1031,9 +1061,11 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
                 </span>
                 <button
                   onClick={() => {
-                    setTargetLevel(1);
-                    setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
-                    setShowAddMemberModal(true);
+                    executeWithAdmin('Adicionar Integrante à Liderança', () => {
+                      setTargetLevel(1);
+                      setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
+                      setShowAddMemberModal(true);
+                    });
                   }}
                   className="p-1.5 bg-red-100 hover:bg-red-200 text-red-800 rounded-lg transition-all cursor-pointer"
                   title="Adicionar à Liderança"
@@ -1100,9 +1132,11 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
                 </span>
                 <button
                   onClick={() => {
-                    setTargetLevel(2);
-                    setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
-                    setShowAddMemberModal(true);
+                    executeWithAdmin('Adicionar Integrante à Gerência Tática', () => {
+                      setTargetLevel(2);
+                      setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
+                      setShowAddMemberModal(true);
+                    });
                   }}
                   className="p-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg transition-all cursor-pointer"
                   title="Adicionar à Gerência Tática"
@@ -1169,9 +1203,11 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
                 </span>
                 <button
                   onClick={() => {
-                    setTargetLevel(3);
-                    setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
-                    setShowAddMemberModal(true);
+                    executeWithAdmin('Adicionar Integrante aos Operacionais', () => {
+                      setTargetLevel(3);
+                      setTargetFactionName(currentOrcrim?.gangue_info.nome_gangue || '');
+                      setShowAddMemberModal(true);
+                    });
                   }}
                   className="p-1.5 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-lg transition-all cursor-pointer"
                   title="Adicionar aos Operacionais"
@@ -1212,8 +1248,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
             <button
               type="button"
               onClick={() => {
-                resetNewOrcrimForm();
-                setShowCreateOrcrimModal(true);
+                executeWithAdmin('Cadastrar Nova ORCRIM', () => {
+                  resetNewOrcrimForm();
+                  setShowCreateOrcrimModal(true);
+                });
               }}
               className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-2 cursor-pointer transition-all"
             >
@@ -1222,7 +1260,11 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setShowAiModal(true)}
+              onClick={() => {
+                executeWithAdmin('Criar ORCRIM com Inteligência Artificial', () => {
+                  setShowAiModal(true);
+                });
+              }}
               className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-2 cursor-pointer transition-all"
             >
               <Sparkles className="w-4 h-4 text-amber-200" />

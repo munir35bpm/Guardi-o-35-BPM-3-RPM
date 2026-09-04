@@ -77,6 +77,8 @@ interface TacticalMapProps {
   onGangAreasChange?: (areas: GangAreaZone[]) => void;
   onEditGangZone?: (zone: GangAreaZone) => void;
   onCreateGangZone?: () => void;
+  isAdmin?: boolean;
+  onRequireAdmin?: (actionName: string, cb: () => void) => void;
 }
 
 // Helper to compute centroid of polygon coordinates for tactical label placement
@@ -160,6 +162,8 @@ export default function TacticalMap({
   onGangAreasChange,
   onEditGangZone,
   onCreateGangZone,
+  isAdmin,
+  onRequireAdmin,
 }: TacticalMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -1503,7 +1507,13 @@ export default function TacticalMap({
           {/* Import KML / GeoJSON Button */}
           <button
             type="button"
-            onClick={() => setIsImporterOpen(true)}
+            onClick={() => {
+              if (onRequireAdmin) {
+                onRequireAdmin('Importar KML/GeoJSON de Gangues', () => setIsImporterOpen(true));
+              } else {
+                setIsImporterOpen(true);
+              }
+            }}
             className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs rounded shadow-lg shadow-amber-500/20 uppercase tracking-wider font-mono flex items-center gap-1.5 transition cursor-pointer"
             title="Importar polígonos e cores do Google My Maps (KML, KMZ, GeoJSON)"
           >
