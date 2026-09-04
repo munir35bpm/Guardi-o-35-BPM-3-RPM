@@ -17,6 +17,9 @@ import {
   saveGangArea,
   saveGangAreasBatch,
   removeGangArea,
+  fetchOrcrimOrganogramas,
+  saveOrcrimOrganograma,
+  removeOrcrimOrganograma,
 } from '../services/firestoreService.js';
 import { DEFAULT_GANG_AREAS_35BPM } from '../utils/kmlGeoJsonParser.js';
 import {
@@ -27,6 +30,7 @@ import {
   InfratorOcorrencia,
   VinculoComparsa,
   CaracteristicasFisicas,
+  OrcrimData,
 } from '../types.js';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -78,7 +82,7 @@ export function loadDatabaseFromDiskCache(): boolean {
     if (fs.existsSync(CACHE_FILE)) {
       const raw = fs.readFileSync(CACHE_FILE, 'utf-8');
       const data = JSON.parse(raw);
-      if (Array.isArray(data.infratores) && data.infratores.length > 0) {
+      if (Array.isArray(data.infratores)) {
         db.infratores = data.infratores;
         db.caracteristicas_fisicas = data.caracteristicas_fisicas || [];
         db.enderecos_atuacao = data.enderecos_atuacao || [];
@@ -91,7 +95,7 @@ export function loadDatabaseFromDiskCache(): boolean {
         if (Array.isArray(data.orcrim_organogramas) && data.orcrim_organogramas.length > 0) {
           db.orcrim_organogramas = data.orcrim_organogramas;
         }
-        console.log(`💾 Banco carregado do cache em disco: ${db.infratores.length} infratores, ${db.ocorrencias_criminais.length} ocorrências.`);
+        console.log(`💾 Banco carregado do cache em disco: ${db.infratores.length} infratores, ${db.orcrim_organogramas.length} ORCRIMs.`);
         return true;
       }
     }
@@ -118,6 +122,7 @@ export async function syncServerWithFirestore(): Promise<void> {
       firestoreGangAreas,
       firestoreInfratorOcorrencias,
       firestoreVinculos,
+      firestoreOrcrim,
     ] = await Promise.all([
       fetchInfratores().catch(() => [] as Infrator[]),
       fetchEnderecos().catch(() => [] as EnderecoAtuacao[]),
@@ -125,6 +130,7 @@ export async function syncServerWithFirestore(): Promise<void> {
       fetchGangAreas().catch(() => [] as GangAreaZone[]),
       fetchInfratorOcorrencias().catch(() => [] as InfratorOcorrencia[]),
       fetchVinculos().catch(() => [] as VinculoComparsa[]),
+      fetchOrcrimOrganogramas().catch(() => [] as OrcrimData[]),
     ]);
 
     if (firestoreInfratores.length > 0) {
@@ -168,6 +174,25 @@ export async function syncServerWithFirestore(): Promise<void> {
       db.gang_areas = DEFAULT_GANG_AREAS_35BPM;
       saveGangAreasBatch(DEFAULT_GANG_AREAS_35BPM, true).catch(() => null);
       console.log(`📍 Áreas de gangue padrão do 35º BPM inicializadas (${DEFAULT_GANG_AREAS_35BPM.length} zonas).`);
+    }
+
+    if (firestoreOrcrim.length > 0) {
+      // Merge with any existing ones from disk cache so newly saved ones are never lost
+      const mergedMap = new Map<string, OrcrimData>();
+      for (const item of db.orcrim_organogramas) {
+        const key = item.id || item.gangue_info?.nome_gangue;
+        if (key) mergedMap.set(key, item);
+      }
+      for (const item of firestoreOrcrim) {
+        const key = item.id || item.gangue_info?.nome_gangue;
+        if (key) mergedMap.set(key, item);
+      }
+      db.orcrim_organogramas = Array.from(mergedMap.values());
+      console.log(`✅ ${db.orcrim_organogramas.length} organogramas ORCRIM carregados e sincronizados.`);
+    } else if (db.orcrim_organogramas.length > 0) {
+      for (const item of db.orcrim_organogramas) {
+        saveOrcrimOrganograma(item).catch(() => null);
+      }
     }
 
     // Persist snapshot to disk

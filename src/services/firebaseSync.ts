@@ -20,6 +20,9 @@ import {
   saveGangArea,
   saveGangAreasBatch,
   removeGangArea,
+  fetchOrcrimOrganogramas,
+  saveOrcrimOrganograma,
+  removeOrcrimOrganograma,
   subscribeToDatabase
 } from './firestoreService';
 import { db } from '../backend/db';
@@ -30,7 +33,8 @@ import {
   VinculoComparsa,
   GangAreaZone,
   SuspectWithDetails,
-  InfratorOcorrencia
+  InfratorOcorrencia,
+  OrcrimData
 } from '../types';
 import { DEFAULT_GANG_AREAS_35BPM } from '../utils/kmlGeoJsonParser';
 
@@ -79,13 +83,14 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
 
   try {
     // 1. Fetch current data from Firestore
-    const [infratores, enderecos, ocorrencias, vinculos, gangAreas, infratorOcorrencias] = await Promise.all([
+    const [infratores, enderecos, ocorrencias, vinculos, gangAreas, infratorOcorrencias, orcrimList] = await Promise.all([
       fetchInfratores().catch(() => []),
       fetchEnderecos().catch(() => []),
       fetchOcorrencias().catch(() => []),
       fetchVinculos().catch(() => []),
       fetchGangAreas().catch(() => []),
       fetchInfratorOcorrencias().catch(() => []),
+      fetchOrcrimOrganogramas().catch(() => []),
     ]);
 
     // Populate local in-memory DB with Firestore data
@@ -193,6 +198,41 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
       db.gang_areas = DEFAULT_GANG_AREAS_35BPM;
     }
 
+    // Populate ORCRIM Organograms
+    if (orcrimList && orcrimList.length > 0) {
+      db.orcrim_organogramas = orcrimList;
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          window.localStorage.setItem('guardiao_orcrim_cache', JSON.stringify(orcrimList));
+        } catch (e) {
+          // ignore storage quota
+        }
+      }
+    } else {
+      // If Firestore is empty, check if local storage or memory has cached organograms, and sync to Firestore
+      let localOrcrim: OrcrimData[] = [];
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          const cached = window.localStorage.getItem('guardiao_orcrim_cache');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              localOrcrim = parsed;
+            }
+          }
+        } catch (e) {}
+      }
+      if (localOrcrim.length === 0 && db.orcrim_organogramas && db.orcrim_organogramas.length > 0) {
+        localOrcrim = db.orcrim_organogramas;
+      }
+      if (localOrcrim.length > 0) {
+        db.orcrim_organogramas = localOrcrim;
+        for (const item of localOrcrim) {
+          saveOrcrimOrganograma(item).catch(() => null);
+        }
+      }
+    }
+
     if (onDataChange) {
       onDataChange();
     }
@@ -276,6 +316,17 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
       onGangAreasChange: (list) => {
         if (list && list.length > 0) {
           db.gang_areas = list;
+          if (onDataChange) onDataChange();
+        }
+      },
+      onOrcrimChange: (list) => {
+        if (list && list.length > 0) {
+          db.orcrim_organogramas = list;
+          if (typeof window !== 'undefined' && window.localStorage) {
+            try {
+              window.localStorage.setItem('guardiao_orcrim_cache', JSON.stringify(list));
+            } catch (e) {}
+          }
           if (onDataChange) onDataChange();
         }
       }
@@ -603,4 +654,58 @@ export async function persistGangAreasToFirebase(gangAreas: GangAreaZone[], repl
     console.error('Erro ao persistir áreas de gangues no Firestore:', err);
   }
 }
+
+/**
+ * Saves or updates an ORCRIM organogram in Firestore, local database and localStorage.
+ */
+export async function persistOrcrimToFirebase(orcrim: OrcrimData): Promise<void> {
+  if (!orcrim || !orcrim.gangue_info) return;
+  try {
+    // 1. Immediately update in-memory DB
+    db.saveOrcrim(orcrim);
+
+    // 2. Immediately cache to localStorage
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem('guardiao_orcrim_cache', JSON.stringify(db.orcrim_organogramas));
+        if (orcrim.id) {
+          window.localStorage.setItem('guardiao_last_selected_orcrim', orcrim.id);
+        }
+      } catch (e) {}
+    }
+
+    // 3. Persist to Firestore
+    await saveOrcrimOrganograma(orcrim);
+  } catch (err) {
+    console.error('Erro ao persistir organograma ORCRIM no Firestore:', err);
+  }
+}
+
+/**
+ * Removes an ORCRIM organogram from Firestore, local database and localStorage.
+ */
+export async function deleteOrcrimFromFirebase(orcrimId: string): Promise<void> {
+  if (!orcrimId) return;
+  try {
+    // 1. Immediately remove from in-memory DB
+    db.deleteOrcrim(orcrimId);
+
+    // 2. Immediately update localStorage
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem('guardiao_orcrim_cache', JSON.stringify(db.orcrim_organogramas));
+        const lastSelected = window.localStorage.getItem('guardiao_last_selected_orcrim');
+        if (lastSelected === orcrimId) {
+          window.localStorage.removeItem('guardiao_last_selected_orcrim');
+        }
+      } catch (e) {}
+    }
+
+    // 3. Remove from Firestore
+    await removeOrcrimOrganograma(orcrimId);
+  } catch (err) {
+    console.error('Erro ao excluir organograma ORCRIM do Firestore:', err);
+  }
+}
+
 

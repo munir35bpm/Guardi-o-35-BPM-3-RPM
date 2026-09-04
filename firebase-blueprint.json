@@ -104,6 +104,17 @@
         "tema": { "type": "string" },
         "bpm": { "type": "string" }
       }
+    },
+    "orcrim_organogramas": {
+      "title": "Organograma de Facção / ORCRIM",
+      "description": "Mapeamento piramidal e estrutura hierárquica de facções e gangues",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "gangue_info": { "type": "object" },
+        "estrutura_piramidal": { "type": "object" }
+      },
+      "required": ["gangue_info", "estrutura_piramidal"]
     }
   },
   "firestore": {
@@ -130,6 +141,10 @@
     "/gang_areas/{areaId}": {
       "schema": "gang_areas",
       "description": "Coleção de demarcações territoriais de gangues"
+    },
+    "/orcrim_organogramas/{orcrimId}": {
+      "schema": "orcrim_organogramas",
+      "description": "Coleção de organogramas de facções e gangues"
     },
     "/configuracoes/{configId}": {
       "schema": "configuracoes",

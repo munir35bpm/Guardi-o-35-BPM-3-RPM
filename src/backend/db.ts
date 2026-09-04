@@ -101,6 +101,18 @@ class CrimIntelDatabase {
     this.infrator_ocorrencia = [];
     this.vinculos_comparsas = [];
     this.gang_areas = [...DEFAULT_GANG_AREAS_35BPM];
+
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const cachedOrcrim = window.localStorage.getItem('guardiao_orcrim_cache');
+        if (cachedOrcrim) {
+          const parsed = JSON.parse(cachedOrcrim);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.orcrim_organogramas = parsed;
+          }
+        }
+      } catch (e) {}
+    }
   }
 
   public getGangAreas(): GangAreaZone[] {
@@ -749,17 +761,29 @@ class CrimIntelDatabase {
 
   public saveOrcrim(orcrim: any): any {
     const existingIndex = this.orcrim_organogramas.findIndex(o => o.id === orcrim.id || o.gangue_info?.nome_gangue === orcrim.gangue_info?.nome_gangue);
+    let result: any;
     if (existingIndex >= 0) {
       this.orcrim_organogramas[existingIndex] = { ...this.orcrim_organogramas[existingIndex], ...orcrim };
-      return this.orcrim_organogramas[existingIndex];
+      result = this.orcrim_organogramas[existingIndex];
     } else {
       const newOrcrim = {
-        id: orcrim.id || `orcrim-${Date.now()}`,
+        id: orcrim.id || (orcrim.gangue_info?.nome_gangue ? `orcrim-${orcrim.gangue_info.nome_gangue.toLowerCase().replace(/[^a-z0-9]/gi, '_')}` : `orcrim-${Date.now()}`),
         ...orcrim
       };
       this.orcrim_organogramas.push(newOrcrim);
-      return newOrcrim;
+      result = newOrcrim;
     }
+
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem('guardiao_orcrim_cache', JSON.stringify(this.orcrim_organogramas));
+        if (result && result.id) {
+          window.localStorage.setItem('guardiao_last_selected_orcrim', result.id);
+        }
+      } catch (e) {}
+    }
+
+    return result;
   }
 
   public deleteOrcrim(id: string): boolean {
@@ -767,7 +791,19 @@ class CrimIntelDatabase {
     this.orcrim_organogramas = this.orcrim_organogramas.filter(
       o => o.id !== id && o.gangue_info?.nome_gangue?.toLowerCase() !== id.toLowerCase()
     );
-    return this.orcrim_organogramas.length < initialLen;
+    const changed = this.orcrim_organogramas.length < initialLen;
+
+    if (changed && typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem('guardiao_orcrim_cache', JSON.stringify(this.orcrim_organogramas));
+        const lastSelected = window.localStorage.getItem('guardiao_last_selected_orcrim');
+        if (lastSelected === id) {
+          window.localStorage.removeItem('guardiao_last_selected_orcrim');
+        }
+      } catch (e) {}
+    }
+
+    return changed;
   }
 
   // Get network graph

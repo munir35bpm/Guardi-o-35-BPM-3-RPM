@@ -27,12 +27,14 @@ import {
   UserMinus,
   UserX,
   ShieldX,
-  AlertCircle
+  AlertCircle,
+  Edit3
 } from 'lucide-react';
 import { OrcrimData, MembroEstruturaOrcrim, Infrator, SituacaoPrisional } from '../types';
 import { db } from '../backend/db';
 import { openOrcrimDossier, openSuspectDossier } from '../utils/dossierGenerator';
 import { FileDown } from 'lucide-react';
+import { persistOrcrimToFirebase, deleteOrcrimFromFirebase } from '../services/firebaseSync';
 
 interface OrcrimWindowProps {
   onSelectSuspect?: (infratorId: string) => void;
@@ -41,16 +43,59 @@ interface OrcrimWindowProps {
   onRefreshSuspects?: () => void;
 }
 
+// Helper to synchronously get organograms from memory or localStorage cache
+const getInitialOrganogramas = (): OrcrimData[] => {
+  if (db.orcrim_organogramas && db.orcrim_organogramas.length > 0) {
+    return db.orcrim_organogramas;
+  }
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const cached = window.localStorage.getItem('guardiao_orcrim_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          db.orcrim_organogramas = parsed;
+          return parsed;
+        }
+      }
+    } catch (e) {}
+  }
+  return [];
+};
+
+// Helper to synchronously get last selected ORCRIM ID
+const getInitialSelectedOrcrimId = (list: OrcrimData[]): string => {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const saved = window.localStorage.getItem('guardiao_last_selected_orcrim');
+      if (saved && list.some(o => o.id === saved || o.gangue_info?.nome_gangue === saved)) {
+        return saved;
+      }
+    } catch (e) {}
+  }
+  if (list.length > 0) {
+    return list[0].id || list[0].gangue_info?.nome_gangue || '';
+  }
+  return '';
+};
+
 export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({ 
   onSelectSuspect, 
   registeredSuspects = [],
   onDeleteSuspect,
   onRefreshSuspects 
 }) => {
-  const [organogramas, setOrganogramas] = useState<OrcrimData[]>([]);
-  const [selectedOrcrimId, setSelectedOrcrimId] = useState<string>('');
-  const [currentOrcrim, setCurrentOrcrim] = useState<OrcrimData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [organogramas, setOrganogramas] = useState<OrcrimData[]>(getInitialOrganogramas);
+  const [selectedOrcrimId, setSelectedOrcrimId] = useState<string>(() => {
+    const list = getInitialOrganogramas();
+    return getInitialSelectedOrcrimId(list);
+  });
+  const [currentOrcrim, setCurrentOrcrim] = useState<OrcrimData | null>(() => {
+    const list = getInitialOrganogramas();
+    const id = getInitialSelectedOrcrimId(list);
+    return list.find(o => o.id === id || o.gangue_info?.nome_gangue === id) || (list.length > 0 ? list[0] : null);
+  });
+  const [loading, setLoading] = useState<boolean>(false);
   const [analyzingAi, setAnalyzingAi] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -92,41 +137,149 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
   const [newOrcrimLeaderSituacao, setNewOrcrimLeaderSituacao] = useState<SituacaoPrisional>('EM_LIBERDADE');
   const [isSavingOrcrim, setIsSavingOrcrim] = useState<boolean>(false);
 
-  // Load existing organograms from backend
+  // Edit ORCRIM Info Modal state
+  const [showEditOrcrimModal, setShowEditOrcrimModal] = useState<boolean>(false);
+  const [editOrcrimName, setEditOrcrimName] = useState<string>('');
+  const [editOrcrimTerritory, setEditOrcrimTerritory] = useState<string>('');
+  const [editOrcrimResumo, setEditOrcrimResumo] = useState<string>('');
+  const [isSavingEditOrcrim, setIsSavingEditOrcrim] = useState<boolean>(false);
+
+  // Edit Member Modal state
+  const [memberToEdit, setMemberToEdit] = useState<{
+    membro: MembroEstruturaOrcrim;
+    level: 1 | 2 | 3;
+  } | null>(null);
+  const [editMemberFuncao, setEditMemberFuncao] = useState<string>('');
+  const [editMemberLevel, setEditMemberLevel] = useState<1 | 2 | 3>(1);
+  const [editMemberSituacao, setEditMemberSituacao] = useState<SituacaoPrisional>('EM_LIBERDADE');
+  const [editMemberMandado, setEditMemberMandado] = useState<boolean>(false);
+  const [editMemberArea, setEditMemberArea] = useState<string>('');
+  const [editMemberSubordinado, setEditMemberSubordinado] = useState<string>('');
+  const [isSavingEditMember, setIsSavingEditMember] = useState<boolean>(false);
+
+  // Multi-layer persistence helper: saves to React state, in-memory DB, localStorage, Firestore, and backend API
+  const persistOrcrimEverywhere = async (targetOrcrim: OrcrimData) => {
+    // 1. Immediately update React state
+    setCurrentOrcrim(targetOrcrim);
+    setOrganogramas(prev => {
+      const filtered = prev.filter(
+        o => o.id !== targetOrcrim.id && o.gangue_info?.nome_gangue !== targetOrcrim.gangue_info?.nome_gangue
+      );
+      return [...filtered, targetOrcrim];
+    });
+    const effectiveId = targetOrcrim.id || targetOrcrim.gangue_info.nome_gangue;
+    setSelectedOrcrimId(effectiveId);
+
+    // 2. Immediately update in-memory DB and localStorage
+    db.saveOrcrim(targetOrcrim);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem('guardiao_orcrim_cache', JSON.stringify(db.orcrim_organogramas));
+        window.localStorage.setItem('guardiao_last_selected_orcrim', effectiveId);
+      } catch (e) {}
+    }
+
+    // 3. Immediately persist to Firestore in background
+    persistOrcrimToFirebase(targetOrcrim).catch(err => {
+      console.warn('Erro ao sincronizar com Firestore:', err);
+    });
+
+    // 4. Immediately persist to Express backend API & disk JSON
+    try {
+      await fetch('/api/orcrim/organogramas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(targetOrcrim),
+      });
+    } catch (err) {
+      console.warn('Erro na requisição backend /api/orcrim/organogramas:', err);
+    }
+  };
+
+  // Multi-layer delete helper: removes from in-memory DB, localStorage, Firestore, and backend API
+  const deleteOrcrimEverywhere = async (id: string, name: string) => {
+    // 1. In-memory DB
+    db.deleteOrcrim(id);
+
+    // 2. LocalStorage
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem('guardiao_orcrim_cache', JSON.stringify(db.orcrim_organogramas));
+        const last = window.localStorage.getItem('guardiao_last_selected_orcrim');
+        if (last === id || last === name) {
+          window.localStorage.removeItem('guardiao_last_selected_orcrim');
+        }
+      } catch (e) {}
+    }
+
+    // 3. Firestore
+    deleteOrcrimFromFirebase(id).catch(err => console.warn(err));
+
+    // 4. Express backend
+    fetch(`/api/orcrim/organogramas/${id}`, { method: 'DELETE' }).catch(err => console.warn(err));
+  };
+
+  // Selection handler with persistence
+  const handleSelectOrcrim = (id: string) => {
+    setSelectedOrcrimId(id);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('guardiao_last_selected_orcrim', id);
+    }
+  };
+
+  // Load existing organograms from backend and reconcile
   const fetchOrganogramas = async () => {
     try {
-      setLoading(true);
       const res = await fetch('/api/orcrim/organogramas').catch(() => null);
       if (res && res.ok) {
         const data = await res.json();
-        setOrganogramas(data);
-        if (data.length > 0) {
-          if (!selectedOrcrimId || !data.find((d: OrcrimData) => d.id === selectedOrcrimId)) {
-            setSelectedOrcrimId(data[0].id || 'pcc-torre-velhas');
-            setCurrentOrcrim(data[0]);
-          } else {
-            const found = data.find((d: OrcrimData) => d.id === selectedOrcrimId);
-            if (found) setCurrentOrcrim(found);
+        if (Array.isArray(data) && data.length > 0) {
+          // Merge with memory / localStorage
+          const map = new Map<string, OrcrimData>();
+          for (const item of db.orcrim_organogramas) {
+            const k = item.id || item.gangue_info?.nome_gangue;
+            if (k) map.set(k, item);
           }
+          for (const item of data) {
+            const k = item.id || item.gangue_info?.nome_gangue;
+            if (k) map.set(k, item);
+          }
+          const merged = Array.from(map.values());
+          db.orcrim_organogramas = merged;
+          if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem('guardiao_orcrim_cache', JSON.stringify(merged));
+          }
+          setOrganogramas(merged);
+
+          // Restore selection
+          const currentId = selectedOrcrimId || (typeof window !== 'undefined' ? window.localStorage.getItem('guardiao_last_selected_orcrim') : null);
+          const found = merged.find(o => o.id === currentId || o.gangue_info?.nome_gangue === currentId);
+          if (found) {
+            setSelectedOrcrimId(found.id || found.gangue_info.nome_gangue);
+            setCurrentOrcrim(found);
+          } else if (merged.length > 0) {
+            setSelectedOrcrimId(merged[0].id || merged[0].gangue_info.nome_gangue);
+            setCurrentOrcrim(merged[0]);
+          }
+          return;
         }
-        return;
       }
     } catch (err) {
-      console.warn('Backend indisponível, utilizando dados locais de ORCRIM:', err);
-    } finally {
-      setLoading(false);
+      console.warn('Backend indisponível, mantendo dados locais de ORCRIM:', err);
     }
 
-    // Static fallback for GitHub Pages / client-only mode
+    // Fallback local memory
     const fallbackData = db.orcrim_organogramas;
-    setOrganogramas(fallbackData);
     if (fallbackData.length > 0) {
-      if (!selectedOrcrimId || !fallbackData.find((d: OrcrimData) => d.id === selectedOrcrimId)) {
-        setSelectedOrcrimId(fallbackData[0].id || 'pcc-torre-velhas');
-        setCurrentOrcrim(fallbackData[0]);
+      setOrganogramas(fallbackData);
+      const currentId = selectedOrcrimId || (typeof window !== 'undefined' ? window.localStorage.getItem('guardiao_last_selected_orcrim') : null);
+      const found = fallbackData.find(d => d.id === currentId || d.gangue_info?.nome_gangue === currentId);
+      if (found) {
+        setSelectedOrcrimId(found.id || found.gangue_info.nome_gangue);
+        setCurrentOrcrim(found);
       } else {
-        const found = fallbackData.find((d: OrcrimData) => d.id === selectedOrcrimId);
-        if (found) setCurrentOrcrim(found);
+        setSelectedOrcrimId(fallbackData[0].id || fallbackData[0].gangue_info.nome_gangue);
+        setCurrentOrcrim(fallbackData[0]);
       }
     }
   };
@@ -137,7 +290,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
 
   useEffect(() => {
     if (selectedOrcrimId && organogramas.length > 0) {
-      const found = organogramas.find(o => o.id === selectedOrcrimId);
+      const found = organogramas.find(o => o.id === selectedOrcrimId || o.gangue_info?.nome_gangue === selectedOrcrimId);
       if (found) setCurrentOrcrim(found);
     }
   }, [selectedOrcrimId, organogramas]);
@@ -166,9 +319,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
       }
 
       const generated = await res.json();
-      await fetchOrganogramas();
-      setSelectedOrcrimId(generated.id || generated.gangue_info.nome_gangue);
-      setCurrentOrcrim(generated);
+      await persistOrcrimEverywhere(generated);
       setShowAiModal(false);
       setAiFactionName('');
       setAiNarrative('');
@@ -179,7 +330,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
     }
   };
 
-  // Add Member to Organogram (with auto-create if no organogram exists)
+  // Add Member to Organogram
   const handleAddMember = async () => {
     if (!selectedSuspectId) {
       alert('Por favor, selecione um infrator cadastrado na lista.');
@@ -208,7 +359,6 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
       };
 
       // Determine target organogram:
-      // 1. Check if user specified or selected an existing faction name
       const effectiveFactionName = targetFactionName.trim() || 
         currentOrcrim?.gangue_info.nome_gangue || 
         suspect.gangue_faccao || 
@@ -226,7 +376,6 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
       } else if (currentOrcrim) {
         targetOrcrim = JSON.parse(JSON.stringify(currentOrcrim));
       } else {
-        // Create new Organogram structure from scratch
         targetOrcrim = {
           id: `orcrim-${Date.now()}`,
           gangue_info: {
@@ -281,23 +430,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
       targetOrcrim.gangue_info.total_integrantes_mapeados = total;
       targetOrcrim.estrutura_piramidal = estrutura;
 
-      const res = await fetch('/api/orcrim/organogramas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(targetOrcrim)
-      }).catch(() => null);
-
-      let savedData = targetOrcrim;
-      if (res && res.ok) {
-        savedData = await res.json();
-      } else {
-        // Fallback local memory
-        savedData = db.saveOrcrim(targetOrcrim);
-      }
-
-      setCurrentOrcrim(savedData);
-      setSelectedOrcrimId(savedData.id || savedData.gangue_info.nome_gangue);
-      await fetchOrganogramas();
+      await persistOrcrimEverywhere(targetOrcrim);
 
       // Reset form and close modal
       setShowAddMemberModal(false);
@@ -306,7 +439,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
       setMemberFuncao('');
       setMemberArea('');
       setMemberSubordinado('');
-      setToastMessage(`Integrante "${newMember.vulgo}" adicionado à estrutura da ORCRIM.`);
+      setToastMessage(`Integrante "${newMember.vulgo}" adicionado e salvo na ORCRIM.`);
     } catch (e: any) {
       console.error('Erro ao salvar membro na ORCRIM:', e);
       alert(`Erro ao salvar integrante na ORCRIM: ${e.message || 'Falha na requisição'}`);
@@ -329,12 +462,11 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
 
     try {
       if (deleteOption === 'delete_entire_suspect') {
-        // 1. Delete suspect from database entirely
         await fetch(`/api/infratores/${membro.infrator_id}`, { method: 'DELETE' }).catch(() => null);
         db.deleteInfrator(membro.infrator_id);
       }
 
-      // 2. Remove member from current Orcrim structure across all levels
+      // Remove member from current Orcrim structure across all levels
       const updatedOrcrim: OrcrimData = JSON.parse(JSON.stringify(currentOrcrim));
       const estrutura = updatedOrcrim.estrutura_piramidal;
 
@@ -359,22 +491,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
         updatedOrcrim.estrutura_piramidal = estrutura;
       }
 
-      // 3. Persist updated organogram
-      const res = await fetch('/api/orcrim/organogramas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedOrcrim)
-      }).catch(() => null);
-
-      let savedData = updatedOrcrim;
-      if (res && res.ok) {
-        savedData = await res.json();
-      } else {
-        savedData = db.saveOrcrim(updatedOrcrim);
-      }
-
-      setCurrentOrcrim(savedData);
-      await fetchOrganogramas();
+      await persistOrcrimEverywhere(updatedOrcrim);
 
       if (deleteOption === 'delete_entire_suspect') {
         onRefreshSuspects?.();
@@ -404,16 +521,19 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
 
     try {
       const id = orcrimToDelete.id || orcrimToDelete.gangue_info.nome_gangue;
-      await fetch(`/api/orcrim/organogramas/${id}`, { method: 'DELETE' }).catch(() => null);
-      db.deleteOrcrim(id);
+      await deleteOrcrimEverywhere(id, orcrimToDelete.gangue_info.nome_gangue);
 
       const remaining = organogramas.filter(
         o => o.id !== id && o.gangue_info.nome_gangue !== orcrimToDelete.gangue_info.nome_gangue
       );
       setOrganogramas(remaining);
       if (remaining.length > 0) {
-        setSelectedOrcrimId(remaining[0].id || remaining[0].gangue_info.nome_gangue);
+        const nextId = remaining[0].id || remaining[0].gangue_info.nome_gangue;
+        setSelectedOrcrimId(nextId);
         setCurrentOrcrim(remaining[0]);
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem('guardiao_last_selected_orcrim', nextId);
+        }
       } else {
         setSelectedOrcrimId('');
         setCurrentOrcrim(null);
@@ -426,6 +546,110 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
       alert(`Erro ao excluir organograma: ${err.message || 'Falha na operação'}`);
     } finally {
       setIsDeletingOrcrim(false);
+    }
+  };
+
+  // Edit ORCRIM Details Handlers
+  const handleInitiateEditOrcrim = () => {
+    if (!currentOrcrim) return;
+    setEditOrcrimName(currentOrcrim.gangue_info.nome_gangue);
+    setEditOrcrimTerritory(currentOrcrim.gangue_info.territorio_principal || 'Santa Luzia / 35º BPM');
+    setEditOrcrimResumo(currentOrcrim.gangue_info.resumo_atuacao || '');
+    setShowEditOrcrimModal(true);
+  };
+
+  const handleSaveEditOrcrimDetails = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!currentOrcrim) return;
+    const nameTrimmed = editOrcrimName.trim();
+    if (!nameTrimmed) {
+      alert('Por favor, informe o Nome da Organização Criminosa.');
+      return;
+    }
+    setIsSavingEditOrcrim(true);
+    try {
+      const updated: OrcrimData = JSON.parse(JSON.stringify(currentOrcrim));
+      updated.gangue_info.nome_gangue = nameTrimmed;
+      updated.gangue_info.territorio_principal = editOrcrimTerritory.trim() || 'Santa Luzia / 35º BPM';
+      updated.gangue_info.resumo_atuacao = editOrcrimResumo.trim() || '';
+      await persistOrcrimEverywhere(updated);
+      setShowEditOrcrimModal(false);
+      setToastMessage(`Dados da organização "${nameTrimmed}" atualizados e salvos com sucesso!`);
+    } catch (err: any) {
+      alert(`Erro ao salvar dados da ORCRIM: ${err.message || err}`);
+    } finally {
+      setIsSavingEditOrcrim(false);
+    }
+  };
+
+  // Edit Member Details Handlers
+  const handleInitiateEditMember = (membro: MembroEstruturaOrcrim, level: 1 | 2 | 3) => {
+    setMemberToEdit({ membro, level });
+    setEditMemberFuncao(membro.funcao_especifica || '');
+    setEditMemberLevel(level);
+    setEditMemberSituacao(membro.situacao_atual || 'EM_LIBERDADE');
+    setEditMemberMandado(!!membro.status_mandado);
+    setEditMemberArea(membro.area_responsabilidade || '');
+    setEditMemberSubordinado(membro.subordinado_a_vulgo || '');
+  };
+
+  const handleSaveEditMember = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!memberToEdit || !currentOrcrim) return;
+
+    setIsSavingEditMember(true);
+    try {
+      const { membro } = memberToEdit;
+      const updated: OrcrimData = JSON.parse(JSON.stringify(currentOrcrim));
+      const estrutura = updated.estrutura_piramidal;
+
+      // Remove from all existing levels
+      estrutura.nivel_1_lideranca = (estrutura.nivel_1_lideranca || []).filter(
+        m => m.infrator_id !== membro.infrator_id
+      );
+      const lvl2 = (estrutura.nivel_2_gerencia_tatica || estrutura['nivel_2_gerencia_tática'] || []).filter(
+        m => m.infrator_id !== membro.infrator_id
+      );
+      estrutura.nivel_2_gerencia_tatica = lvl2;
+      estrutura['nivel_2_gerencia_tática'] = lvl2;
+      estrutura.nivel_3_operacionais_e_linha_de_frente = (estrutura.nivel_3_operacionais_e_linha_de_frente || []).filter(
+        m => m.infrator_id !== membro.infrator_id
+      );
+
+      // Updated member object
+      const updatedMember: MembroEstruturaOrcrim = {
+        ...membro,
+        funcao_especifica: editMemberFuncao.trim() || membro.funcao_especifica,
+        situacao_atual: editMemberSituacao,
+        status_mandado: editMemberMandado,
+        area_responsabilidade: editMemberArea.trim() || undefined,
+        subordinado_a_vulgo: editMemberSubordinado.trim() || undefined,
+      };
+
+      // Add to new level
+      if (editMemberLevel === 1) {
+        estrutura.nivel_1_lideranca.push(updatedMember);
+      } else if (editMemberLevel === 2) {
+        estrutura.nivel_2_gerencia_tatica.push(updatedMember);
+        estrutura['nivel_2_gerencia_tática'] = estrutura.nivel_2_gerencia_tatica;
+      } else {
+        estrutura.nivel_3_operacionais_e_linha_de_frente.push(updatedMember);
+      }
+
+      const total = (estrutura.nivel_1_lideranca?.length || 0) + 
+        (estrutura.nivel_2_gerencia_tatica?.length || 0) + 
+        (estrutura.nivel_3_operacionais_e_linha_de_frente?.length || 0);
+
+      updated.gangue_info.total_integrantes_mapeados = total;
+      updated.estrutura_piramidal = estrutura;
+
+      await persistOrcrimEverywhere(updated);
+      setMemberToEdit(null);
+      setToastMessage(`Dados e função de "${membro.vulgo}" atualizados e salvos.`);
+    } catch (err: any) {
+      alert(`Erro ao salvar alterações do integrante: ${err.message || err}`);
+    } finally {
+      setIsSavingEditMember(false);
     }
   };
 
@@ -458,7 +682,8 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
         `A organização "${nameTrimmed}" já possui um organograma cadastrado. Deseja abrir o organograma existente?`
       );
       if (confirmOpen) {
-        setSelectedOrcrimId(existing.id || existing.gangue_info.nome_gangue);
+        const id = existing.id || existing.gangue_info.nome_gangue;
+        handleSelectOrcrim(id);
         setCurrentOrcrim(existing);
         setShowCreateOrcrimModal(false);
       }
@@ -509,31 +734,10 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
         },
       };
 
-      const res = await fetch('/api/orcrim/organogramas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newOrcrim),
-      }).catch(() => null);
-
-      let savedData = newOrcrim;
-      if (res && res.ok) {
-        savedData = await res.json();
-      } else {
-        savedData = db.saveOrcrim(newOrcrim);
-      }
-
-      setOrganogramas(prev => {
-        const filtered = prev.filter(
-          o => o.id !== savedData.id && o.gangue_info.nome_gangue !== savedData.gangue_info.nome_gangue
-        );
-        return [...filtered, savedData];
-      });
-
-      setSelectedOrcrimId(savedData.id || savedData.gangue_info.nome_gangue);
-      setCurrentOrcrim(savedData);
+      await persistOrcrimEverywhere(newOrcrim);
       setShowCreateOrcrimModal(false);
       resetNewOrcrimForm();
-      setToastMessage(`Organização Criminosa "${savedData.gangue_info.nome_gangue}" cadastrada com sucesso!`);
+      setToastMessage(`Organização Criminosa "${newOrcrim.gangue_info.nome_gangue}" cadastrada com sucesso!`);
     } catch (err: any) {
       console.error('Erro ao cadastrar nova ORCRIM:', err);
       alert(`Erro ao cadastrar nova ORCRIM: ${err.message || 'Falha na requisição'}`);
@@ -673,8 +877,8 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
             return (
               <button
                 key={orcrim.id || orcrim.gangue_info.nome_gangue}
-                onClick={() => setSelectedOrcrimId(orcrim.id || orcrim.gangue_info.nome_gangue)}
-                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                onClick={() => handleSelectOrcrim(orcrim.id || orcrim.gangue_info.nome_gangue)}
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                   isSelected
                     ? 'bg-[#C4A76E] text-[#0E121B] shadow-md ring-2 ring-[#DFC897]'
                     : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700 border border-slate-700'
@@ -717,10 +921,21 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                   Organização Criminosa / Facção
                 </span>
-                <h3 className="text-xl font-black text-slate-900 mt-0.5 flex items-center gap-2">
-                  <ShieldAlert className="w-5 h-5 text-red-600" />
-                  {currentOrcrim.gangue_info.nome_gangue}
-                </h3>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                    <ShieldAlert className="w-5 h-5 text-red-600" />
+                    {currentOrcrim.gangue_info.nome_gangue}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handleInitiateEditOrcrim}
+                    className="p-1.5 text-slate-500 hover:text-amber-800 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-md transition-all cursor-pointer flex items-center gap-1 text-xs font-bold shadow-2xs"
+                    title="Editar informações da Organização Criminosa"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                    <span className="text-[11px]">Editar Dados</span>
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -841,6 +1056,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
                     level={1}
                     onSelectSuspect={onSelectSuspect}
                     onInitiateDelete={handleInitiateDeleteMember}
+                    onInitiateEdit={handleInitiateEditMember}
                   />
                 ))}
               </div>
@@ -909,6 +1125,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
                     level={2}
                     onSelectSuspect={onSelectSuspect}
                     onInitiateDelete={handleInitiateDeleteMember}
+                    onInitiateEdit={handleInitiateEditMember}
                   />
                 ))}
               </div>
@@ -977,6 +1194,7 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
                     level={3}
                     onSelectSuspect={onSelectSuspect}
                     onInitiateDelete={handleInitiateDeleteMember}
+                    onInitiateEdit={handleInitiateEditMember}
                   />
                 ))}
               </div>
@@ -1706,6 +1924,241 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
         </div>
       )}
 
+      {/* Modal: Editar Organização Criminosa */}
+      {showEditOrcrimModal && currentOrcrim && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 space-y-4 font-sans max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-100 text-amber-800 rounded-lg">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 uppercase tracking-tight">
+                    Editar Organização Criminosa
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Atualize os dados estratégicos e território de domínio da facção
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditOrcrimModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditOrcrimDetails} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Nome da Organização Criminosa *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editOrcrimName}
+                  onChange={(e) => setEditOrcrimName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white text-slate-900"
+                  placeholder="Nome da facção ou gangue..."
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Território de Domínio Principal *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editOrcrimTerritory}
+                  onChange={(e) => setEditOrcrimTerritory(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white text-slate-900"
+                  placeholder="Ex: Palmital / 35º BPM, Santa Luzia"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Doutrina, Modus Operandi & Histórico
+                </label>
+                <textarea
+                  rows={4}
+                  value={editOrcrimResumo}
+                  onChange={(e) => setEditOrcrimResumo(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white text-slate-900"
+                  placeholder="Descrição da atuação delitiva da organização..."
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowEditOrcrimModal(false)}
+                  disabled={isSavingEditOrcrim}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEditOrcrim}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  {isSavingEditOrcrim ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{isSavingEditOrcrim ? 'Salvando...' : 'Salvar Alterações'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Integrante da ORCRIM */}
+      {memberToEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 space-y-4 font-sans max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <img
+                  src={memberToEdit.membro.foto_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&h=300&fit=crop'}
+                  alt={memberToEdit.membro.vulgo}
+                  className="w-12 h-12 rounded-lg object-cover border border-slate-300 shadow-xs"
+                />
+                <div>
+                  <h3 className="text-base font-black text-slate-900 uppercase tracking-tight flex items-center gap-1.5">
+                    <span>Editar Integrante: &quot;{memberToEdit.membro.vulgo}&quot;</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    {memberToEdit.membro.nome_completo}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMemberToEdit(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditMember} className="space-y-3.5">
+              {/* Nível Hierárquico */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Nível Hierárquico no Organograma *
+                </label>
+                <select
+                  value={editMemberLevel}
+                  onChange={(e) => setEditMemberLevel(Number(e.target.value) as 1 | 2 | 3)}
+                  className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white text-slate-900"
+                >
+                  <option value={1}>Nível 1 • Liderança Estratégica & Sintonia Geral</option>
+                  <option value={2}>Nível 2 • Gerência Tática, Disciplinas & Logística</option>
+                  <option value={3}>Nível 3 • Operacionais, Soldados de Pista & Linha de Frente</option>
+                </select>
+              </div>
+
+              {/* Função Específica */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Função Específica no Organograma *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editMemberFuncao}
+                  onChange={(e) => setEditMemberFuncao(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white text-slate-900"
+                  placeholder="Ex: Sintonia de Rua, Gerente do Palmital, Fogueteiro, Executor..."
+                />
+              </div>
+
+              {/* Situação Prisional & Mandado */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                    Situação Prisional
+                  </label>
+                  <select
+                    value={editMemberSituacao}
+                    onChange={(e) => setEditMemberSituacao(e.target.value as SituacaoPrisional)}
+                    className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white text-slate-900"
+                  >
+                    <option value="EM_LIBERDADE">EM LIBERDADE</option>
+                    <option value="PRESO">PRESO</option>
+                    <option value="FORAGIDO">FORAGIDO</option>
+                    <option value="MORTO">FALECIDO (MORTO)</option>
+                  </select>
+                </div>
+
+                <div className="flex items-end pb-2">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-red-800 bg-red-50 p-2 rounded-lg border border-red-200 w-full">
+                    <input
+                      type="checkbox"
+                      checked={editMemberMandado}
+                      onChange={(e) => setEditMemberMandado(e.target.checked)}
+                      className="accent-red-600 w-4 h-4 rounded cursor-pointer"
+                    />
+                    <span>Mandado de Prisão Ativo</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Área / Ponto de Responsabilidade */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Área / Ponto de Responsabilidade (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={editMemberArea}
+                  onChange={(e) => setEditMemberArea(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white text-slate-900"
+                  placeholder="Ex: Biqueira da Caixa d'Água, Rua 15, Alto do Palmital..."
+                />
+              </div>
+
+              {/* Subordinado a (Vulgo do Superior) */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Subordinado Diretamente a (Vulgo) (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={editMemberSubordinado}
+                  onChange={(e) => setEditMemberSubordinado(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white text-slate-900"
+                  placeholder="Ex: Vulgo do gerente ou líder superior imediato..."
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setMemberToEdit(null)}
+                  disabled={isSavingEditMember}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEditMember}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  {isSavingEditMember ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{isSavingEditMember ? 'Salvando...' : 'Salvar Alterações'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900 border border-amber-500/80 text-amber-300 px-4 py-3 rounded-lg shadow-2xl font-mono text-xs flex items-center gap-2.5 animate-in slide-in-from-bottom-2">
@@ -1728,9 +2181,10 @@ interface MemberCardProps {
   level: 1 | 2 | 3;
   onSelectSuspect?: (id: string) => void;
   onInitiateDelete: (membro: MembroEstruturaOrcrim, level: 1 | 2 | 3) => void;
+  onInitiateEdit?: (membro: MembroEstruturaOrcrim, level: 1 | 2 | 3) => void;
 }
 
-const MemberCard: React.FC<MemberCardProps> = ({ membro, level, onSelectSuspect, onInitiateDelete }) => {
+const MemberCard: React.FC<MemberCardProps> = ({ membro, level, onSelectSuspect, onInitiateDelete, onInitiateEdit }) => {
   const getStatusBadge = (status: SituacaoPrisional, mandado?: boolean) => {
     if (status === 'MORTO') {
       return (
@@ -1835,6 +2289,21 @@ const MemberCard: React.FC<MemberCardProps> = ({ membro, level, onSelectSuspect,
         </span>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          {onInitiateEdit && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onInitiateEdit(membro, level);
+              }}
+              className="text-xs font-bold text-slate-700 hover:text-black bg-slate-100 hover:bg-slate-200 border border-slate-300/80 flex items-center gap-1 px-2 py-1 rounded-md transition-all cursor-pointer shadow-2xs"
+              title="Editar função, nível ou situação do integrante"
+            >
+              <Edit3 className="w-3.5 h-3.5 text-slate-600" />
+              <span>Editar</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={(e) => {

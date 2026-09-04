@@ -20,6 +20,8 @@ import {
   saveGangArea,
   saveGangAreasBatch,
   removeGangArea,
+  saveOrcrimOrganograma,
+  removeOrcrimOrganograma,
 } from './src/services/firestoreService.js';
 import dotenv from 'dotenv';
 
@@ -1487,8 +1489,9 @@ app.get('/api/network-graph', (req, res) => {
 // ==========================================
 // MODULE E: ORCRIM - ORGANOGRAMAS DE FACÇÕES E GANGUES
 // ==========================================
-app.get('/api/orcrim/organogramas', (req, res) => {
+app.get('/api/orcrim/organogramas', async (req, res) => {
   try {
+    await ensureServerDataLoaded();
     const organogramas = db.getOrcrimOrganogramas();
     res.json(organogramas);
   } catch (error: any) {
@@ -1496,8 +1499,9 @@ app.get('/api/orcrim/organogramas', (req, res) => {
   }
 });
 
-app.get('/api/orcrim/organogramas/:id', (req, res) => {
+app.get('/api/orcrim/organogramas/:id', async (req, res) => {
   try {
+    await ensureServerDataLoaded();
     const item = db.getOrcrimById(req.params.id);
     if (!item) {
       res.status(404).json({ error: 'Organograma de facção/gangue não encontrado.' });
@@ -1509,7 +1513,7 @@ app.get('/api/orcrim/organogramas/:id', (req, res) => {
   }
 });
 
-app.post('/api/orcrim/organogramas', (req, res) => {
+app.post('/api/orcrim/organogramas', async (req, res) => {
   try {
     const data = req.body;
     if (!data.gangue_info || !data.estrutura_piramidal) {
@@ -1518,13 +1522,16 @@ app.post('/api/orcrim/organogramas', (req, res) => {
     }
     const saved = db.saveOrcrim(data);
     saveDatabaseToDiskCache();
+    saveOrcrimOrganograma(saved).catch((err) => {
+      console.warn('Erro assíncrono ao salvar orcrim no firestore:', err);
+    });
     res.status(201).json(saved);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.delete('/api/orcrim/organogramas/:id', (req, res) => {
+app.delete('/api/orcrim/organogramas/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const deleted = db.deleteOrcrim(id);
@@ -1533,6 +1540,9 @@ app.delete('/api/orcrim/organogramas/:id', (req, res) => {
       return;
     }
     saveDatabaseToDiskCache();
+    removeOrcrimOrganograma(id).catch((err) => {
+      console.warn('Erro assíncrono ao remover orcrim do firestore:', err);
+    });
     res.json({ success: true, message: 'Organograma excluído com sucesso.' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

@@ -15,7 +15,8 @@ import {
   OcorrenciaCriminal,
   InfratorOcorrencia,
   VinculoComparsa,
-  GangAreaZone
+  GangAreaZone,
+  OrcrimData
 } from '../types';
 import { db } from '../backend/db';
 
@@ -27,6 +28,7 @@ export const COLLECTIONS = {
   VINCULOS_CRIMES: 'infrator_ocorrencia',
   VINCULOS_COMPARSAS: 'vinculos_comparsas',
   GANG_AREAS: 'gang_areas',
+  ORCRIM_ORGANOGRAMAS: 'orcrim_organogramas',
 };
 
 // Helper to recursively remove undefined fields and convert invalid structures for Firestore
@@ -452,6 +454,51 @@ export async function removeGangArea(id: string): Promise<void> {
 }
 
 // ==========================================
+// ORCRIM ORGANOGRAMAS CRUD
+// ==========================================
+
+export async function fetchOrcrimOrganogramas(): Promise<OrcrimData[]> {
+  try {
+    const colRef = collection(firestore, COLLECTIONS.ORCRIM_ORGANOGRAMAS);
+    const snapshot = await getDocs(colRef);
+    const list: OrcrimData[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as OrcrimData;
+      if (data && data.gangue_info && data.estrutura_piramidal) {
+        list.push({
+          ...data,
+          id: data.id || docSnap.id
+        });
+      }
+    });
+    return list;
+  } catch (error) {
+    console.error('Erro ao buscar organogramas ORCRIM do Firestore:', error);
+    return [];
+  }
+}
+
+export async function saveOrcrimOrganograma(orcrim: OrcrimData): Promise<void> {
+  try {
+    const rawId = orcrim.id || (orcrim.gangue_info?.nome_gangue ? `orcrim-${orcrim.gangue_info.nome_gangue.toLowerCase().replace(/[^a-z0-9]/gi, '_')}` : `orcrim-${Date.now()}`);
+    const docRef = doc(firestore, COLLECTIONS.ORCRIM_ORGANOGRAMAS, rawId);
+    const sanitized = sanitizeForFirestore({ ...orcrim, id: rawId });
+    await setDoc(docRef, sanitized, { merge: true });
+  } catch (err) {
+    console.warn('Erro ao salvar organograma ORCRIM no Firestore:', err);
+  }
+}
+
+export async function removeOrcrimOrganograma(id: string): Promise<void> {
+  try {
+    const docRef = doc(firestore, COLLECTIONS.ORCRIM_ORGANOGRAMAS, id);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.warn('Erro ao remover organograma ORCRIM do Firestore:', err);
+  }
+}
+
+// ==========================================
 // REAL-TIME SYNC HELPER
 // ==========================================
 
@@ -461,6 +508,7 @@ export function subscribeToDatabase(callbacks: {
   onOcorrenciasChange?: (data: OcorrenciaCriminal[]) => void;
   onInfratorOcorrenciasChange?: (data: InfratorOcorrencia[]) => void;
   onGangAreasChange?: (data: GangAreaZone[]) => void;
+  onOrcrimChange?: (data: OrcrimData[]) => void;
 }) {
   const unsubs: (() => void)[] = [];
 
@@ -515,6 +563,25 @@ export function subscribeToDatabase(callbacks: {
       callbacks.onGangAreasChange!(list);
     }, (err) => {
       console.warn('Firestore Gang Areas onSnapshot error:', err);
+    });
+    unsubs.push(unsub);
+  }
+
+  if (callbacks.onOrcrimChange) {
+    const unsub = onSnapshot(collection(firestore, COLLECTIONS.ORCRIM_ORGANOGRAMAS), (snap) => {
+      const list: OrcrimData[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as OrcrimData;
+        if (data && data.gangue_info && data.estrutura_piramidal) {
+          list.push({
+            ...data,
+            id: data.id || d.id
+          });
+        }
+      });
+      callbacks.onOrcrimChange!(list);
+    }, (err) => {
+      console.warn('Firestore ORCRIM Organogramas onSnapshot error:', err);
     });
     unsubs.push(unsub);
   }
