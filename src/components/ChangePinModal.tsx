@@ -17,7 +17,7 @@ export const ChangePinModal: React.FC<ChangePinModalProps> = ({ isOpen, onClose,
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -31,7 +31,7 @@ export const ChangePinModal: React.FC<ChangePinModalProps> = ({ isOpen, onClose,
       return;
     }
 
-    const result = changeAdminPin(currentPin, newPin);
+    const result = await changeAdminPin(currentPin, newPin);
     if (result.success) {
       onSuccess();
       onClose();

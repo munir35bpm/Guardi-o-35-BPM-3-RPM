@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Lock, Unlock, Eye, EyeOff, AlertTriangle, KeyRound, X } from 'lucide-react';
-import { loginAdmin, DEFAULT_PIN_HINT } from '../services/adminAuth';
+import { loginAdmin } from '../services/adminAuth';
 
 interface AdminPinModalProps {
   isOpen: boolean;
@@ -19,7 +19,6 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   const [showPin, setShowPin] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [showHint, setShowHint] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -141,28 +140,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
               />
               <span>Lembrar neste navegador por 30 dias</span>
             </label>
-
-            <button
-              type="button"
-              onClick={() => setShowHint(!showHint)}
-              className="text-[10px] font-mono text-[#DFC897] hover:underline cursor-pointer"
-            >
-              {showHint ? 'Ocultar dica' : 'Primeiro acesso?'}
-            </button>
           </div>
-
-          {/* Hint info for initial access */}
-          {showHint && (
-            <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded text-[11px] font-mono text-amber-300 space-y-1">
-              <p className="font-bold flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                PIN Padrão Inicial: <code className="bg-black/50 px-1.5 py-0.5 rounded text-amber-200">{DEFAULT_PIN_HINT}</code>
-              </p>
-              <p className="text-[10px] text-zinc-400">
-                Após desbloquear, você pode trocar o PIN para qualquer código pessoal no botão "Alterar PIN".
-              </p>
-            </div>
-          )}
 
           {/* Action Buttons */}
           <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-800">

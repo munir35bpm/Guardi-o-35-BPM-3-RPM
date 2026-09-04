@@ -1323,38 +1323,78 @@ export default function App() {
 
   // Direct Photo Handlers for Suspect Detail Drawer
   const handleUploadDirectPhotoFiles = async (files: FileList | File[]) => {
-    if (!selectedSuspectDetail) return;
-    const suspectId = selectedSuspectDetail.id;
-    const fileList = Array.from(files);
+    requireAdmin('Adicionar Fotos do Infrator', async () => {
+      if (!selectedSuspectDetail) return;
+      const suspectId = selectedSuspectDetail.id;
+      const fileList = Array.from(files);
 
-    for (const file of fileList) {
-      if (!file.type.startsWith('image/')) continue;
+      for (const file of fileList) {
+        if (!file.type.startsWith('image/')) continue;
+        try {
+          const compressedDataUrl = await compressImage(file, 1000, 1000, 0.78);
+          const isFirst = (!selectedSuspectDetail.galeria_fotos || selectedSuspectDetail.galeria_fotos.length === 0);
+          const photoPayload = {
+            url: compressedDataUrl,
+            tipo: isFirst ? 'ROSTO' : 'TATUAGEM',
+            descricao: isFirst ? 'Foto Principal' : 'Registro Fotográfico Complementar',
+            principal: isFirst,
+          };
+
+          let updated: any = null;
+          try {
+            const res = await fetch(`/api/infratores/${suspectId}/fotos`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(photoPayload),
+            });
+            if (res.ok) {
+              updated = await res.json();
+            }
+          } catch (err) {
+            console.warn('API direct photo upload failed, using local DB', err);
+          }
+
+          if (!updated) {
+            updated = db.addPhotoToInfrator(suspectId, photoPayload);
+          }
+
+          if (updated) {
+            await persistSuspectToFirebase(updated);
+            setSelectedSuspectDetail(updated);
+            setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
+          }
+        } catch (e) {
+          console.error('Error uploading photo:', e);
+        }
+      }
+
+      fetchTelemetry();
+      setToastMessage('Foto(s) adicionada(s) ao acervo do infrator com sucesso!');
+      setTimeout(() => setToastMessage(null), 3500);
+    });
+  };
+
+  const handleAddDirectPhoto = async (photo: { url: string; tipo: any; descricao: string; principal?: boolean }) => {
+    requireAdmin('Adicionar Foto ao Infrator', async () => {
+      if (!selectedSuspectDetail) return;
+      const suspectId = selectedSuspectDetail.id;
       try {
-        const compressedDataUrl = await compressImage(file, 1000, 1000, 0.78);
-        const isFirst = (!selectedSuspectDetail.galeria_fotos || selectedSuspectDetail.galeria_fotos.length === 0);
-        const photoPayload = {
-          url: compressedDataUrl,
-          tipo: isFirst ? 'ROSTO' : 'TATUAGEM',
-          descricao: isFirst ? 'Foto Principal' : 'Registro Fotográfico Complementar',
-          principal: isFirst,
-        };
-
         let updated: any = null;
         try {
           const res = await fetch(`/api/infratores/${suspectId}/fotos`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(photoPayload),
+            body: JSON.stringify(photo),
           });
           if (res.ok) {
             updated = await res.json();
           }
         } catch (err) {
-          console.warn('API direct photo upload failed, using local DB', err);
+          console.warn('API error, adding direct photo locally:', err);
         }
 
         if (!updated) {
-          updated = db.addPhotoToInfrator(suspectId, photoPayload);
+          updated = db.addPhotoToInfrator(suspectId, photo);
         }
 
         if (updated) {
@@ -1362,51 +1402,15 @@ export default function App() {
           setSelectedSuspectDetail(updated);
           setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
         }
+
+        setIsAddingDirectPhoto(false);
+        fetchTelemetry();
+        setToastMessage('Foto adicionada ao acervo!');
+        setTimeout(() => setToastMessage(null), 3000);
       } catch (e) {
-        console.error('Error uploading photo:', e);
+        console.error('Error adding direct photo:', e);
       }
-    }
-
-    fetchTelemetry();
-    setToastMessage('Foto(s) adicionada(s) ao acervo do infrator com sucesso!');
-    setTimeout(() => setToastMessage(null), 3500);
-  };
-
-  const handleAddDirectPhoto = async (photo: { url: string; tipo: any; descricao: string; principal?: boolean }) => {
-    if (!selectedSuspectDetail) return;
-    const suspectId = selectedSuspectDetail.id;
-    try {
-      let updated: any = null;
-      try {
-        const res = await fetch(`/api/infratores/${suspectId}/fotos`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(photo),
-        });
-        if (res.ok) {
-          updated = await res.json();
-        }
-      } catch (err) {
-        console.warn('API error, adding direct photo locally:', err);
-      }
-
-      if (!updated) {
-        updated = db.addPhotoToInfrator(suspectId, photo);
-      }
-
-      if (updated) {
-        await persistSuspectToFirebase(updated);
-        setSelectedSuspectDetail(updated);
-        setSuspects((prev) => prev.map((s) => (s.id === suspectId ? updated : s)));
-      }
-
-      setIsAddingDirectPhoto(false);
-      fetchTelemetry();
-      setToastMessage('Foto adicionada ao acervo!');
-      setTimeout(() => setToastMessage(null), 3000);
-    } catch (e) {
-      console.error('Error adding direct photo:', e);
-    }
+    });
   };
 
   const handleSaveDirectPhotoForm = async (e: React.FormEvent) => {
@@ -3487,7 +3491,8 @@ export default function App() {
                   }}
                   className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-100 font-bold text-xs rounded transition flex items-center gap-1.5 cursor-pointer"
                 >
-                  <UserPlus className="w-3.5 h-3.5 text-emerald-400" /> Cadastrar Novo Infrator
+                  {!isAdmin ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <UserPlus className="w-3.5 h-3.5 text-emerald-400" />}
+                  <span>Cadastrar Novo Infrator</span>
                 </button>
                 <button
                   onClick={() => {
@@ -3499,7 +3504,8 @@ export default function App() {
                   }}
                   className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-100 font-bold text-xs rounded transition flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Plus className="w-3.5 h-3.5 text-cyan-400" /> Registrar Ocorrência (B.O.)
+                  {!isAdmin ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <Plus className="w-3.5 h-3.5 text-cyan-400" />}
+                  <span>Registrar Ocorrência (B.O.)</span>
                 </button>
                 <button
                   onClick={() => {
@@ -3511,7 +3517,8 @@ export default function App() {
                   }}
                   className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-100 font-bold text-xs rounded transition flex items-center gap-1.5 cursor-pointer"
                 >
-                  <MapPin className="w-3.5 h-3.5 text-amber-400" /> Cadastrar Área de Atuação
+                  {!isAdmin ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <MapPin className="w-3.5 h-3.5 text-amber-400" />}
+                  <span>Cadastrar Área de Atuação</span>
                 </button>
               </div>
 
@@ -5049,10 +5056,11 @@ export default function App() {
                           type="button"
                           onClick={() => handleStartEditSuspect(selectedSuspectDetail.id)}
                           className="px-2.5 py-0.5 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-[9px] uppercase font-mono flex items-center gap-1 transition cursor-pointer shadow-sm shadow-amber-500/20"
-                          title="Continuar Preenchimento ou Editar Ficha"
+                          title={isAdmin ? "Continuar Preenchimento ou Editar Ficha" : "Acesso restrito. Requer PIN de Administrador."}
                         >
+                          {!isAdmin && <Lock className="w-2.5 h-2.5" />}
                           <Edit3 className="w-2.5 h-2.5" />
-                          <span>Editar Ficha</span>
+                          <span>{isAdmin ? 'Editar Ficha' : 'Desbloquear / Editar'}</span>
                         </button>
                       )}
                       <span className="text-[9px] text-zinc-500 font-mono">ID // INSPECTION</span>
@@ -5085,8 +5093,8 @@ export default function App() {
                         className="w-full py-2 bg-gradient-to-r from-amber-500/20 via-amber-500/30 to-amber-500/20 hover:from-amber-500/30 hover:to-amber-500/40 border border-amber-500/50 hover:border-amber-400 text-amber-300 font-bold rounded text-xs font-mono flex items-center justify-center gap-2 transition cursor-pointer shadow-sm shadow-amber-500/10"
                         title="Continuar preenchimento, alterar fotos, características, endereços ou ocorrências"
                       >
-                        <Edit3 className="w-4 h-4 text-amber-400" />
-                        <span>✏️ Continuar / Editar Cadastro Completo</span>
+                        {!isAdmin ? <Lock className="w-4 h-4 text-amber-400" /> : <Edit3 className="w-4 h-4 text-amber-400" />}
+                        <span>{isAdmin ? '✏️ Continuar / Editar Cadastro Completo' : '🔒 Desbloquear para Editar Cadastro Completo'}</span>
                       </button>
 
                       <div className="space-y-2 border-t border-zinc-800/80 pt-3 font-mono">
@@ -5118,18 +5126,41 @@ export default function App() {
                               <ShieldAlert className="w-3 h-3 text-amber-400" />
                               Situação Prisional / Status
                             </span>
-                            <span className="text-[8px] text-zinc-500 font-mono">Alteração Imediata</span>
+                            <span className="text-[8px] text-zinc-500 font-mono">
+                              {isAdmin ? 'Alteração Imediata' : 'Somente Leitura'}
+                            </span>
                           </div>
-                          <select
-                            value={selectedSuspectDetail.situacao_atual || (selectedSuspectDetail.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE')}
-                            onChange={(e) => handleUpdateSelectedSuspectSituacao(e.target.value as any)}
-                            className="w-full bg-[#0A0A0B] border border-amber-500/60 rounded p-1.5 text-xs text-amber-300 font-bold focus:outline-none focus:border-amber-400 cursor-pointer"
-                          >
-                            <option value="EM_LIBERDADE">🟢 EM LIBERDADE (Na rua / Monitorado)</option>
-                            <option value="FORAGIDO">🔴 FORAGIDO DA JUSTIÇA (Mandado Ativo)</option>
-                            <option value="PRESO">🔒 PRESO / SISTEMA PENITENCIÁRIO</option>
-                            <option value="MORTO">💀 MORTO / FALECIDO (Óbito Confirmado)</option>
-                          </select>
+                          {isAdmin ? (
+                            <select
+                              value={selectedSuspectDetail.situacao_atual || (selectedSuspectDetail.status_mandado_prisao ? 'FORAGIDO' : 'EM_LIBERDADE')}
+                              onChange={(e) => handleUpdateSelectedSuspectSituacao(e.target.value as any)}
+                              className="w-full bg-[#0A0A0B] border border-amber-500/60 rounded p-1.5 text-xs text-amber-300 font-bold focus:outline-none focus:border-amber-400 cursor-pointer"
+                            >
+                              <option value="EM_LIBERDADE">🟢 EM LIBERDADE (Na rua / Monitorado)</option>
+                              <option value="FORAGIDO">🔴 FORAGIDO DA JUSTIÇA (Mandado Ativo)</option>
+                              <option value="PRESO">🔒 PRESO / SISTEMA PENITENCIÁRIO</option>
+                              <option value="MORTO">💀 MORTO / FALECIDO (Óbito Confirmado)</option>
+                            </select>
+                          ) : (
+                            <div
+                              onClick={() => requireAdmin('Alterar Situação Prisional', () => {})}
+                              className="w-full bg-[#0A0A0B] border border-zinc-800 hover:border-amber-500/50 rounded p-1.5 text-xs text-amber-300/90 font-bold flex items-center justify-between cursor-pointer transition select-none"
+                              title="Clique para desbloquear modo Administrador com seu PIN."
+                            >
+                              <span>
+                                {(selectedSuspectDetail.situacao_atual === 'FORAGIDO' || selectedSuspectDetail.status_mandado_prisao)
+                                  ? '🔴 FORAGIDO DA JUSTIÇA (Mandado Ativo)'
+                                  : selectedSuspectDetail.situacao_atual === 'PRESO'
+                                  ? '🔒 PRESO / SISTEMA PENITENCIÁRIO'
+                                  : selectedSuspectDetail.situacao_atual === 'MORTO'
+                                  ? '💀 MORTO / FALECIDO (Óbito Confirmado)'
+                                  : '🟢 EM LIBERDADE (Na rua / Monitorado)'}
+                              </span>
+                              <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1">
+                                <Lock className="w-3 h-3 text-amber-500/80" /> Bloqueado
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -5158,16 +5189,22 @@ export default function App() {
                           </span>
                           <button
                             type="button"
-                            onClick={() => setIsAddingDirectPhoto(!isAddingDirectPhoto)}
+                            onClick={() => {
+                              if (!isAdmin) {
+                                requireAdmin('Adicionar Foto ao Infrator', () => setIsAddingDirectPhoto(true));
+                              } else {
+                                setIsAddingDirectPhoto(!isAddingDirectPhoto);
+                              }
+                            }}
                             className="px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded text-[9px] font-mono font-bold flex items-center gap-1 transition cursor-pointer"
                           >
-                            <Plus className="w-2.5 h-2.5" />
+                            {!isAdmin ? <Lock className="w-2.5 h-2.5 text-amber-500" /> : <Plus className="w-2.5 h-2.5" />}
                             <span>{isAddingDirectPhoto ? 'Cancelar' : '+ Adicionar Foto'}</span>
                           </button>
                         </div>
 
                         {/* Inline Form to add photo to suspect */}
-                        {isAddingDirectPhoto && (
+                        {isAddingDirectPhoto && isAdmin && (
                           <div className="bg-[#0A0A0B] p-3 rounded border border-amber-500/40 space-y-2.5 font-mono text-xs">
                             <span className="text-[10px] text-amber-400 font-bold uppercase block flex items-center gap-1">
                               <Upload className="w-3 h-3 text-amber-400" /> Carregar Nova Foto / Detalhe Físico
@@ -5408,18 +5445,24 @@ export default function App() {
                             <span className="text-[9px] text-amber-400 font-mono font-bold">{selectedSuspectDetail.ocorrencias?.length || 0} Registros</span>
                             <button
                               type="button"
-                              onClick={() => setIsLinkingDirectOccurrence(!isLinkingDirectOccurrence)}
+                              onClick={() => {
+                                if (!isAdmin) {
+                                  requireAdmin('Vincular Ocorrência ao Infrator', () => setIsLinkingDirectOccurrence(true));
+                                } else {
+                                  setIsLinkingDirectOccurrence(!isLinkingDirectOccurrence);
+                                }
+                              }}
                               className="px-2 py-0.5 bg-zinc-850 hover:bg-zinc-800 text-amber-400 border border-zinc-700 rounded text-[9px] font-mono font-bold flex items-center gap-1 transition cursor-pointer"
-                              title="Adicionar ou vincular ocorrência a este infrator"
+                              title={isAdmin ? "Adicionar ou vincular ocorrência a este infrator" : "Acesso restrito ao Administrador"}
                             >
-                              <Plus className="w-2.5 h-2.5" />
+                              {!isAdmin ? <Lock className="w-2.5 h-2.5 text-amber-500" /> : <Plus className="w-2.5 h-2.5" />}
                               <span>{isLinkingDirectOccurrence ? 'Fechar' : 'Vincular B.O.'}</span>
                             </button>
                           </div>
                         </div>
 
                         {/* Inline Linkage Form for existing suspect */}
-                        {isLinkingDirectOccurrence && (
+                        {isLinkingDirectOccurrence && isAdmin && (
                           <form
                             onSubmit={handleLinkOccurrenceDirectly}
                             className="bg-[#0A0A0B] p-3 rounded border border-amber-500/40 space-y-2.5 font-mono text-xs"
@@ -5725,16 +5768,22 @@ export default function App() {
                           </span>
                           <button
                             type="button"
-                            onClick={() => setIsAddingDirectAddress(!isAddingDirectAddress)}
+                            onClick={() => {
+                              if (!isAdmin) {
+                                requireAdmin('Adicionar Endereço ao Infrator', () => setIsAddingDirectAddress(true));
+                              } else {
+                                setIsAddingDirectAddress(!isAddingDirectAddress);
+                              }
+                            }}
                             className="px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded text-[9px] font-mono font-bold flex items-center gap-1 transition cursor-pointer"
                           >
-                            <Plus className="w-3 h-3" />
-                            {isAddingDirectAddress ? 'Cancelar' : '+ Endereço'}
+                            {!isAdmin ? <Lock className="w-2.5 h-2.5 text-amber-500" /> : <Plus className="w-3 h-3" />}
+                            <span>{isAddingDirectAddress ? 'Cancelar' : '+ Endereço'}</span>
                           </button>
                         </div>
 
                         {/* Inline Form to add address directly to existing suspect */}
-                        {isAddingDirectAddress && (
+                        {isAddingDirectAddress && isAdmin && (
                           <form onSubmit={handleAddAddressDirectly} className="bg-[#121216] p-2.5 rounded border border-zinc-800 space-y-2 font-mono text-xs">
                             <span className="text-[9px] text-amber-400 font-bold uppercase block">Adicionar Novo Endereço</span>
                             <div>

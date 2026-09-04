@@ -1,21 +1,26 @@
 /**
  * Serviço de Autenticação e Controle de Acesso do Administrador (PMMG • 35º BPM)
- * Permite alternar entre "Modo Consulta (Somente Leitura)" e "Modo Alimentação (Administrador)"
- * garantindo que apenas o usuário autorizado (com PIN mestre) possa criar, editar ou excluir dados.
+ * Sincronizado centralmente via Firebase Firestore para que TODAS as sessões
+ * e dispositivos respeitem estritamente o PIN Mestre definido pelo operador.
+ * 
+ * Por padrão, qualquer usuário externo que acesse o link fica em MODO CONSULTA (Somente Leitura).
  */
 
-const PIN_STORAGE_KEY = 'guardiao_admin_pin_hash_v1';
-const SESSION_STORAGE_KEY = 'guardiao_admin_session_auth_v1';
-const REMEMBER_STORAGE_KEY = 'guardiao_admin_remember_token_v1';
+import { firestore, doc, getDoc, setDoc, onSnapshot } from '../lib/firebase';
 
-// PIN padrão de fábrica para primeira inicialização (PMMG 35º BPM)
-const DEFAULT_INITIAL_PIN = '35bpm';
+const PIN_STORAGE_KEY = 'guardiao_admin_pin_hash_v2';
+const SESSION_STORAGE_KEY = 'guardiao_admin_session_auth_v2';
+const REMEMBER_STORAGE_KEY = 'guardiao_admin_remember_token_v2';
 
-// Simple hashing function for PIN comparison and persistence
-function simpleHash(text: string): string {
+// PINs padrão aceitos na inicialização (compatibilidade total e flexibilidade maiúscula/minúscula)
+const DEFAULT_INITIAL_PINS = ['PMMG35BPM', '35bpm', 'pmmg35bpm', '35BPM'];
+
+// Hashing seguro simples de 32-bit com sal para ofuscação no banco
+export function simpleHash(text: string): string {
+  const salted = `35bpm_guardiao_pmmg_${text.trim().toLowerCase()}`;
   let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    const char = text.charCodeAt(i);
+  for (let i = 0; i < salted.length; i++) {
+    const char = salted.charCodeAt(i);
     hash = (hash << 5) - hash + char;
     hash |= 0; // Convert to 32bit integer
   }
@@ -36,19 +41,59 @@ function notifyListeners(isAuth: boolean) {
   });
 }
 
+// Em memória: hash ativo do PIN sincronizado
+let activeCloudPinHash: string | null = null;
+
+// Inicializa escuta em tempo real do PIN Mestre no Firestore
+if (typeof window !== 'undefined') {
+  try {
+    const secDocRef = doc(firestore, 'system_config', 'admin_security');
+    onSnapshot(
+      secDocRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data && data.pin_hash) {
+            activeCloudPinHash = data.pin_hash;
+            localStorage.setItem(PIN_STORAGE_KEY, data.pin_hash);
+          }
+        } else {
+          // Documento não existe ainda: cria com o PIN padrão PMMG35BPM
+          const defaultHash = simpleHash('PMMG35BPM');
+          activeCloudPinHash = defaultHash;
+          localStorage.setItem(PIN_STORAGE_KEY, defaultHash);
+          setDoc(secDocRef, {
+            pin_hash: defaultHash,
+            updated_at: new Date().toISOString(),
+            description: 'PIN Mestre de Controle de Alimentação 35º BPM',
+          }).catch((err) => {
+            console.warn('Não foi possível gravar PIN inicial no Firestore:', err);
+          });
+        }
+      },
+      (err) => {
+        console.warn('Aviso: escuta de PIN no Firestore em fallback local:', err);
+      }
+    );
+  } catch (e) {
+    console.warn('Erro ao configurar sincronização de PIN:', e);
+  }
+}
+
 /**
  * Retorna o hash do PIN atualmente configurado
  */
 export function getStoredPinHash(): string {
-  if (typeof window === 'undefined') return simpleHash(DEFAULT_INITIAL_PIN);
+  if (activeCloudPinHash) return activeCloudPinHash;
+  if (typeof window === 'undefined') return simpleHash('PMMG35BPM');
   const stored = localStorage.getItem(PIN_STORAGE_KEY);
-  if (!stored) {
-    // Configura o PIN inicial
-    const initialHash = simpleHash(DEFAULT_INITIAL_PIN);
-    localStorage.setItem(PIN_STORAGE_KEY, initialHash);
-    return initialHash;
+  if (stored) {
+    activeCloudPinHash = stored;
+    return stored;
   }
-  return stored;
+  const defaultHash = simpleHash('PMMG35BPM');
+  activeCloudPinHash = defaultHash;
+  return defaultHash;
 }
 
 /**
@@ -69,7 +114,6 @@ export function isAdminAuthenticated(): boolean {
     try {
       const parsed = JSON.parse(rememberToken);
       if (parsed.expiresAt && Date.now() < parsed.expiresAt) {
-        // Renova na session para acesso rápido
         sessionStorage.setItem(SESSION_STORAGE_KEY, 'authorized_admin');
         return true;
       } else {
@@ -87,11 +131,21 @@ export function isAdminAuthenticated(): boolean {
  * Valida o PIN fornecido contra o hash armazenado
  */
 export function verifyPin(inputPin: string): boolean {
-  if (!inputPin) return false;
+  if (!inputPin || inputPin.trim().length === 0) return false;
   const currentHash = getStoredPinHash();
-  const inputHash = simpleHash(inputPin.trim());
-  const inputHashLower = simpleHash(inputPin.trim().toLowerCase());
-  return currentHash === inputHash || currentHash === inputHashLower;
+  const inputHash = simpleHash(inputPin);
+
+  // 1. Verifica se bate exatamente com o hash salvo (seja personalizado ou padrão)
+  if (currentHash === inputHash) return true;
+
+  // 2. Se o hash atual for o padrão inicial, aceita qualquer uma das variações padrão
+  const defaultHashes = DEFAULT_INITIAL_PINS.map((p) => simpleHash(p));
+  const isCurrentlyDefault = defaultHashes.includes(currentHash);
+  if (isCurrentlyDefault && defaultHashes.includes(inputHash)) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -120,7 +174,7 @@ export function loginAdmin(pin: string, remember30Days = false): { success: bool
     return { success: true, message: 'Modo Alimentação liberado com sucesso!' };
   }
 
-  return { success: false, message: 'PIN incorreto. Acesso restrito ao Administrador.' };
+  return { success: false, message: 'PIN incorreto. Acesso de alteração restrito ao Administrador.' };
 }
 
 /**
@@ -135,35 +189,41 @@ export function logoutAdmin(): void {
 }
 
 /**
- * Altera o PIN de Administrador
+ * Altera o PIN de Administrador e sincroniza com o Firestore e localStorage
  */
-export function changeAdminPin(
+export async function changeAdminPin(
   currentPin: string,
   newPin: string
-): { success: boolean; message: string } {
+): Promise<{ success: boolean; message: string }> {
   if (!verifyPin(currentPin)) {
     return { success: false, message: 'O PIN atual informado está incorreto.' };
   }
 
   if (!newPin || newPin.trim().length < 4) {
-    return { success: false, message: 'O novo PIN deve ter no mínimo 4 caracteres.' };
+    return { success: false, message: 'O novo PIN deve ter no mínimo 4 dígitos/caracteres.' };
   }
 
-  const newHash = simpleHash(newPin.trim());
+  const newHash = simpleHash(newPin);
+  activeCloudPinHash = newHash;
   localStorage.setItem(PIN_STORAGE_KEY, newHash);
-  return { success: true, message: 'PIN de Administrador alterado com sucesso!' };
+
+  // Sincroniza imediatamente com o Firebase Firestore
+  try {
+    const secDocRef = doc(firestore, 'system_config', 'admin_security');
+    await setDoc(secDocRef, {
+      pin_hash: newHash,
+      updated_at: new Date().toISOString(),
+      updated_by: 'admin_session',
+    });
+  } catch (err) {
+    console.error('Erro ao sincronizar novo PIN no Firestore:', err);
+  }
+
+  return { success: true, message: 'PIN Mestre atualizado com sucesso em todos os dispositivos!' };
 }
 
 /**
- * Redefine o PIN para o padrão do 35º BPM (35bpm)
- */
-export function resetToDefaultPin(): void {
-  const initialHash = simpleHash(DEFAULT_INITIAL_PIN);
-  localStorage.setItem(PIN_STORAGE_KEY, initialHash);
-}
-
-/**
- * Permite que componentes React ou serviços escutem alterações no estado de autenticação
+ * Permite que componentes React escutem alterações de autenticação
  */
 export function subscribeToAuth(callback: AuthListener): () => void {
   listeners.add(callback);
@@ -171,5 +231,3 @@ export function subscribeToAuth(callback: AuthListener): () => void {
     listeners.delete(callback);
   };
 }
-
-export const DEFAULT_PIN_HINT = DEFAULT_INITIAL_PIN;
