@@ -92,6 +92,8 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
   const executeWithAdmin = (actionName: string, actionFn: () => void) => {
     if (onRequireAdmin) {
       onRequireAdmin(actionName, actionFn);
+    } else if (!isAdmin) {
+      alert('Acesso restrito: A edição de organogramas e membros da ORCRIM é restrita a Administradores.');
     } else {
       actionFn();
     }
@@ -805,6 +807,15 @@ export const OrcrimWindow: React.FC<OrcrimWindowProps> = ({
                 <span className="text-xs text-[#DFC897] font-semibold">
                   35º BPM • Alto Rio das Velhas
                 </span>
+                {isAdmin ? (
+                  <span className="px-2 py-0.5 bg-emerald-950/80 text-emerald-300 border border-emerald-600/60 rounded text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                    🔓 Modo Administrador
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-red-950/80 text-red-300 border border-red-800/80 rounded text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                    🔒 Somente Leitura (Edição Restrita a Admin)
+                  </span>
+                )}
               </div>
               <h2 className="text-2xl font-black text-white tracking-wide mt-1">
                 ORCRIM • Organogramas de Facções & Gangues

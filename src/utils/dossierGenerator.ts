@@ -174,45 +174,73 @@ export const SVG_LOGO_35BPM = `
  * based on all registered occurrences, modus operandi texts, and historical facts of the suspect.
  */
 function buildJudicialPoliceTechnicalReport(infratorFull: any, rawOccurrences: any[]) {
-  // Enrich occurrences with full db records to ensure modus_operandi and descricao_fato are 100% available
-  const occurrences = (rawOccurrences || []).map((oc: any) => {
+  // 1. Gather all occurrences linked to this suspect
+  const inputOccurrences = (rawOccurrences && rawOccurrences.length > 0)
+    ? rawOccurrences
+    : (infratorFull?.ocorrencias || []);
+
+  // Look up occurrences in db if ID exists
+  const allOccurrencesMap = new Map<string, any>();
+
+  // Add from input
+  inputOccurrences.forEach((oc: any) => {
+    if (oc) {
+      const key = oc.id || oc.numero_bo || Math.random().toString();
+      allOccurrencesMap.set(key, oc);
+    }
+  });
+
+  // If infrator has id, check db.infrator_ocorrencia to ensure no occurrence was missed
+  if (infratorFull?.id && db.infrator_ocorrencia && db.ocorrencias_criminais) {
+    const links = db.infrator_ocorrencia.filter(io => io.infrator_id === infratorFull.id);
+    links.forEach(link => {
+      const dbOc = db.ocorrencias_criminais.find(o => o.id === link.ocorrencia_id);
+      if (dbOc) {
+        const key = dbOc.id || dbOc.numero_bo;
+        if (!allOccurrencesMap.has(key)) {
+          allOccurrencesMap.set(key, { ...dbOc, papel: link.papel_no_crime || 'Autor' });
+        }
+      }
+    });
+  }
+
+  // Hydrate each occurrence with full database data
+  const occurrences = Array.from(allOccurrencesMap.values()).map((oc: any) => {
     const fromDb: any = (db.ocorrencias_criminais || []).find(
       o => o.id === oc.id || (o.numero_bo && oc.numero_bo && o.numero_bo === oc.numero_bo)
     );
-    if (fromDb) {
-      return {
-        ...fromDb,
-        ...oc,
-        modus_operandi: (oc.modus_operandi || fromDb.modus_operandi || '').trim(),
-        descricao_fato: (oc.descricao_fato || fromDb.descricao_fato || '').trim(),
-        armas_utilizadas: (oc.armas_utilizadas || fromDb.armas_utilizadas || '').trim(),
-        veiculo_utilizado: (oc.veiculo_utilizado || fromDb.veiculo_utilizado || '').trim(),
-        tipificacao_penal: (oc.tipificacao_penal || fromDb.tipificacao_penal || 'Não informada').trim(),
-        papel: (oc.papel || oc.papel_no_crime || fromDb.papel || fromDb.papel_no_crime || 'Autor').trim(),
-        bairro: (oc.bairro || fromDb.bairro || '').trim(),
-        cidade: (oc.cidade || fromDb.cidade || 'Santa Luzia').trim(),
-      };
-    }
+    const papelFinal = (oc.papel || oc.papel_no_crime || fromDb?.papel || fromDb?.papel_no_crime || 'Autor').trim();
     return {
+      ...(fromDb || {}),
       ...oc,
-      modus_operandi: (oc.modus_operandi || '').trim(),
-      descricao_fato: (oc.descricao_fato || '').trim(),
-      armas_utilizadas: (oc.armas_utilizadas || '').trim(),
-      veiculo_utilizado: (oc.veiculo_utilizado || '').trim(),
-      tipificacao_penal: (oc.tipificacao_penal || 'Não informada').trim(),
-      papel: (oc.papel || oc.papel_no_crime || 'Autor').trim(),
-      bairro: (oc.bairro || '').trim(),
-      cidade: (oc.cidade || 'Santa Luzia').trim(),
+      numero_bo: (oc.numero_bo || fromDb?.numero_bo || 'S/N').trim(),
+      data_hora: oc.data_hora || fromDb?.data_hora || '',
+      tipificacao_penal: (oc.tipificacao_penal || fromDb?.tipificacao_penal || 'Não informada').trim(),
+      papel: papelFinal,
+      modus_operandi: (oc.modus_operandi || fromDb?.modus_operandi || '').trim(),
+      descricao_fato: (oc.descricao_fato || fromDb?.descricao_fato || '').trim(),
+      armas_utilizadas: (oc.armas_utilizadas || fromDb?.armas_utilizadas || '').trim(),
+      veiculo_utilizado: (oc.veiculo_utilizado || fromDb?.veiculo_utilizado || '').trim(),
+      bairro: (oc.bairro || fromDb?.bairro || '').trim(),
+      cidade: (oc.cidade || fromDb?.cidade || 'Santa Luzia').trim(),
     };
   });
 
+  const nomeGuerra = infratorFull?.vulgo ? `"${infratorFull.vulgo}"` : (infratorFull?.nome_completo || 'Investigado');
+  const nomeCompleto = infratorFull?.nome_completo || 'Não informado';
+  const faccaoCadastrada = (infratorFull?.gangue_faccao && infratorFull.gangue_faccao !== 'Sem facção informada' && infratorFull.gangue_faccao !== 'Sem Facção' && infratorFull.gangue_faccao !== 'Nenhuma')
+    ? infratorFull.gangue_faccao
+    : null;
+  const situacaoPrisional = infratorFull?.situacao_atual || infratorFull?.situacao_prisional || 'EM_LIBERDADE';
+  const mandadoAtivo = infratorFull?.mandado_prisao || situacaoPrisional === 'FORAGIDO';
+
   if (!occurrences || occurrences.length === 0) {
     const defaultLines = [
-      'Nenhum registro criminal individual ou B.O. vinculado diretamente a este investigado no banco de dados até a presente data.',
-      'Infrator sem histórico de flagrantes ou inquéritos policiais ativos catalogados no sistema de inteligência do 35º BPM.',
-      'Recomenda-se verificação periódica de antecedentes junto ao sistema ISP/CINDS e BNMP para atualização cadastral.',
-      'Não há registro de apreensão de armas, veículos de apoio ou mandados judiciais pendentes associados.',
-      'Diretriz operacional: Proceder à identificação padrão em caso de abordagem policial preventiva de rotina.'
+      `1. O investigado ${nomeGuerra} (${nomeCompleto}) não possui boletins de ocorrência registrados formalmente no banco de dados do 35º BPM até a presente data.`,
+      '2. Inexistência de flagrantes ou registros criminais com modus operandi individualizado catalogados nesta circunscrição policial.',
+      '3. Recomenda-se consulta aos sistemas policiais integrados (ISP/CINDS e BNMP) para verificação de registros em outras unidades da federação.',
+      '4. Não constam apreensões de armas, veículos automotores ou mandados de prisão pendentes associados a este prontuário local.',
+      '5. Diretriz: Em caso de abordagem preventiva de rotina, realizar qualificação e identificação nos termos operacionais regulares.'
     ];
 
     return {
@@ -225,61 +253,102 @@ function buildJudicialPoliceTechnicalReport(infratorFull: any, rawOccurrences: a
       papeisCount: {} as Record<string, number>,
       diligencePoints: [] as any[],
       rich5Lines: defaultLines,
-      eixoModoDeAgir: 'Não constam registros policiais catalogados para traçar o padrão comportamental delitivo deste indivíduo.',
-      eixoComparsaria: 'Sem comparsas registrados em ocorrências policiais.',
-      eixoLogisticaArmas: 'Sem armamento ou veículos catalogados em ações delituosas.',
-      eixoTerritorialidade: 'Sem raio de atuação territorial delimitado em registros.',
-      subsidiosJudiciarios: [] as { titulo: string; fundamentacao: string }[],
+      eixoModoDeAgir: `Não constam registros de ocorrências vinculadas ao investigado ${nomeGuerra} (${nomeCompleto}) no banco de dados para traçar seu padrão operacional de conduta.`,
+      eixoComparsaria: 'Sem comparsas ou vínculos de coautoria registrados formalmente em boletins de ocorrência.',
+      eixoLogisticaArmas: 'Não há registro de apreensão de armamentos ou veículos vinculados ao indivíduo.',
+      eixoTerritorialidade: 'Sem histórico de atuação territorial delimitado em ocorrências policiais.',
+      subsidiosJudiciarios: [
+        {
+          titulo: '1. Verificação Cadastral Integrada nos Sistemas Policiais (ISP / CINDS / BNMP)',
+          fundamentacao: 'Realizar consulta aprofundada nos sistemas estaduais e nacionais para certificar a inexistência de mandados ou registros em outras comarcas.'
+        }
+      ],
       apanhadoDetalhado: [] as any[],
-      textoFormatadoPoliciaJudiciaria: 'RELATÓRIO TÉCNICO DE INTELIGÊNCIA: Nenhum registro policial cadastrado para este investigado.',
+      textoFormatadoPoliciaJudiciaria: `RELATÓRIO TÉCNICO DE CONDUTA: O investigado ${nomeGuerra} (${nomeCompleto}) não possui boletins de ocorrência catalogados no 35º BPM.`,
     };
   }
 
+  // Detailed Analysis Structures
   const tipificacoesMap: Record<string, number> = {};
   const papeisCount: Record<string, number> = {};
-  const armasSet = new Set<string>();
-  const veiculosSet = new Set<string>();
+  const armasList: { arma: string; bo: string }[] = [];
+  const veiculosList: { veiculo: string; bo: string }[] = [];
   const locaisSet = new Set<string>();
-  const modusOperandiList: string[] = [];
-  const historicosList: string[] = [];
-  const diligencePoints: any[] = [];
+
+  // Distinct Modus Operandi and Narratives with metadata
+  const distinctModusOperandi: { bo: string; data: string; tip: string; papel: string; text: string }[] = [];
+  const distinctHistoricos: { bo: string; data: string; tip: string; papel: string; text: string }[] = [];
   const apanhadoDetalhado: any[] = [];
+  const diligencePoints: any[] = [];
 
   for (const oc of occurrences) {
-    const tip = oc.tipificacao_penal || 'Não especificada';
+    const tip = oc.tipificacao_penal || 'Não informada';
     tipificacoesMap[tip] = (tipificacoesMap[tip] || 0) + 1;
 
     const papel = oc.papel || 'Autor';
     papeisCount[papel] = (papeisCount[papel] || 0) + 1;
 
-    const localStr = oc.bairro ? `${oc.bairro} (${oc.cidade})` : (oc.cidade || 'Circunscrição 35º BPM');
+    const localStr = oc.bairro ? `${oc.bairro} (${oc.cidade})` : (oc.cidade || 'Santa Luzia');
     if (oc.bairro) locaisSet.add(oc.bairro);
     else if (oc.cidade) locaisSet.add(oc.cidade);
 
-    if (oc.armas_utilizadas && !['não informada', 'n/d', 'nenhuma', 'não informado'].includes(oc.armas_utilizadas.toLowerCase())) {
-      oc.armas_utilizadas.split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean).forEach((w: string) => armasSet.add(w));
-    }
-
-    if (oc.veiculo_utilizado && !['não informado', 'n/d', 'nenhum'].includes(oc.veiculo_utilizado.toLowerCase())) {
-      oc.veiculo_utilizado.split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean).forEach((v: string) => veiculosSet.add(v));
-    }
-
-    if (oc.modus_operandi && oc.modus_operandi.length > 3 && !modusOperandiList.includes(oc.modus_operandi)) {
-      modusOperandiList.push(oc.modus_operandi);
-    }
-
-    if (oc.descricao_fato && oc.descricao_fato.length > 10 && !historicosList.includes(oc.descricao_fato)) {
-      historicosList.push(oc.descricao_fato);
-    }
-
     const boNum = oc.numero_bo || 'S/N';
     const dataFmt = oc.data_hora ? new Date(oc.data_hora).toLocaleDateString('pt-BR') : 'Data N/D';
-    let pontoChave = oc.modus_operandi || '';
-    if (!pontoChave && oc.descricao_fato) {
-      pontoChave = oc.descricao_fato.length > 220 ? oc.descricao_fato.slice(0, 220) + '...' : oc.descricao_fato;
+
+    // Real Weapons Seized/Employed
+    const rawArmas = oc.armas_utilizadas || '';
+    if (rawArmas && !['não informada', 'n/d', 'nenhuma', 'não informado', 'nao informada', 'sem arma', 'desarmado'].includes(rawArmas.toLowerCase().trim())) {
+      rawArmas.split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean).forEach((w: string) => {
+        if (!armasList.some(a => a.arma.toLowerCase() === w.toLowerCase() && a.bo === boNum)) {
+          armasList.push({ arma: w, bo: boNum });
+        }
+      });
+    }
+
+    // Real Vehicles
+    const rawVeiculo = oc.veiculo_utilizado || '';
+    if (rawVeiculo && !['não informado', 'n/d', 'nenhum', 'nao informado', 'a pé', 'a pe', 'sem veiculo'].includes(rawVeiculo.toLowerCase().trim())) {
+      rawVeiculo.split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean).forEach((v: string) => {
+        if (!veiculosList.some(item => item.veiculo.toLowerCase() === v.toLowerCase() && item.bo === boNum)) {
+          veiculosList.push({ veiculo: v, bo: boNum });
+        }
+      });
+    }
+
+    // Real Modus Operandi (Clean)
+    const cleanModus = (oc.modus_operandi || '').trim();
+    if (cleanModus.length > 5 && !['não informado', 'n/d', 'não detalhado', 'nao informado', 'sem modus operandi'].includes(cleanModus.toLowerCase())) {
+      if (!distinctModusOperandi.some(m => m.text.toLowerCase() === cleanModus.toLowerCase())) {
+        distinctModusOperandi.push({
+          bo: boNum,
+          data: dataFmt,
+          tip,
+          papel,
+          text: cleanModus
+        });
+      }
+    }
+
+    // Real Resumo do Histórico / Descrição do Fato (Clean)
+    const cleanHist = (oc.descricao_fato || '').trim();
+    if (cleanHist.length > 10 && !['não informado', 'n/d', 'historico nao inserido', 'sem historico', 'em apuracao'].includes(cleanHist.toLowerCase())) {
+      if (!distinctHistoricos.some(h => h.text.toLowerCase() === cleanHist.toLowerCase())) {
+        distinctHistoricos.push({
+          bo: boNum,
+          data: dataFmt,
+          tip,
+          papel,
+          text: cleanHist
+        });
+      }
+    }
+
+    let pontoChave = cleanModus;
+    if (!pontoChave && cleanHist) {
+      pontoChave = cleanHist.length > 180 ? cleanHist.slice(0, 180) + '...' : cleanHist;
     }
     if (!pontoChave) {
-      pontoChave = 'Registro criminal catalogado na circunscrição do 35º BPM.';
+      pontoChave = `Registro policial de ${tip} catalogado na circunscrição do 35º BPM.`;
     }
 
     diligencePoints.push({
@@ -297,138 +366,361 @@ function buildJudicialPoliceTechnicalReport(infratorFull: any, rawOccurrences: a
       tipificacao: tip,
       papel: papel,
       local: localStr,
-      modusOperandi: oc.modus_operandi || 'Modus operandi não detalhado no registro individual.',
-      resumoHistorico: oc.descricao_fato || 'Histórico resumido não inserido no boletim.',
-      armas: oc.armas_utilizadas || 'Não especificada',
-      veiculo: oc.veiculo_utilizado || 'Não especificado',
+      modusOperandi: cleanModus || 'Modus operandi individualizado não detalhado no campo específico deste boletim.',
+      resumoHistorico: cleanHist || 'Descrição fática resumida não cadastrada no texto original do registro.',
+      armas: rawArmas || 'Não especificada no boletim',
+      veiculo: rawVeiculo || 'Não especificado / A pé',
     });
   }
 
+  // Sorted Tipificações
   const tipificacoesCount = Object.entries(tipificacoesMap)
     .map(([crime, count]) => ({ crime, count }))
     .sort((a, b) => b.count - a.count);
 
-  const armasArray = Array.from(armasSet);
-  const veiculosArray = Array.from(veiculosSet);
+  const armasArray = Array.from(new Set(armasList.map(a => a.arma)));
+  const veiculosArray = Array.from(new Set(veiculosList.map(v => v.veiculo)));
   const locaisArray = Array.from(locaisSet);
 
-  const crimesStr = tipificacoesCount.map(t => `${t.crime} (${t.count}x)`).join(', ') || 'crimes diversos';
-  const papeisStr = Object.entries(papeisCount).map(([p, c]) => `${p} (${c}x)`).join(', ') || 'Autor/Investigado';
-  const armasStr = armasArray.join(', ') || 'armamento não especificado no ato dos registros';
-  const veiculosStr = veiculosArray.join(', ') || 'deslocamento a pé ou veículos não individualizados';
-  const locaisStr = locaisArray.slice(0, 5).join(', ') || 'área territorial do 35º BPM';
-  const faccao = infratorFull.gangue_faccao || 'não vinculada oficialmente';
-  const nomeGuerra = infratorFull.vulgo ? `"${infratorFull.vulgo}"` : infratorFull.nome_completo;
+  const crimesStr = tipificacoesCount.map(t => `${t.crime} (${t.count}x)`).join(', ');
+  const papeisStr = Object.entries(papeisCount).map(([p, c]) => `${p} (${c}x)`).join(', ');
+  const locaisStr = locaisArray.join(', ') || 'Área de atuação do 35º BPM';
 
-  // Analysis of behavioral patterns by cross-referencing all text
-  const fullText = (modusOperandiList.join(' ') + ' ' + historicosList.join(' ')).toLowerCase();
+  // Crime Categories Analysis based solely on actual tipificações and real texts
+  const allTextsCombined = (
+    distinctModusOperandi.map(m => m.text).join(' ') + ' ' +
+    distinctHistoricos.map(h => h.text).join(' ') + ' ' +
+    tipificacoesCount.map(t => t.crime).join(' ')
+  ).toLowerCase();
 
-  const hasGroup = /desembarcaram|comparsa|co-autor|coautor|condutor|motorista|garupa|trio|dupla|veículo de apoio|conduzido por|divisão|em grupo|concurso/.test(fullText);
-  const hasLethality = /cabeça|face|tórax|queima-roupa|executou|homicídio|morte|letal|disparos|tiros|emboscada|letalidade/.test(fullText);
-  const hasInvasion = /lanchonete|bar|estabelecimento|comercial|residência|imóvel|adentrou|invadiu|área externa/.test(fullText);
-  const hasCamouflage = /gandola|camuflada|balaclava|capuz|máscara|vestes|boné|disfarce|roupas escuras/.test(fullText);
-  const hasMotorcycle = /motocicleta|moto|titan|fan|sem placa|chassi adulterado|chassi raspado|clonada/.test(fullText);
-  const hasCarSupport = /fiesta|carro|veículo de apoio|automóvel|prata|placa oqx/.test(fullText);
-  const hasEvasionTactics = /fuga|evadiu|evadindo|alta velocidade|vielas|becos|mata|cerco|descarte|homizio|desobediência/.test(fullText);
-  const hasGangRivalry = /facção|gangue|rivalidade|vingança|maquiné|quinze|muleta|guerra|disputa|desafeto/.test(fullText);
-  const hasHomicide = tipificacoesCount.some(t => /homicídio|homicidio|tentativa de homicídio/i.test(t.crime));
-  const hasWeapons = tipificacoesCount.some(t => /porte|posse|arma|disparo/i.test(t.crime)) || armasArray.length > 0;
-  const hasTraffic = tipificacoesCount.some(t => /tráfico|drogas|entorpecente|associação/i.test(t.crime));
-  const hasReceptacao = tipificacoesCount.some(t => /receptação|receptacao|adulteração/i.test(t.crime));
+  const isTrafico = tipificacoesCount.some(t => /tráfico|trafico|entorpecente|drogas|entorpecentes|maconha|cocaína|crack|biqueira/i.test(t.crime));
+  const isPatrimonio = tipificacoesCount.some(t => /roubo|furto|receptação|receptacao|estelionato|extorsão|latrocínio|apropriação/i.test(t.crime));
+  const isVida = tipificacoesCount.some(t => /homicídio|homicidio|tentativa de homicídio|lesão corporal grave|morte|execução/i.test(t.crime));
+  const isArmas = tipificacoesCount.some(t => /porte|posse|disparo|estatuto do desarmamento|arma de fogo|munição/i.test(t.crime)) || armasArray.length > 0;
+  const isViolenciaDomestica = tipificacoesCount.some(t => /maria da penha|ameaça|lesão corporal leve|violência doméstica|injúria/i.test(t.crime));
+  const isOrganizacao = tipificacoesCount.some(t => /organização criminosa|associação criminosa|facção|quadrilha/i.test(t.crime));
 
-  // Synthesise Eixo I: Modo de Agir do Cadastrado
-  let modoDeAgirParts: string[] = [];
-  modoDeAgirParts.push(`O investigado <strong>${nomeGuerra}</strong> (${infratorFull.nome_completo}) apresenta atuação delitiva com elevado grau de audácia, planejamento tático e reiteração criminosa, figurando prioritariamente como <strong>${papeisStr}</strong> em <strong>${occurrences.length} registro(s) policial(is)</strong> no 35º BPM.`);
+  // =========================================================================
+  // EIXO I: Padrão Comportamental & Dinâmica Executória (Maneira Como Age)
+  // =========================================================================
+  const modoDeAgirBlocks: string[] = [];
 
-  if (hasLethality || hasHomicide) {
-    modoDeAgirParts.push(`Constata-se padrão de conduta voltado à violência extrema e eliminação sumária de desafetos, caracterizado por ataques premeditados e disparos de arma de fogo direcionados a curta distância contra regiões vitais da vítima (cabeça, face e tórax), evidenciando dolo manifesto de execução e nula margem para reação.`);
+  // P1: Identificação, volume e papel preponderante
+  modoDeAgirBlocks.push(
+    `O investigado <strong>${nomeGuerra}</strong> (${nomeCompleto}) registra um histórico de <strong>${occurrences.length} ocorrência(s) policial(is)</strong> formalmente catalogada(s) na circunscrição do 35º BPM. Nos registros analisados, figura com papel preponderante de <strong>${papeisStr}</strong>, incidindo especificamente nas seguintes tipificações: <strong>${crimesStr}</strong>.`
+  );
+
+  // P2: LEITURA DIRETA DO MODUS OPERANDI REGISTRADO
+  if (distinctModusOperandi.length > 0) {
+    const modusItems = distinctModusOperandi.map(m => 
+      `<div style="margin: 4px 0; padding: 4px 8px; background: #fffbeb; border-left: 3px solid #d97706; border-radius: 2px;">` +
+      `<strong>• B.O. Nº ${m.bo} (${m.tip} • Data: ${m.data} • Condição: ${m.papel}):</strong> ` +
+      `<span style="color: #78350f;">"${m.text}"</span>` +
+      `</div>`
+    ).join('');
+    modoDeAgirBlocks.push(
+      `No tocante à <strong>maneira como o investigado age (Modus Operandi catalogado nos boletins)</strong>, a leitura técnica dos registros revela os seguintes modos executórios específicos documentados pelas guarnições:<br/>${modusItems}`
+    );
   }
 
-  if (hasInvasion) {
-    modoDeAgirParts.push(`Nas condutas registradas, evidencia-se dinâmica agressiva de invasão física a estabelecimentos comerciais (como lanchonetes e bares) ou recintos particulares, buscando surpreender o alvo em ambiente confinado para garantir o resultado letal e dispersar terceiros.`);
+  // P3: LEITURA DIRETA DO RESUMO DO HISTÓRICO / CIRCUNSTÂNCIAS FÁTICAS
+  if (distinctHistoricos.length > 0) {
+    const histItems = distinctHistoricos.map(h => {
+      const displayDesc = h.text.length > 320 ? h.text.substring(0, 320) + '...' : h.text;
+      return (
+        `<div style="margin: 4px 0; padding: 4px 8px; background: #f0fdf4; border-left: 3px solid #16a34a; border-radius: 2px;">` +
+        `<strong>• Histórico do B.O. Nº ${h.bo} (${h.tip}):</strong> ` +
+        `<span style="color: #14532d;">${displayDesc}</span>` +
+        `</div>`
+      );
+    }).join('');
+    modoDeAgirBlocks.push(
+      `A <strong>leitura dos resumos circunstanciados dos históricos policiais</strong> complementa a dinâmica com os seguintes fatos documentados em ocorrência:<br/>${histItems}`
+    );
   }
 
-  if (hasCamouflage) {
-    modoDeAgirParts.push(`Há emprego recorrente de vestimentas táticas e camufladas (como gandolas militares e agasalhos com capuz) destinadas a dificultar o reconhecimento formal por testemunhas oculares ou sistemas de videomonitoramento urbano.`);
+  // P4: SÍNTESE PROPORCIONAL E REALÍSTICA DA CONDUTA (Baseada estritamente nos crimes reais)
+  const sinteseCondutaParts: string[] = [];
+
+  if (isTrafico) {
+    const drugMentions: string[] = [];
+    if (/crack/i.test(allTextsCombined)) drugMentions.push('crack');
+    if (/cocaína|cocaina|pó|ependorf/i.test(allTextsCombined)) drugMentions.push('cocaína');
+    if (/maconha|bucha|tablete/i.test(allTextsCombined)) drugMentions.push('maconha');
+    const drugStr = drugMentions.length > 0 ? `com substâncias descritas como ${drugMentions.join(', ')}` : 'com comercialização de entorpecentes';
+
+    if (/dispensou|arremessou|jogou|descartou/i.test(allTextsCombined)) {
+      sinteseCondutaParts.push(`No narcotráfico (${drugStr}), o investigado atua com padrão tático de dispensação e descarte de invólucros ao notar a aproximação de viaturas policiais, buscando desvencilhar-se da posse física para afastar o flagrante.`);
+    } else if (/olheiro|fogagueteiro|avistou a guarnição/i.test(allTextsCombined)) {
+      sinteseCondutaParts.push(`Na atividade de tráfico de drogas (${drugStr}), observa-se dinâmica de vigilância territorial ("olheiro") e alerta imediato à aproximação policial para evasão.`);
+    } else {
+      sinteseCondutaParts.push(`Na prática de tráfico ilícito de drogas (${drugStr}), a conduta documentada indica comércio direto em pontos e logradouros mapeados, com fracionamento de substâncias e posse de numerário em cédulas de pequeno valor.`);
+    }
   }
 
-  if (hasEvasionTactics) {
-    modoDeAgirParts.push(`Ante a aproximação de forças policiais, o infrator demonstra padrão de desobediência e fuga veloz, deslocando-se rapidamente por vias residenciais e vielas até locais de apoio previamente estabelecidos para ocultação de armas e dispensação de vestes.`);
+  if (isPatrimonio) {
+    if (/simulando|simulação|mão sob a blusa|sob a camisa/i.test(allTextsCombined)) {
+      sinteseCondutaParts.push(`Nos delitos patrimoniais (roubo/furto), a dinâmica de abordagem caracteriza-se pelo emprego de grave ameaça mediante simulação de porte de arma de fogo sob as vestes, intimidando a vítima para rápida entrega de pertences (aparelhos telefônicos e valores).`);
+    } else if (armasArray.length > 0) {
+      sinteseCondutaParts.push(`Nas ocorrências de crimes contra o patrimônio, a abordagem às vítimas foi executada mediante grave ameaça ostensiva com emprego direto de arma (${armasArray.join(', ')}), com subjugação física das vítimas.`);
+    } else if (/arrombamento|escalada|rompimento/i.test(allTextsCombined)) {
+      sinteseCondutaParts.push(`Nos crimes patrimoniais de furto, evidencia-se modo de agir pautado pelo rompimento de obstáculos e invasão de recintos para subtração de bens.`);
+    } else {
+      sinteseCondutaParts.push(`Nas infrações contra o patrimônio, o investigado opera com foco prioritário em alvos de fácil receptação e rápida evasão a pé pelo terreno urbano.`);
+    }
   }
 
-  if (modoDeAgirParts.length <= 2) {
-    modoDeAgirParts.push(`O investigado atua com emprego contundente de ameaça armada e intimidação na área periférica, buscando a consumação rápida das ações delituosas e a evasão imediata para garantir a impunidade.`);
+  if (isVida) {
+    sinteseCondutaParts.push(`Nos crimes dolosos contra a vida catalogados, as informações técnicas indicam ação com dolo direto, sem oportunizar chance de defesa à vítima, com disparos ou agressões consumadas em locais de movimentação pública ou desavenças territoriais.`);
   }
 
-  const eixoModoDeAgir = modoDeAgirParts.join(' ');
+  if (isArmas && !isVida && !isPatrimonio) {
+    sinteseCondutaParts.push(`No que tange ao porte/posse irregular de arma de fogo, a conduta documentada caracteriza-se pelo transporte do artefato em via pública ou ocultação em local de fácil acesso para pronto uso.`);
+  }
 
-  // Synthesise Eixo II: Comparsaria e Divisão de Tarefas
-  let comparsariaParts: string[] = [];
-  if (hasGroup) {
-    comparsariaParts.push(`As apurações técnicas revelam que o investigado opera de maneira coordenada em <strong>concurso de pessoas e divisão funcional de tarefas</strong>. Identifica-se a atuação com condutores de apoio designados (motoristas/pilotos de prontidão para fuga rápida), atiradores empunhando armamentos em ação simultânea e elementos de contenção externa.`);
+  if (isViolenciaDomestica) {
+    sinteseCondutaParts.push(`Nos registros vinculados à violência doméstica e familiar contra a mulher, constata-se padrão de agressão verbal, ameaças e lesões corporais decorrentes de conflitos de convivência.`);
+  }
+
+  if (sinteseCondutaParts.length === 0) {
+    sinteseCondutaParts.push(`A conduta do investigado desenvolve-se conforme as circunstâncias fáticas descritas nos registros individuais, com reiteração específica nas tipificações de ${crimesStr}.`);
+  }
+
+  // Reaction to police approach
+  if (/evadiu|fuga|correu|pulou muro|alta velocidade|desobedeceu/i.test(allTextsCombined)) {
+    sinteseCondutaParts.push(`Diante da intervenção de guarnições policiais, o investigado adota comportamento de evasão ativa e tentativa de fuga por vielas, quintais ou desobediência a ordens de parada legais.`);
   } else {
-    comparsariaParts.push(`Embora atue frequentemente de maneira direta na execução dos delitos, as ocorrências indicam articulação com indivíduos da comunidade e co-autores identificados em boletins correlatos.`);
+    sinteseCondutaParts.push(`Nos registros em que houve abordagem policial direta, a qualificação e condução ocorreram sem registro de resistência física violenta ou evasão consumada.`);
   }
 
-  if (hasGangRivalry || faccao !== 'não vinculada oficialmente') {
-    comparsariaParts.push(`Os registros evidenciam que suas ações estão atreladas a cobranças, disputas de território e vinganças armadas entre facções locais (com histórico de confrontos e tensões territoriais na circunscrição do 35º BPM, incluindo rivalidades ativas como Chácaras Maquiné, Povoado do Quinze e grupos adjacentes).`);
+  modoDeAgirBlocks.push(sinteseCondutaParts.join(' '));
+
+  const eixoModoDeAgir = modoDeAgirBlocks.join('<br/><br/>');
+
+  // =========================================================================
+  // EIXO II: Divisão Funcional de Tarefas, Concurso de Agentes & Comparsaria
+  // =========================================================================
+  const comparsariaBlocks: string[] = [];
+
+  // Solo vs Coautoria in Occurrences
+  const totalCoautor = papeisCount['Coautor'] || 0;
+  const totalAutor = papeisCount['Autor'] || 0;
+
+  if (totalCoautor > 0 && totalAutor > 0) {
+    comparsariaBlocks.push(
+      `Quanto à forma de atuação, o investigado alterna condutas em <strong>coautoria (${totalCoautor} registro(s))</strong> e atuação direta como <strong>autor principal (${totalAutor} registro(s))</strong>, demonstrando versatilidade na divisão funcional de papéis delitivos.`
+    );
+  } else if (totalCoautor > 0) {
+    comparsariaBlocks.push(
+      `As ocorrências apontam atuação preponderante em <strong>concurso de pessoas (${totalCoautor} registro(s) como Coautor)</strong>, exercendo funções de apoio, vigilância ou execução compartilhada com terceiros comparsas.`
+    );
+  } else {
+    comparsariaBlocks.push(
+      `Os registros policiais apontam atuação prioritariamente <strong>individual / direta (${totalAutor} registro(s) como Autor)</strong> nas ações delitivas catalogadas.`
+    );
   }
 
-  if (hasReceptacao || hasMotorcycle) {
-    comparsariaParts.push(`Identifica-se rede de receptação e repasse de veículos roubados ou com sinais identificadores adulterados entre comparsas, viabilizando o transporte de armas e a mobilidade de executores em ações rápidas.`);
+  // Registered Comparsas from infratorFull
+  const comparsasCadastrados = Array.isArray(infratorFull?.comparsas) ? infratorFull.comparsas : [];
+  if (comparsasCadastrados.length > 0) {
+    const comparsasHtml = comparsasCadastrados.map((c: any) => {
+      const comp = c.comparsa || {};
+      const cNome = comp.nome_completo || c.nome || 'Comparsa';
+      const cVulgo = comp.vulgo || c.vulgo ? `"${comp.vulgo || c.vulgo}"` : '';
+      const cGrau = c.grau ? `[Grau: ${c.grau}]` : '';
+      const sharedBos = Array.isArray(c.shared_bos) && c.shared_bos.length > 0
+        ? `— Coautoria no(s) B.O.(s): ${c.shared_bos.map((b: any) => b.numero_bo).join(', ')}`
+        : '';
+      const hist = c.historico ? `(${c.historico})` : '';
+      return `<div style="margin: 2px 0; padding-left: 6px; border-left: 2px solid #6366f1;">• <strong>${cNome} ${cVulgo}</strong> ${cGrau} ${sharedBos} ${hist}</div>`;
+    }).join('');
+
+    comparsariaBlocks.push(
+      `O banco de inteligência e os cruzamentos de registros identificam <strong>vínculos de comparsaria formalmente catalogados</strong> com os seguintes indivíduos:<br/>${comparsasHtml}`
+    );
+  } else {
+    comparsariaBlocks.push(
+      `Não constam comparsas formalmente cadastrados ou vínculos de coautoria estável vinculados a este prontuário no sistema até a presente data.`
+    );
   }
 
-  const eixoComparsaria = comparsariaParts.join(' ');
-
-  // Synthesise Eixo III: Logística, Armas e Mobilidade
-  let logisticaParts: string[] = [];
-  logisticaParts.push(`No âmbito do poderio bélico, os registros vinculados ao cadastrado apontam o emprego tático de <strong>${armasStr}</strong>.`);
-
-  if (hasWeapons) {
-    logisticaParts.push(`Observa-se preferência por armas de fogo com numeração de série raspada/suprimida, adulterações de acabamento e calibres com expressivo poder de parada (como pistolas 9mm, .40 e revólveres cal. .38), reduzindo a rastreabilidade balística inicial.`);
+  // Faction / Gang
+  if (faccaoCadastrada) {
+    comparsariaBlocks.push(
+      `No que tange a vínculos com facções ou gangues criminosas, o investigado possui vínculo atribuído junto ao grupo: <strong>${faccaoCadastrada}</strong>.`
+    );
+  } else {
+    comparsariaBlocks.push(
+      `Não constam vínculos comprovados com facções criminosas organizadas ou disputas entre gangues rivais nos registros analisados até o momento.`
+    );
   }
 
-  logisticaParts.push(`Para deslocamento, apoio operacional e evasão do cerco policial, constata-se a utilização de <strong>${veiculosStr}</strong>.`);
+  const eixoComparsaria = comparsariaBlocks.join('<br/><br/>');
 
-  if (hasMotorcycle) {
-    logisticaParts.push(`Destaca-se o emprego de motocicletas potentes sem placa e com numeração de chassi adulterada, conferindo extrema agilidade para tráfego em alta velocidade por becos e áreas de difícil penetração de viaturas de 4 rodas.`);
+  // =========================================================================
+  // EIXO III: Poderio Bélico, Vetores de Mobilidade & Logística de Fuga
+  // =========================================================================
+  const logisticaBlocks: string[] = [];
+
+  // Armas
+  if (armasList.length > 0) {
+    const armasDetalhadas = armasList.map(a => `<strong>${a.arma}</strong> (B.O. Nº ${a.bo})`).join(', ');
+    logisticaBlocks.push(
+      `No âmbito do poderio bélico, os registros vinculados ao cadastrado apontam a apreensão / emprego direto de: ${armasDetalhadas}.`
+    );
+    if (/raspada|suprimida|adulterada/i.test(allTextsCombined)) {
+      logisticaBlocks.push(
+        `Registra-se o emprego de armamento com numeração de série suprimida/raspada, visando dificultar a identificação de origem e o rastreamento pericial inicial.`
+      );
+    }
+  } else {
+    logisticaBlocks.push(
+      `<strong>Não há registro de apreensão ou emprego ostensivo de armas de fogo</strong> catalogado nos boletins de ocorrência vinculados a este indivíduo.`
+    );
   }
 
-  if (hasCarSupport) {
-    logisticaParts.push(`Registra-se também o suporte logístico de veículos de passeio de cores neutras para transporte e desembarque simultâneo de múltiplos executores armados, permitindo resgate imediato após os ataques.`);
+  // Mobilidade / Veículos
+  if (veiculosList.length > 0) {
+    const veiculosDetalhados = veiculosList.map(v => `<strong>${v.veiculo}</strong> (B.O. Nº ${v.bo})`).join(', ');
+    logisticaBlocks.push(
+      `Quanto aos meios de locomoção, apoio ou fuga documentados nos boletins: ${veiculosDetalhados}.`
+    );
+  } else {
+    logisticaBlocks.push(
+      `As ações delitivas registradas ocorreram mediante deslocamento a pé, sem veículos automotores identificados ou cadastrados nos boletins.`
+    );
   }
 
-  const eixoLogisticaArmas = logisticaParts.join(' ');
+  const eixoLogisticaArmas = logisticaBlocks.join('<br/><br/>');
 
-  // Synthesise Eixo IV: Espacialidade e Territorialidade
-  let territorialidadeParts: string[] = [];
-  territorialidadeParts.push(`O perímetro de circulação delitiva e influência do investigado concentra-se prioritariamente nos bairros <strong>${locaisStr}</strong>, mantendo vínculos territoriais sob a órbita da facção <strong>${faccao}</strong>.`);
-  territorialidadeParts.push(`As diligências policiais indicam que, após o cometimento das condutas violentas, os autores realizam rotas de fuga direcionadas para redutos residenciais conhecidos na região periférica, onde procedem ao descarte imediato do armamento e dispersão dos envolvidos.`);
-  const eixoTerritorialidade = territorialidadeParts.join(' ');
+  // =========================================================================
+  // EIXO IV: Espacialidade Territorial, Redutos & Conflitos Interfacções
+  // =========================================================================
+  const territorialidadeBlocks: string[] = [];
 
-  // Formulate Technical Recommendations for Polícia Judiciária
-  const subsidiosJudiciarios: { titulo: string; fundamentacao: string }[] = [
-    {
-      titulo: '1. Representação por Prisão Preventiva / Cautelar (Art. 312 do CPP)',
-      fundamentacao: `Fundamentar a segregação cautelar na garantia da ordem pública, ante a reiteração criminosa específica, o modus operandi violento (execuções sumárias e premeditadas) e a posse de armamento com numeração suprimida, fatores que denotam periculosidade concreta e risco efetivo à integridade de testemunhas e moradores locais.`,
-    },
-    {
-      titulo: '2. Mandados de Busca e Apreensão Domiciliar Simultâneos',
-      fundamentacao: `Expedição de mandados de busca e apreensão direcionados aos logradouros mapeados e imóveis de familiares/comparsas identificados nos registros policiais, com o objetivo de arrecadar o arsenal bélico da facção, aparelhos celulares e vestimentas camufladas descritas nos homicídios.`,
-    },
-    {
-      titulo: '3. Exame Pericial de Confronto Microcomparativo Balístico',
-      fundamentacao: `Requisição formal ao Instituto de Criminalística para que projéteis e estojos arrecadados nas cenas de homicídios pretéritos da área do 35º BPM sejam confrontados com as armas de fogo apreendidas em posse do investigado ou de seus comparsas (calibres 9mm, .40 e .38), estabelecendo o nexo de autoria e materialidade em múltiplos inquéritos policiais.`,
-    },
-    {
-      titulo: '4. Perícia Telemática e Quebra de Sigilo de Dados em Telefones Celulares',
-      fundamentacao: `Requerimento judicial de acesso e extração forense aos dados de comunicações, mensagens instantâneas e registros fotográficos em celulares apreendidos, visando comprovar a linha de comando, mandantes de execuções e rotas de abastecimento de armas e drogas.`,
-    },
-    {
-      titulo: '5. Indiciamento Conjunto por Associação Criminosa / Organização Criminosa (Lei 12.850/13)',
-      fundamentacao: `Articulação probatória da estabilidade do vínculo e da divisão premeditada de tarefas entre o investigado e os coautores citados nos boletins, instruindo o inquérito policial sob a ótica do concurso de pessoas e associação qualificada para a prática reiterada de crimes.`,
-    },
-  ];
+  const enderecosCadastrados = Array.isArray(infratorFull?.enderecos) ? infratorFull.enderecos : [];
+  if (enderecosCadastrados.length > 0) {
+    const endHtml = enderecosCadastrados.map((e: any) => {
+      const tipo = e.tipo_endereco ? `[${e.tipo_endereco}]` : '[Endereço]';
+      const logr = e.logradouro || 'Logradouro não informado';
+      const num = e.numero ? `Nº ${e.numero}` : 'S/N';
+      const bai = e.bairro ? `Bairro ${e.bairro}` : '';
+      const cid = e.cidade ? `(${e.cidade})` : '(Santa Luzia)';
+      const obs = e.observacoes ? `— Obs: ${e.observacoes}` : '';
+      return `<div style="margin: 2px 0; padding-left: 6px; border-left: 2px solid #0284c7;">• <strong>${tipo}</strong>: ${logr}, ${num}, ${bai} ${cid} ${obs}</div>`;
+    }).join('');
+
+    territorialidadeBlocks.push(
+      `O investigado possui os seguintes <strong>endereços e pontos de interesse formalmente cadastrados</strong> no 35º BPM:<br/>${endHtml}`
+    );
+  }
+
+  if (locaisArray.length > 0) {
+    territorialidadeBlocks.push(
+      `O raio de incidência das condutas delitivas nos boletins analisados concentra-se no(s) bairro(s): <strong>${locaisStr}</strong>.`
+    );
+    if (locaisArray.length === 1) {
+      territorialidadeBlocks.push(
+        `Observa-se padrão de atuação estritamente hiperlocal circunscrito ao bairro <strong>${locaisArray[0]}</strong>, onde o investigado reside ou mantém vínculos comunitários diretos.`
+      );
+    } else {
+      territorialidadeBlocks.push(
+        `O investigado demonstra capacidade de mobilidade entre diferentes bairros (${locaisStr}), atuando em corredores de circulação e vias de escoamento da comarca.`
+      );
+    }
+  } else {
+    territorialidadeBlocks.push(
+      `Sem raio territorial de crimes individualizado nos boletins policiais até o momento.`
+    );
+  }
+
+  const eixoTerritorialidade = territorialidadeBlocks.join('<br/><br/>');
+
+  // =========================================================================
+  // DIRETRIZES E SUBSÍDIOS TÉCNICOS PARA A POLÍCIA JUDICIÁRIA (100% Proporcionais)
+  // =========================================================================
+  const subsidiosJudiciarios: { titulo: string; fundamentacao: string }[] = [];
+  const bosStr = occurrences.map(o => o.numero_bo).slice(0, 4).join(', ');
+  const enderecosStr = enderecosCadastrados.map((e: any) => `${e.logradouro || 'Rua'}, Bairro ${e.bairro || 'N/D'}`).join('; ') || locaisStr;
+
+  // 1. Mandado / Prisão Status
+  if (mandadoAtivo) {
+    subsidiosJudiciarios.push({
+      titulo: '1. Cumprimento Prioritário de Mandado de Prisão em Aberto (BNMP / Recaptura)',
+      fundamentacao: `O investigado encontra-se na condição de FORAGIDO / com mandado de prisão ativo. Priorizar diligências de recaptura nos endereços catalogados (${enderecosStr}) e vigilância velada nos pontos de frequência habitual mapeados.`
+    });
+  } else if (situacaoPrisional === 'PRESO' || situacaoPrisional === 'PRESO_TEMPORARIO') {
+    subsidiosJudiciarios.push({
+      titulo: '1. Instrução Prisional perante a Vara de Execuções Penais',
+      fundamentacao: `Juntada do presente relatório técnico consolidado ao prontuário do apenado para subsidiar decisões judiciais relativas a benefícios da execução penal, transferências de estabelecimento prisional e manutenção da custódia cautelar.`
+    });
+  }
+
+  // 2. Tráfico de Drogas
+  if (isTrafico) {
+    subsidiosJudiciarios.push({
+      titulo: `${subsidiosJudiciarios.length + 1}. Mandado de Busca e Apreensão Domiciliar nos Pontos Mapeados`,
+      fundamentacao: `Expedição de mandado de busca e apreensão judicial para os endereços residenciais e redutos catalogados (${enderecosStr}), visando à arrecadação de entorpecentes estocados, balanças de precisão, anotações de contabilidade e numerário oriundo da narcotraficância.`
+    });
+    subsidiosJudiciarios.push({
+      titulo: `${subsidiosJudiciarios.length + 1}. Perícia Toxicológica Definitiva e Rastreamento Financeiro de Apoio`,
+      fundamentacao: `Juntada aos autos dos laudos toxicológicos definitivos das substâncias entorpecentes apreendidas nos B.O.s vinculados (${bosStr}) e identificação de eventuais contas bancárias / chaves PIX utilizadas para movimentação do comércio ilícito.`
+    });
+  }
+
+  // 3. Crimes Patrimoniais (Roubo / Furto)
+  if (isPatrimonio) {
+    subsidiosJudiciarios.push({
+      titulo: `${subsidiosJudiciarios.length + 1}. Reconhecimento Fotográfico e Presencial Formal perante as Vítimas (Art. 226 do CPP)`,
+      fundamentacao: `Convocação formal das vítimas dos B.O.s catalogados (${bosStr}) à Delegacia de Polícia Civil para realização do procedimento formal de reconhecimento pessoal/fotográfico, ratificando a autoria delitiva com estrita observância das formalidades legais.`
+    });
+    subsidiosJudiciarios.push({
+      titulo: `${subsidiosJudiciarios.length + 1}. Rastreamento de Aparelhos Subtraídos e Responsabilização de Receptadores`,
+      fundamentacao: `Diligências investigativas para rastreamento de terminais telefônicos (IMEI) e bens subtraídos nas ocorrências, com identificação e autuação da cadeia de receptação operante nos bairros de atuação.`
+    });
+  }
+
+  // 4. Armas de Fogo
+  if (armasList.length > 0) {
+    const armasNomes = armasArray.join(', ');
+    subsidiosJudiciarios.push({
+      titulo: `${subsidiosJudiciarios.length + 1}. Exame Pericial de Eficiência Balística e Rastreamento SINARM / SIGMA`,
+      fundamentacao: `Requisição pericial de eficiência e prestabilidade das armas apreendidas (${armasNomes}) perante o Instituto de Criminalística e consulta aos cadastros SINARM/SIGMA para verificar histórico de furto/roubo ou propriedade anterior do armamento.`
+    });
+  }
+
+  // 5. Crimes contra a Vida (Homicídio / Tentativa)
+  if (isVida) {
+    subsidiosJudiciarios.push({
+      titulo: `${subsidiosJudiciarios.length + 1}. Representação por Prisão Preventiva para Garantia da Ordem Pública (Art. 312 do CPP)`,
+      fundamentacao: `Fundamentar o pedido de segregação cautelar na gravidade concreta dos crimes dolosos contra a vida apurados nos B.O.s (${bosStr}), risco efetivo à vida de testemunhas presenciais e periculosidade acentuada do investigado.`
+    });
+    subsidiosJudiciarios.push({
+      titulo: `${subsidiosJudiciarios.length + 1}. Confronto Microcomparativo Balístico de Projéteis e Estojos`,
+      fundamentacao: `Requisição formal para confronto balístico microcomparativo entre projéteis/estojos arrecadados nas cenas de crime e armamentos apreendidos com o investigado ou seus comparsas para estabelecimento de nexo material.`
+    });
+  }
+
+  // 6. Comparsas / Associação Criminosa
+  if (comparsasCadastrados.length > 0 || isOrganizacao) {
+    const comparsasNomes = comparsasCadastrados.map((c: any) => c.comparsa?.nome_completo || c.nome).slice(0, 3).join(', ') || 'coautores';
+    subsidiosJudiciarios.push({
+      titulo: `${subsidiosJudiciarios.length + 1}. Indiciamento por Concurso de Pessoas / Associação Criminosa (Art. 288 do CP / Lei 12.850/13)`,
+      fundamentacao: `Demonstração nos autos da estabilidade do vínculo e divisão premeditada de tarefas entre o investigado e seus comparsas catalogados (${comparsasNomes}) para instrução de ação penal conjunta.`
+    });
+  }
+
+  // Fallback if small list
+  if (subsidiosJudiciarios.length === 0) {
+    subsidiosJudiciarios.push({
+      titulo: '1. Instrução Probatória e Oitiva Formal do Investigado',
+      fundamentacao: `Intimação formal do investigado para prestar esclarecimentos sobre as circunstâncias dos fatos apurados no(s) B.O.(s) ${bosStr}, oportunizando o contraditório regular.`
+    });
+    subsidiosJudiciarios.push({
+      titulo: '2. Atualização Cadastral e Checagem Periódica de Antecedentes',
+      fundamentacao: `Manutenção de vigilância cadastral junto aos sistemas de segurança pública do Estado de Minas Gerais para acompanhamento de eventuais reincidências.`
+    });
+  }
 
   // Plain-text formatted report for copying into official documents
   const textoFormatadoPoliciaJudiciaria = [
@@ -439,26 +731,26 @@ function buildJudicialPoliceTechnicalReport(infratorFull: any, rawOccurrences: a
     '================================================================================',
     '',
     `1. DADOS DO INVESTIGADO:`,
-    `Nome Completo: ${infratorFull.nome_completo || 'NÃO INFORMADO'}`,
-    `Alcunha / Vulgo: "${infratorFull.vulgo || 'S/V'}"`,
-    `CPF / Documento: ${infratorFull.cpf || 'Não cadastrado'}`,
-    `Facção / Gangue: ${infratorFull.gangue_faccao || 'Sem facção informada'}`,
-    `Grau de Periculosidade: ${infratorFull.periculosidade || 'Alta'}`,
+    `Nome Completo: ${nomeCompleto}`,
+    `Alcunha / Vulgo: "${infratorFull?.vulgo || 'S/V'}"`,
+    `CPF / Documento: ${infratorFull?.cpf || 'Não cadastrado'}`,
+    `Situação Prisional: ${situacaoPrisional}${mandadoAtivo ? ' (MANDADO DE PRISÃO ATIVO)' : ''}`,
+    `Facção / Gangue: ${faccaoCadastrada || 'Sem facção informada'}`,
     `Total de Ocorrências Analisadas: ${occurrences.length} registro(s)`,
     `Tipificações Incidentes: ${crimesStr}`,
     `Papel Preponderante: ${papeisStr}`,
     '',
     `2. DA MANEIRA COMO O INVESTIGADO AGE (MODUS OPERANDI CONSOLIDADO):`,
-    eixoModoDeAgir.replace(/<[^>]*>/g, ''),
+    eixoModoDeAgir.replace(/<[^>]*>/g, '').replace(/&quot;/g, '"'),
     '',
     `3. DA DIVISÃO FUNCIONAL DE TAREFAS E ESTRUTURA DE COMPARSARIA:`,
-    eixoComparsaria.replace(/<[^>]*>/g, ''),
+    eixoComparsaria.replace(/<[^>]*>/g, '').replace(/&quot;/g, '"'),
     '',
     `4. DO PODERIO BÉLICO, MEIOS LOGÍSTICOS E VETORES DE MOBILIDADE / FUGA:`,
-    eixoLogisticaArmas.replace(/<[^>]*>/g, ''),
+    eixoLogisticaArmas.replace(/<[^>]*>/g, '').replace(/&quot;/g, '"'),
     '',
-    `5. DA TERRITORIALIDADE, REDUTOS E DISPUTAS INTERFACÇÕES:`,
-    eixoTerritorialidade.replace(/<[^>]*>/g, ''),
+    `5. DA TERRITORIALIDADE, REDUTOS E DISPUTAS:`,
+    eixoTerritorialidade.replace(/<[^>]*>/g, '').replace(/&quot;/g, '"'),
     '',
     `6. DIRETRIZES E SUBSÍDIOS TÉCNICOS PARA A POLÍCIA JUDICIÁRIA:`,
     subsidiosJudiciarios.map(s => `• ${s.titulo}\n  Fundamentação: ${s.fundamentacao}`).join('\n\n'),
@@ -478,12 +770,14 @@ function buildJudicialPoliceTechnicalReport(infratorFull: any, rawOccurrences: a
   ].join('\n');
 
   // 5 Rich Lines for summary
+  const armaResumo = armasArray.length > 0 ? armasArray.join(', ') : 'sem armas de fogo cadastradas';
+  const veicResumo = veiculosArray.length > 0 ? veiculosArray.join(', ') : 'deslocamento a pé / sem veículos';
   const rich5Lines = [
-    `<strong>1. Reiteração Delitiva & Tipificações:</strong> O investigado <strong>${nomeGuerra}</strong> possui envolvimento catalogado em <strong>${occurrences.length} ocorrência(s) policial(is)</strong>, com histórico concentrado na prática de <strong>${crimesStr}</strong>, figurando preponderantemente como <strong>${papeisStr}</strong> nos registros do 35º BPM.`,
-    `<strong>2. Padrão de Conduta & Modus Operandi:</strong> As apurações técnicas consolidam padrão operacional caracterizado por <strong>${hasLethality ? 'alta letalidade com disparos vitais direcionados à queima-roupa e emboscadas planejadas' : 'atuação ostensiva com emprego de violência e rápida tomada de decisão'}</strong>, ${hasInvasion ? 'com invasão tática de recintos para anular reações do alvo' : 'com abordagem contundente sobre as vítimas'}.`,
-    `<strong>3. Meios Empregados (Armamento & Mobilidade):</strong> Constata-se emprego de <strong>${armasStr}</strong> para intimidação e confronto armado, utilizando como suporte de transporte e rota de fuga <strong>${veiculosStr}</strong> para rápida evasão do cerco policial e ocultação em redutos.`,
-    `<strong>4. Concurso de Agentes & Facção:</strong> Atuação estruturada com divisão de tarefas entre executores, condutores de apoio e receptadores de veículos, mantendo raio de ação concentrado nos bairros <strong>${locaisStr}</strong> sob influência de <strong>${faccao}</strong>.`,
-    `<strong>5. Diretriz Técnica para a Polícia Judiciária:</strong> Recomenda-se instrução probatória com representação por prisão preventiva (art. 312 do CPP), mandados de busca domiciliar simultâneos em redutos mapeados e confronto microcomparativo balístico de estojos e projéteis perante o Instituto de Criminalística.`
+    `<strong>1. Reiteração Delitiva & Tipificações:</strong> O investigado <strong>${nomeGuerra}</strong> (${nomeCompleto}) possui <strong>${occurrences.length} ocorrência(s) policial(is)</strong>, com histórico concentrado na prática de <strong>${crimesStr}</strong>, figurando preponderantemente como <strong>${papeisStr}</strong> nos registros do 35º BPM.`,
+    `<strong>2. Padrão de Conduta & Modus Operandi:</strong> As condutas catalogadas evidenciam dinâmica executória individualizada com leitura direta dos boletins, atuando com ${distinctModusOperandi.length > 0 ? 'modus operandi específico documentado pelas guarnições' : 'ações circunstanciadas nos históricos policiais registrados'}.`,
+    `<strong>3. Meios Empregados (Armamento & Mobilidade):</strong> Constata-se emprego de <strong>${armaResumo}</strong> e meios de deslocamento/fuga registrados como <strong>${veicResumo}</strong>.`,
+    `<strong>4. Concurso de Agentes & Comparsaria:</strong> ${comparsasCadastrados.length > 0 ? `Atuação articulada com ${comparsasCadastrados.length} comparsa(s) catalogado(s)` : 'Atuação prioritariamente individual sem comparsas estáveis cadastrados'}${faccaoCadastrada ? `, sob a órbita do grupo ${faccaoCadastrada}` : ', sem vínculo de facção formal'}. Concentração nos bairros <strong>${locaisStr}</strong>.`,
+    `<strong>5. Diretriz Técnica para a Polícia Judiciária:</strong> Recomenda-se ${subsidiosJudiciarios[0]?.titulo || 'instrução probatória e qualificação cadastral'} perante a Delegacia de Polícia Civil.`
   ];
 
   return {
@@ -492,7 +786,7 @@ function buildJudicialPoliceTechnicalReport(infratorFull: any, rawOccurrences: a
     tipificacoesCount,
     armas: armasArray,
     veiculos: veiculosArray,
-    modusOperandiList,
+    modusOperandiList: distinctModusOperandi.map(m => m.text),
     papeisCount,
     diligencePoints,
     rich5Lines,

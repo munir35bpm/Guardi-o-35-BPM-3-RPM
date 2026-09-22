@@ -6274,6 +6274,8 @@ export default function App() {
                 registeredSuspects={suspects}
                 onDeleteSuspect={handleInitiateDeleteSuspect}
                 onRefreshSuspects={fetchTelemetry}
+                isAdmin={isAdmin}
+                onRequireAdmin={requireAdmin}
               />
             </motion.div>
           )}
