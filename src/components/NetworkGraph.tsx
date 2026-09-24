@@ -50,9 +50,39 @@ export function isSuspectInGang(gang?: string, has_gang?: boolean): boolean {
   );
 }
 
+export function normalizeGangDisplayName(name?: string): string {
+  if (!name) return '';
+  const trimmed = name.trim().replace(/\s+/g, ' ');
+  if (!trimmed) return '';
+
+  // Short uppercase acronyms (<= 5 chars, no spaces, like "PCC", "CV", "ADA", "TCP")
+  if (trimmed.length <= 5 && trimmed === trimmed.toUpperCase() && !trimmed.includes(' ')) {
+    return trimmed;
+  }
+
+  // If already mixed case (e.g. "Gangue 31 de Janeiro"), preserve it
+  const isAllUpper = trimmed === trimmed.toUpperCase();
+  const isAllLower = trimmed === trimmed.toLowerCase();
+  if (!isAllUpper && !isAllLower) {
+    return trimmed;
+  }
+
+  // Format Title Case with lowercase Portuguese prepositions
+  const lowercaseWords = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'nos', 'nas', 'por', 'com']);
+  const words = trimmed.toLowerCase().split(' ');
+  return words
+    .map((word, idx) => {
+      if (idx > 0 && lowercaseWords.has(word)) {
+        return word;
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
+}
+
 export function getDisplayGangName(gang?: string, has_gang?: boolean): string {
   if (isSuspectInGang(gang, has_gang)) {
-    return gang!.trim();
+    return normalizeGangDisplayName(gang);
   }
   return 'Infratores sem gangue';
 }
@@ -114,7 +144,7 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
     }
     return {
       ...nodeData,
-      gang: inGang ? n.gang : 'Infratores sem gangue',
+      gang: inGang ? normalizeGangDisplayName(n.gang) : 'Infratores sem gangue',
       has_gang: inGang,
     };
   };
@@ -158,21 +188,45 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
     };
   }, []);
 
-  // Compute available distinct gangs and counters
+  // Compute available distinct gangs (strictly deduplicated case-insensitively) and counters
   const { availableGangs, countGang, countNoGang, totalSuspects } = useMemo(() => {
     const suspectNodes = rawNodes.filter((n) => n.type === 'suspect');
     const withGang = suspectNodes.filter((n) => isSuspectInGang(n.gang, n.has_gang));
     const withoutGang = suspectNodes.filter((n) => !isSuspectInGang(n.gang, n.has_gang));
 
-    const gangsSet = new Set<string>();
+    // Map lowercase key -> canonical display name and count
+    const gangMap = new Map<string, { canonical: string; count: number }>();
+
     withGang.forEach((n) => {
       if (n.gang && n.gang !== 'Infratores sem gangue') {
-        gangsSet.add(n.gang.trim());
+        const raw = n.gang.trim().replace(/\s+/g, ' ');
+        const lowerKey = raw.toLowerCase();
+        const normalized = normalizeGangDisplayName(raw);
+
+        const existing = gangMap.get(lowerKey);
+        if (!existing) {
+          gangMap.set(lowerKey, { canonical: normalized, count: 1 });
+        } else {
+          existing.count += 1;
+          // Prefer Title Case or mixed-case variant over all-uppercase or all-lowercase
+          const currentIsAllUpper = existing.canonical === existing.canonical.toUpperCase();
+          const currentIsAllLower = existing.canonical === existing.canonical.toLowerCase();
+          const newIsAllUpper = normalized === normalized.toUpperCase();
+          const newIsAllLower = normalized === normalized.toLowerCase();
+
+          if ((currentIsAllUpper || currentIsAllLower) && (!newIsAllUpper && !newIsAllLower)) {
+            existing.canonical = normalized;
+          }
+        }
       }
     });
 
+    const distinctGangs = Array.from(gangMap.values())
+      .map((item) => item.canonical)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+
     return {
-      availableGangs: Array.from(gangsSet).sort(),
+      availableGangs: distinctGangs,
       countGang: withGang.length,
       countNoGang: withoutGang.length,
       totalSuspects: suspectNodes.length,
@@ -200,8 +254,10 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
       if (filterMode === 'all') {
         return true;
       }
-      // Specific gang filter
-      return n.gang?.trim().toLowerCase() === filterMode.trim().toLowerCase();
+      // Specific gang filter: case-insensitive & whitespace-normalized comparison
+      const targetGang = filterMode.trim().replace(/\s+/g, ' ').toLowerCase();
+      const suspectGang = (n.gang || '').trim().replace(/\s+/g, ' ').toLowerCase();
+      return suspectGang === targetGang;
     });
 
     const visibleSuspectIds = new Set(visibleSuspects.map((s) => s.id));
@@ -581,25 +637,38 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
               {/* Seletor de Gangue Específica (caso existam facções cadastradas) */}
               {availableGangs.length > 0 && (
                 <select
-                  value={availableGangs.includes(filterMode) ? filterMode : ''}
+                  value={
+                    availableGangs.find(
+                      (g) => g.toLowerCase() === filterMode.trim().toLowerCase()
+                    ) || ''
+                  }
                   onChange={(e) => {
                     if (e.target.value) setFilterMode(e.target.value);
                   }}
                   className={`px-2.5 py-1 rounded text-xs font-semibold bg-slate-900 border text-slate-200 outline-none cursor-pointer transition ${
-                    availableGangs.includes(filterMode)
+                    availableGangs.some(
+                      (g) => g.toLowerCase() === filterMode.trim().toLowerCase()
+                    )
                       ? 'border-amber-500 text-amber-300 bg-amber-950/40'
                       : 'border-slate-700 hover:border-slate-600'
                   }`}
-                  title="Filtrar por facção específica"
+                  title="Filtrar por facção específica (lista consolidada sem duplicidades)"
                 >
                   <option value="" disabled>
                     Facção específica...
                   </option>
-                  {availableGangs.map((gang) => (
-                    <option key={gang} value={gang}>
-                      {gang}
-                    </option>
-                  ))}
+                  {availableGangs.map((gang) => {
+                    const count = rawNodes.filter(
+                      (n) =>
+                        n.type === 'suspect' &&
+                        (n.gang || '').trim().toLowerCase() === gang.trim().toLowerCase()
+                    ).length;
+                    return (
+                      <option key={gang} value={gang}>
+                        {gang} {count > 0 ? `(${count})` : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               )}
 
@@ -917,7 +986,11 @@ export default function NetworkGraph({ onSelectNode }: NetworkGraphProps) {
                   ? 'Infratores sem gangue'
                   : filterMode === 'all'
                   ? 'Todos os Infratores'
-                  : `Facção: ${filterMode}`}
+                  : `Facção: ${
+                      availableGangs.find(
+                        (g) => g.toLowerCase() === filterMode.trim().toLowerCase()
+                      ) || filterMode
+                    }`}
               </strong>
             </span>
           </div>
