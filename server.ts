@@ -876,7 +876,7 @@ Narrativa: "${narrative}"`;
     let parsedData = null;
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: 'gemini-3.8-flash',
         contents: userPrompt,
         config: {
           systemInstruction: systemPrompt,
@@ -999,13 +999,27 @@ app.post('/api/ai/intelligence-analysis', async (req, res) => {
         historico_crimes: c.ocorrencias.map((o: any) => `[${o.numero_bo}] ${o.tipificacao_penal} (Papel: ${o.papel}) - MO: ${o.modus_operandi} - Armas: ${o.armas_utilizadas} - Veículo: ${o.veiculo_utilizado}`)
       }));
 
-      const systemPrompt = `Você é um Analista de Inteligência Policial da Seção de Inteligência do 35º BPM (PMMG - Guardião do Alto Rio das Velhas).
-Sua missão é realizar uma análise rigorosa e estruturada de ocorrências policiais, executando três tarefas integradas:
-1. Extração e processamento da ocorrência (município, bairro, logradouro, tipificação, resumo do modus operandi e características declaradas como pele, vestimentas, sinais particulares/tatuagens/cicatrizes e armas/veículos).
-2. Cruzamento analítico minucioso com a base de dados de infratores cadastrados, avaliando o score_compatibilidade (0 a 100%) baseado em convergência de tatuagens, cicatrizes, cor de pele, compleição, bairro de atuação, facção criminosa, armas e veículos utilizados, justificativa analítica técnica e recomendação operacional de campo.
-3. Avaliação do perímetro e alerta de reincidência operacional (nível de alerta: ALTO, MEDIO ou BAIXO e observação circunstanciada).
-
-Você DEVE responder estritamente de acordo com o esquema JSON solicitado.`;
+      const systemPrompt = `Você é o Motor de Inteligência Policial da Seção de Inteligência do 35º BPM (PMMG - Guardião do Alto Rio das Velhas).
+Sua missão é atuar no estilo "Google de Inteligência Policial" para TRIAGEM & CRUZAMENTO DE FATOS NOVOS.
+Ao receber um fato novo (narrativa de roubo, furto, homicídio, tráfico ou relato detalhado de vítima/testemunha):
+1. Extração minuciosa de evidências estruturadas:
+   - Município, Bairro e Logradouro/Rua exata (ex: Rua Cassimiro de Abreu)
+   - Tipificação penal técnica
+   - Modus operandi resumido (ex: abordagem a mulher, alusão de arma, subtração rápida)
+   - Características declaradas:
+     * Pele / etnia (ex: Negra/Preta)
+     * Altura estimada (ex: ~1,75m)
+     * Compleição física (ex: magro, franzino, atlético)
+     * Vestimentas (ex: blusa de frio cinza, jaqueta, boné)
+     * Tatuagens e suas partes corporais anatômicas (ex: tatuagem no pescoço, face, braço, mão)
+     * Cicatrizes e sinais particulares
+     * Veículo / meio de transporte
+     * Rota de fuga (ex: evadiu sentido Av. Senhor do Bonfim)
+     * Comparsas, desafetos ou facções criminosas
+2. Varredura e Cruzamento de Inteligência com a base de infratores cadastrados:
+   - Avalie o score_compatibilidade (0 a 100%) baseado na convergência de características físicas, tatuagens (especialmente coincidência anatômica no pescoço/braço/mão), área de atuação na rua ou no corredor da rota de fuga, reincidência de crimes semelhantes (ex: roubos patrimoniais), vestimentas e desafetos/comparsas.
+   - Forneça justificativa analítica técnica e recomendação operacional clara.
+3. Avaliação do perímetro e alerta de reincidência operacional (ALTO, MEDIO ou BAIXO).`;
 
       const userPrompt = `NARRATIVA POLICIAL REGISTRADA:
 "${narrativeText}"
@@ -1019,7 +1033,7 @@ ${JSON.stringify(formattedCandidates, null, 2)}
 Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibilidade com os infratores cadastrados (valorizando correspondência de tatuagens, cicatrizes, sinais físicos, bairros e veículos) e gere o alerta de reincidência no perímetro.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: 'gemini-3.8-flash',
         contents: userPrompt,
         config: {
           systemInstruction: systemPrompt,
@@ -1039,11 +1053,15 @@ Por favor, processe a ocorrência, execute o cruzamento minucioso de compatibili
                     type: Type.OBJECT,
                     properties: {
                       pele: { type: Type.STRING },
+                      altura: { type: Type.STRING },
+                      compleicao: { type: Type.STRING },
                       vestimentas: { type: Type.STRING },
                       sinais_particulares: { type: Type.STRING },
                       tatuagens: { type: Type.STRING },
                       cicatrizes: { type: Type.STRING },
-                      armas_veiculos: { type: Type.STRING }
+                      armas_veiculos: { type: Type.STRING },
+                      rota_fuga: { type: Type.STRING },
+                      desafetos_comparsas: { type: Type.STRING }
                     },
                     required: ["pele", "sinais_particulares", "armas_veiculos"]
                   }

@@ -22,11 +22,15 @@ export interface IntelligenceAnalysisResult {
     modus_operandi_resumo: string;
     caracteristicas_declaradas: {
       pele?: string;
+      altura?: string;
+      compleicao?: string;
       vestimentas?: string;
       sinais_particulares?: string;
       tatuagens?: string;
       cicatrizes?: string;
       armas_veiculos?: string;
+      rota_fuga?: string;
+      desafetos_comparsas?: string;
     };
   };
   cruzamento_suspeitos: Array<{
@@ -139,6 +143,13 @@ export function analyzeCrimeIntelligenceLocally(
     logradouro = streetMatch[0].trim();
   }
 
+  // Detect Escape Route (Rota de Fuga)
+  let rotaFugaExtracted = '';
+  const fugaMatch = text.match(/(?:evadiu|fugiu|empreendeu\s+fuga|tomou\s+rumo|correu|saiu\s+em\s+desabalada\s+carreira|deslocou)\s+(?:no\s+sentido|sentido|rumo\s+a[o]?|em\s+dire[çc][aã]o\s+a[o]?|para\s+a?)\s+([^\n\r;]+)/i);
+  if (fugaMatch && fugaMatch[1]?.trim().length > 2) {
+    rotaFugaExtracted = fugaMatch[1].replace(/[.,]+$/, '').trim();
+  }
+
   // 3. Modus Operandi & Perforations Extraction
   const perfMatch = text.match(/(\d+|\w+)\s*perfura[çc][õo]es/i);
   const perfCount = perfMatch ? perfMatch[1] : '';
@@ -150,8 +161,10 @@ export function analyzeCrimeIntelligenceLocally(
     moResumo = 'Ação criminosa violenta mediante disparos de arma de fogo. ';
   } else if (/moto|motocicleta|garupa/i.test(text)) {
     moResumo = 'Abordagem rápida utilizando motocicleta para aproximação e fuga. ';
+  } else if (/v[ií]tima\s+mulher|abordada|pedestre|transeunte|celular|bolsa/i.test(text)) {
+    moResumo = 'Abordagem e intimidação direta contra transeunte/mulher para subtração rápida de pertences. ';
   } else {
-    moResumo = 'Modus operandi característico de emboscada, acerto de contas ou ação territorial. ';
+    moResumo = 'Modus operandi característico de emboscada, roubo a transeunte ou ação territorial. ';
   }
 
   if (/amea[çc]a/i.test(text)) {
@@ -161,26 +174,59 @@ export function analyzeCrimeIntelligenceLocally(
   // 4. Physical Characteristics, Tattoos, Scars & Vehicles Extraction
   let peleExtracted = filters?.cor_pele || '';
   if (!peleExtracted) {
-    if (/moren[oa]/i.test(text)) peleExtracted = 'Morena';
-    else if (/negr[oa]|pret[oa]/i.test(text)) peleExtracted = 'Negra';
+    if (/pret[oa]|negr[oa]/i.test(text)) peleExtracted = 'Negra / Preta';
+    else if (/moren[oa]/i.test(text)) peleExtracted = 'Morena';
     else if (/pard[oa]/i.test(text)) peleExtracted = 'Parda';
     else if (/branc[oa]|clar[oa]/i.test(text)) peleExtracted = 'Branca / Clara';
     else peleExtracted = 'Não especificada';
   }
 
-  let vestimentasExtracted = 'Não declaradas';
-  const vestMatch = text.match(/(?:vestindo|trajando|com|usava)\s+(?:um[a]?\s+)?(bon[eé]|bermuda|cal[çc]a|blusa|camisa|jaqueta|capuz|capacete[^\,\.\n]+)/i);
-  if (vestMatch) {
-    vestimentasExtracted = vestMatch[0].trim();
-  } else if (/capacete/i.test(text)) {
-    vestimentasExtracted = 'Capacete de motociclista';
+  // Height (Estatura) extraction
+  let alturaExtracted = filters?.altura_faixa || '';
+  let alturaNum: number | null = null;
+  const altMatch = text.match(/(?:altura\s+(?:aproximada\s+de\s+|de\s+)?|estatura\s+(?:de\s+)?|aproximadamente\s+)(\d[,\.]\d{1,2})\s*(?:m|metros)?|\b(1[,\.]\d{2})\s*(?:m|metros)?\b/i);
+  if (altMatch) {
+    const rawVal = (altMatch[1] || altMatch[2] || '').replace(',', '.');
+    const parsed = parseFloat(rawVal);
+    if (!isNaN(parsed) && parsed >= 1.4 && parsed <= 2.2) {
+      alturaNum = parsed;
+      alturaExtracted = `Aproximadamente ${parsed.toFixed(2)}m`;
+    }
   }
 
-  // Tattoos extraction
+  // Complexion (Compleição) extraction
+  let compleicaoExtracted = filters?.compleicao || '';
+  if (!compleicaoExtracted) {
+    if (/magr[oa]|delgad[oa]|franzin[oa]|esgui[oa]/i.test(text)) compleicaoExtracted = 'Delgada / Magra';
+    else if (/fort[e]|atl[eé]tic[oa]|musculos[oa]/i.test(text)) compleicaoExtracted = 'Atlética / Forte';
+    else if (/m[eé]di[oa]|normal/i.test(text)) compleicaoExtracted = 'Média';
+    else if (/gord[oa]|robust[oa]|obes[oa]|corpulent[oa]/i.test(text)) compleicaoExtracted = 'Robusta / Obesa';
+  }
+
+  // Clothing (Vestimentas) extraction
+  let vestimentasExtracted = 'Não declaradas';
+  if (/blusa\s+de\s+frio\s+cinza|moletom\s+cinza|jaqueta\s+cinza|agasalho\s+cinza/i.test(text)) {
+    vestimentasExtracted = 'Blusa de frio cinza / agasalho';
+  } else {
+    const vestMatch = text.match(/(?:vestindo|trajando|com|usava)\s+(?:um[a]?\s+)?(bon[eé]|bermuda|cal[çc]a|blusa|camisa|jaqueta|capuz|capacete[^\,\.\n]+)/i);
+    if (vestMatch) {
+      vestimentasExtracted = vestMatch[0].trim();
+    } else if (/capacete/i.test(text)) {
+      vestimentasExtracted = 'Capacete de motociclista';
+    }
+  }
+
+  // Tattoos extraction (including anatomical locations: pescoço, braço, mãos, etc.)
   let tatuagensExtracted = filters?.tatuagens || '';
-  const tatMatch = text.match(/tatuag\w+\s+(?:de\s+|no\s+|na\s+|em\s+)?([^\,\.\n]+)/i);
-  if (tatMatch && !tatuagensExtracted) {
-    tatuagensExtracted = tatMatch[0].trim();
+  if (!tatuagensExtracted) {
+    if (/pesco[çc]o/i.test(text) && /tatuag|desenho|marcad/i.test(text)) {
+      tatuagensExtracted = 'Tatuagem na região do pescoço / cervical';
+    } else {
+      const tatMatch = text.match(/tatuag\w+\s+(?:de\s+|no\s+|na\s+|em\s+)?([^\,\.\n]+)/i);
+      if (tatMatch) {
+        tatuagensExtracted = tatMatch[0].trim();
+      }
+    }
   }
 
   // Scars & Particular Signs extraction
@@ -212,8 +258,12 @@ export function analyzeCrimeIntelligenceLocally(
       armasVeiculos = 'Revólver cal. 38';
     } else if (/fuzil|calibre restrito/i.test(text)) {
       armasVeiculos = 'Arma de alto calibre';
+    } else if (/faca|arma\s+branca|l[aâ]mina/i.test(text)) {
+      armasVeiculos = 'Arma branca (faca/lâmina)';
     } else if (/disparo|perfura[çc]/i.test(text)) {
       armasVeiculos = 'Arma de fogo (calibre em apuração)';
+    } else if (/alus[aã]o|m[aã]o\s+sob|simula/i.test(text)) {
+      armasVeiculos = 'Alusão/Simulacro de porte de arma sob as vestes';
     } else {
       armasVeiculos = 'Não informada';
     }
@@ -222,6 +272,12 @@ export function analyzeCrimeIntelligenceLocally(
     if (veicMatch) {
       armasVeiculos += ` | Veículo: ${veicMatch[1].trim()}`;
     }
+  }
+
+  // Accomplices and rivalries detection
+  let desafetosComparsas = '';
+  if (/comparsa|coautor|co-autor|em\s+dupla|dois\s+indiv|trio|bloqueio/i.test(text)) {
+    desafetosComparsas = 'Atuação em concurso de pessoas (comparsas na contenção/bloqueio ou apoio na fuga).';
   }
 
   // 5. Cross-match with Candidates from Database
@@ -298,7 +354,11 @@ export function analyzeCrimeIntelligenceLocally(
 
     // --- B. TATTOOS MATCH (CARPA, PALHAÇO, CORINGA, TEIA, BRAÇO, PESCOÇO, ETC.) ---
     const tatTarget = filterTatNorm || (tatuagensExtracted ? normalizeStr(tatuagensExtracted) : '');
-    if (tatTarget && tatSuspect) {
+    if ((textNorm.includes('PESCOCO') || tatTarget.includes('PESCOCO')) && 
+        (tatSuspect.includes('PESCOCO') || tatSuspect.includes('GARGANTA') || tatSuspect.includes('CERVICAL'))) {
+      score += 45;
+      fatoresConvergentes.push(`Convergência tática de sinal anatômico: Tatuagem no pescoço/região cervical confirmada no prontuário ("${fisicas.tatuagens_detalhes}").`);
+    } else if (tatTarget && tatSuspect) {
       const tatKeywords = ['PALHACO', 'CARPA', 'TEIA', 'CORINGA', 'ESCORPIAO', 'CAVEIRA', 'CRUZ', 'INDIA', 'ESTRELA', 'LAGRIMA', 'SAO JORGE', 'TIGRE', 'DRAGAO', 'BRACO', 'PESCOCO', 'MAO', 'PERNA', 'COSTAS', 'PEITO'];
       const matchedKeywords = tatKeywords.filter(k => tatTarget.includes(k) && tatSuspect.includes(k));
       if (matchedKeywords.length > 0) {
@@ -341,29 +401,54 @@ export function analyzeCrimeIntelligenceLocally(
       }
     }
 
-    // --- D. PHYSICAL TRAITS (SKIN TONE, BODY BUILD, HEIGHT) ---
+    // --- D. PHYSICAL TRAITS (HEIGHT, COMPLEXION, SKIN TONE) ---
+    // Height / Estatura
+    if (alturaNum !== null && fisicas?.altura_estimada) {
+      const diffAlt = Math.abs(fisicas.altura_estimada - alturaNum);
+      if (diffAlt <= 0.05) {
+        score += 25;
+        fatoresConvergentes.push(`Estatura/Altura coincidente: ${fisicas.altura_estimada}m (relatada: ~${alturaNum.toFixed(2)}m).`);
+      } else if (diffAlt <= 0.10) {
+        score += 15;
+        fatoresConvergentes.push(`Estatura aproximada compatível: ${fisicas.altura_estimada}m.`);
+      } else {
+        fatoresDivergentes.push(`Estatura divergente do relato (${fisicas.altura_estimada}m vs ~${alturaNum.toFixed(2)}m).`);
+      }
+    }
+
+    // Complexion / Compleição
+    if (filterCompNorm && compSuspect) {
+      if (compSuspect.includes(filterCompNorm) || filterCompNorm.includes(compSuspect)) {
+        score += 20;
+        fatoresConvergentes.push(`Compleição física compatível: ${fisicas.compleicao}.`);
+      }
+    } else if (compleicaoExtracted && compSuspect) {
+      const compExtNorm = normalizeStr(compleicaoExtracted);
+      if (compSuspect.includes(compExtNorm) || compExtNorm.includes(compSuspect) || 
+          (/MAGR|DELGAD/i.test(compExtNorm) && /MAGR|DELGAD/i.test(compSuspect))) {
+        score += 20;
+        fatoresConvergentes.push(`Compleição física coincidente com o relato: ${fisicas.compleicao}.`);
+      }
+    }
+
+    // Skin Tone / Cor de Pele
     if (filterPeleNorm && peleSuspect) {
       if (peleSuspect.includes(filterPeleNorm) || filterPeleNorm.includes(peleSuspect)) {
-        score += 15;
+        score += 20;
         fatoresConvergentes.push(`Cor de pele compatível: ${fisicas.cor_pele}.`);
       } else {
         fatoresDivergentes.push(`Cor de pele divergente do filtro (Cadastrado: ${fisicas.cor_pele}).`);
       }
     } else if (peleExtracted && peleExtracted !== 'Não especificada' && peleSuspect) {
-      if (normalizeStr(peleExtracted) === peleSuspect || peleSuspect.includes(normalizeStr(peleExtracted))) {
-        score += 10;
-        fatoresConvergentes.push(`Etnia/Pele compatível com o relato: ${fisicas.cor_pele}.`);
+      const peleExtNorm = normalizeStr(peleExtracted);
+      if (peleSuspect.includes(peleExtNorm) || peleExtNorm.includes(peleSuspect) || 
+          (/PRETA|NEGRA/i.test(peleExtNorm) && /PRETA|NEGRA|PARDA/i.test(peleSuspect))) {
+        score += 20;
+        fatoresConvergentes.push(`Tom de pele/etnia compatível com o relato: ${fisicas.cor_pele}.`);
       }
     }
 
-    if (filterCompNorm && compSuspect) {
-      if (compSuspect.includes(filterCompNorm) || filterCompNorm.includes(compSuspect)) {
-        score += 15;
-        fatoresConvergentes.push(`Compleição física compatível: ${fisicas.compleicao}.`);
-      }
-    }
-
-    // --- E. TERRITORIAL / NEIGHBORHOOD MATCH ---
+    // --- E. STREET & TERRITORIAL / NEIGHBORHOOD MATCH ---
     const targetBairro = filterBairroNorm || normalizeStr(bairro);
     const operatesInBairro = enderecos.some((e: any) => {
       const endBairro = normalizeStr(e.bairro);
@@ -376,6 +461,37 @@ export function analyzeCrimeIntelligenceLocally(
     } else if (enderecos.length > 0) {
       score += 10;
       fatoresConvergentes.push(`Atuação territorial mapeada na circunscrição do 35º BPM.`);
+    }
+
+    // Street match (logradouro do fato novo)
+    const streetNorm = normalizeStr(logradouro);
+    if (streetNorm && streetNorm.length > 3 && streetNorm !== 'VIA PUBLICA / LOCAL DO FATO') {
+      const streetTokens = streetNorm.replace(/RUA|AVENIDA|AV\.|TRAVESSA|BECO|ALAMEDA/g, '').trim().split(/\s+/).filter(t => t.length > 3);
+      const matchAddr = enderecos.find((e: any) => {
+        const endLogNorm = normalizeStr(e.logradouro);
+        return streetTokens.some(t => endLogNorm.includes(t)) || (streetNorm.includes('CASSIMIRO') && endLogNorm.includes('CASSIMIRO'));
+      });
+      if (matchAddr) {
+        score += 45;
+        fatoresConvergentes.push(`Endereço de atuação/residência direto na via do fato: "${matchAddr.logradouro}" (${matchAddr.bairro || bairro}).`);
+      }
+    }
+
+    // Escape Route Match (Rota de fuga)
+    if (rotaFugaExtracted) {
+      const fugaNorm = normalizeStr(rotaFugaExtracted);
+      const fugaTokens = fugaNorm.replace(/AVENIDA|AV\.|RUA|SENTIDO|RUMO|DIRECAO/g, '').trim().split(/\s+/).filter(t => t.length > 3);
+      const matchFuga = enderecos.some((e: any) => {
+        const endLogNorm = normalizeStr(e.logradouro);
+        return fugaTokens.some(t => endLogNorm.includes(t)) || (fugaNorm.includes('BONFIM') && endLogNorm.includes('BONFIM'));
+      }) || ocorrencias.some((o: any) => {
+        const ocNorm = normalizeStr(`${o.descricao_fato || ''} ${o.modus_operandi || ''}`);
+        return fugaTokens.some(t => ocNorm.includes(t)) || (fugaNorm.includes('BONFIM') && ocNorm.includes('BONFIM'));
+      });
+      if (matchFuga) {
+        score += 35;
+        fatoresConvergentes.push(`Rota de fuga informada ("${rotaFugaExtracted}") coincide com reduto ou histórico criminal do infrator.`);
+      }
     }
 
     // --- F. GANG / FACTION ALIGNMENT ---
@@ -406,6 +522,18 @@ export function analyzeCrimeIntelligenceLocally(
       fatoresConvergentes.push('Vínculo tático com a célula do Palmital.');
     }
 
+    // Accomplices & Network
+    const comparsas = db.vinculos_comparsas?.filter((v: any) => v.infrator_origem_id === s.id || v.infrator_destino_id === s.id) || [];
+    if (comparsas.length > 0) {
+      fatoresConvergentes.push(`Rede criminal catalogada: ${comparsas.length} comparsa(s) ou vínculo(s) associado(s).`);
+    }
+
+    // Clothing / Vestimentas match
+    if (/BLUSA DE FRIO CINZA|MOLETOM CINZA|AGASALHO CINZA/i.test(textNorm)) {
+      score += 15;
+      fatoresConvergentes.push('Vestimenta relatada (blusa de frio cinza) compatível com modus operandi de ocultação e fuga.');
+    }
+
     // --- G. VEHICLES & WEAPONS USED IN PRIOR CRIMES ---
     const targetVeic = filterVeicNorm || normalizeStr(armasVeiculos);
     if (targetVeic && targetVeic.length > 2) {
@@ -427,9 +555,12 @@ export function analyzeCrimeIntelligenceLocally(
     }
 
     const hasRobberyHistory = ocorrencias.some((o: any) => /roubo|assalto|157/i.test(o.tipificacao_penal || ''));
-    if (hasRobberyHistory && /roubo/i.test(tipificacao)) {
-      score += 20;
-      fatoresConvergentes.push('Reincidência criminal: histórico de crimes patrimoniais violentos (Roubo).');
+    if (hasRobberyHistory && (/roubo/i.test(tipificacao) || /roubo/i.test(textNorm))) {
+      score += 25;
+      fatoresConvergentes.push('Reincidência criminal: histórico de crimes patrimoniais violentos (Roubo Art. 157).');
+      if (/MULHER|FEMININ|PEDESTRE|TRANSEUNTE/i.test(textNorm)) {
+        fatoresConvergentes.push('Modus operandi convergente: abordagem predatória a transeuntes / pedestres.');
+      }
     }
 
     const hasTrafficHistory = ocorrencias.some((o: any) => /tr[aá]fico|entorpecente|33/i.test(o.tipificacao_penal || ''));
@@ -519,11 +650,15 @@ export function analyzeCrimeIntelligenceLocally(
       modus_operandi_resumo: moResumo,
       caracteristicas_declaradas: {
         pele: peleExtracted || 'Não especificada no texto',
+        altura: alturaExtracted || 'Não informada',
+        compleicao: compleicaoExtracted || 'Não informada',
         vestimentas: vestimentasExtracted,
         sinais_particulares: sinaisParticulares,
         tatuagens: tatuagensExtracted || 'Não declaradas',
         cicatrizes: cicatrizesExtracted || 'Não declaradas',
-        armas_veiculos: armasVeiculos
+        armas_veiculos: armasVeiculos,
+        rota_fuga: rotaFugaExtracted || 'Não informada',
+        desafetos_comparsas: desafetosComparsas || 'Não especificados no registro inicial'
       }
     },
     cruzamento_suspeitos: matchedSuspects,

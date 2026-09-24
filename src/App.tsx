@@ -736,13 +736,22 @@ export default function App() {
   };
 
   // Full Integrated Intelligence Analysis (35º BPM Schema: Ocorrência + Cruzamento + Alerta de Reincidência)
-  const handleRunIntelligenceAnalysis = async () => {
-    const hasNarrative = Boolean(narrativeInput && narrativeInput.trim() !== '');
-    const hasFilters = (Object.values(intelligenceFilters) as string[]).some(v => Boolean(v && v.trim()));
+  const handleRunIntelligenceAnalysis = async (customNarrative?: string, customFilters?: typeof intelligenceFilters) => {
+    const textToAnalyze = customNarrative !== undefined ? customNarrative : narrativeInput;
+    const activeFilters = customFilters !== undefined ? customFilters : intelligenceFilters;
+    const hasNarrative = Boolean(textToAnalyze && textToAnalyze.trim() !== '');
+    const hasFilters = (Object.values(activeFilters) as string[]).some(v => Boolean(v && v.trim()));
 
     if (!hasNarrative && !hasFilters) {
       setIntelligenceError('Insira o relato do fato policial ou selecione filtros de características físicas, tatuagens, cicatrizes ou veículos.');
       return;
+    }
+
+    if (customNarrative !== undefined) {
+      setNarrativeInput(customNarrative);
+    }
+    if (customFilters !== undefined) {
+      setIntelligenceFilters(customFilters);
     }
 
     setIsIntelligenceAnalyzing(true);
@@ -754,11 +763,11 @@ export default function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            narrative: narrativeInput,
+            narrative: textToAnalyze,
             lat: selectedCoords?.lat,
             lng: selectedCoords?.lng,
             radius_km: searchRadius,
-            filters: intelligenceFilters
+            filters: activeFilters
           }),
         });
 
@@ -776,10 +785,10 @@ export default function App() {
       // If backend was unreachable or returned non-JSON, run the deterministic intelligence engine locally
       if (!data) {
         data = analyzeCrimeIntelligenceLocally(
-          narrativeInput,
+          textToAnalyze,
           suspects.length > 0 ? suspects : undefined,
           selectedCoords ? { lat: selectedCoords.lat, lng: selectedCoords.lng } : undefined,
-          intelligenceFilters
+          activeFilters
         );
       }
 
@@ -2771,7 +2780,10 @@ export default function App() {
             }`}
           >
             <BrainCircuit className="w-3.5 h-3.5 text-[#60A5FA]" />
-            IA Triagem & Cruzamento
+            <span>Triagem & Cruzamento (Google Policial)</span>
+            <span className="px-1.5 py-0.2 text-[8px] bg-blue-950 text-blue-300 rounded font-black border border-blue-700/80">
+              IA BUSCA
+            </span>
           </button>
           <button
             onClick={() => setActiveTab('orcrim')}
@@ -3009,7 +3021,7 @@ export default function App() {
                       <div className="flex items-center gap-2">
                         <Sparkles className="text-amber-500 w-4 h-4" />
                         <h3 className="font-bold text-zinc-100 text-xs uppercase tracking-widest font-mono">
-                          Mecanismo de Inteligência Tática & Cruzamento Criminal // 35º BPM
+                          GOOGLE DE INTELIGÊNCIA POLICIAL • TRIAGEM & CRUZAMENTO DE FATOS NOVOS // 35º BPM
                         </h3>
                       </div>
                       <div className="flex items-center gap-2">
@@ -3022,19 +3034,19 @@ export default function App() {
                           <span>Nova Consulta / Limpar</span>
                         </button>
                         <span className="text-[9px] font-mono text-amber-400 bg-amber-950/30 border border-amber-800/40 px-2 py-0.5 rounded font-bold">
-                          GEMINI 3.7 FLASH + HEURÍSTICA FORENSE
+                          GEMINI 3.8 FLASH + MOTOR HEURÍSTICO FORENSE
                         </span>
                       </div>
                     </div>
 
-                    <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
-                      Insira o relato da ocorrência policial (B.O., COPOM, SOU) e/ou defina características físicas, tatuagens, cicatrizes e veículos. O sistema processará as evidências, avaliará o nível de alerta territorial e cruzará a base de infratores calculando a probabilidade de autoria.
+                    <p className="text-xs text-zinc-300 mb-3 leading-relaxed">
+                      Insira qualquer relato de <strong className="text-amber-300">Fato Novo policial</strong> (B.O., COPOM, SOU, declaração de testemunha ou vítima). O sistema atua como o <strong className="text-amber-400">Google de Inteligência Policial</strong>, varrendo todos os registros de infratores e ocorrências para cruzar modus operandi, características físicas (altura, compleição, cor da pele), tatuagens e suas localizações anatômicas (pescoço, braço, mão), vestimentas, rota de fuga, veículos, área de atuação e comparsas.
                     </p>
 
                     <div className="space-y-3">
                       <div>
                         <label className="block text-[10px] font-mono text-zinc-400 uppercase font-bold mb-1 flex items-center justify-between">
-                          <span>Narrativa do Boletim de Ocorrência / COPOM</span>
+                          <span>Narrativa do Fato Novo / Boletim de Ocorrência / COPOM</span>
                           {narrativeInput && (
                             <button
                               onClick={() => setNarrativeInput('')}
@@ -3048,7 +3060,7 @@ export default function App() {
                           value={narrativeInput}
                           onChange={(e) => setNarrativeInput(e.target.value)}
                           className="w-full min-h-28 bg-[#0A0A0B] text-zinc-200 p-3 rounded border border-zinc-800 focus:outline-none focus:border-amber-500 text-xs font-mono leading-relaxed resize-y focus:ring-1 focus:ring-amber-500/20"
-                          placeholder="Cole aqui a narrativa policial, transcrição do chamado COPOM ou descrição dos fatos..."
+                          placeholder="Cole aqui a narrativa do fato novo (Ex: Houve um roubo na rua Cassimiro de Abreu, onde a vitima mulher, alegou que foi abordada por um individuo magro, preto, altura aproximada de 1,75, blusa de frio cinza, tatuagem no pescoço e evadiu sentido Av. Senhor do Bonfim)..."
                         />
                       </div>
 
@@ -3281,7 +3293,7 @@ export default function App() {
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800/80 pt-3">
                       <div className="flex flex-wrap gap-2">
                         <button
-                          onClick={handleRunIntelligenceAnalysis}
+                          onClick={() => handleRunIntelligenceAnalysis()}
                           disabled={isIntelligenceAnalyzing}
                           className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-black font-black rounded text-xs transition uppercase flex items-center justify-center gap-1.5 font-mono shadow-md shadow-amber-500/20 cursor-pointer"
                         >
@@ -3316,38 +3328,60 @@ export default function App() {
                         </button>
                       </div>
 
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1.5 items-center">
                         <button
                           onClick={() => {
-                            setNarrativeInput(
-                              'ACIONADOS PELO COPOM PARA ATENDIMENTO DE UMA CHAMADA DE HOMICÍDIO NA RUA DOS PEQUIZEIROS 187, BAIRRO BOM DESTINO - SANTA LUZIA. NO LOCAL DEPARAMOS COM UM CORPO CAÍDO AO SOLO SEM VIDA, COM PERFURAÇÕES PROVENIENTES DE DISPAROS DE ARMA DE FOGO. TESTEMUNHAS RELATAM AÇÃO DE DOIS INDIVÍDUOS EM UMA MOTOCICLETA ESCURA ENVOLVIDOS EM GUERRA DE FACÇÕES.'
-                            );
-                            setIntelligenceFilters({
+                            const exampleCase = 'Houve um roubo na rua Cassimiro de Abreu, onde a vitima mulher, alegou que foi abordada por um individuo magro, preto, altura aproximada de 1,75, blusa de frio cinza, tatuagem no pescoço e evadiu sentido Av. Senhor do Bonfim.';
+                            setNarrativeInput(exampleCase);
+                            const updatedFilters = {
+                              ...intelligenceFilters,
+                              cor_pele: 'Negra',
+                              compleicao: 'Delgada',
+                              tatuagens: 'Pescoço',
+                              veiculo: '',
+                              bairro: 'São Benedito'
+                            };
+                            setIntelligenceFilters(updatedFilters);
+                            handleRunIntelligenceAnalysis(exampleCase, updatedFilters);
+                          }}
+                          className="px-2.5 py-1.5 bg-gradient-to-r from-amber-500/25 to-amber-600/30 hover:from-amber-500/40 hover:to-amber-600/50 border border-amber-500/60 text-amber-200 hover:text-white text-[11px] rounded transition font-mono font-bold cursor-pointer flex items-center gap-1.5 shadow"
+                          title="Clique para testar o fato novo: Roubo na Rua Cassimiro de Abreu (Magro, Preto, 1.75m, Blusa Cinza, Tatuagem no Pescoço, Fuga Av. Bonfim)"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Fato Novo: Roubo Cassimiro de Abreu (Pescoço / Blusa Cinza / Av. Bonfim)</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            const homicideCase = 'ACIONADOS PELO COPOM PARA ATENDIMENTO DE UMA CHAMADA DE HOMICÍDIO NA RUA DOS PEQUIZEIROS 187, BAIRRO BOM DESTINO - SANTA LUZIA. NO LOCAL DEPARAMOS COM UM CORPO CAÍDO AO SOLO SEM VIDA, COM PERFURAÇÕES PROVENIENTES DE DISPAROS DE ARMA DE FOGO. TESTEMUNHAS RELATAM AÇÃO DE DOIS INDIVÍDUOS EM UMA MOTOCICLETA ESCURA ENVOLVIDOS EM GUERRA DE FACÇÕES.';
+                            setNarrativeInput(homicideCase);
+                            const homicideFilters = {
                               ...intelligenceFilters,
                               bairro: 'Bom Destino',
                               veiculo: 'Motocicleta escura'
-                            });
+                            };
+                            setIntelligenceFilters(homicideFilters);
+                            handleRunIntelligenceAnalysis(homicideCase, homicideFilters);
                           }}
                           className="px-2 py-1 bg-amber-950/30 hover:bg-amber-900/40 border border-amber-800/50 text-amber-300 text-[10px] rounded transition font-mono cursor-pointer"
                         >
                           Exemplo Homicídio (Bom Destino)
                         </button>
                         <button
-                          onClick={() =>
-                            setNarrativeInput(
-                              'Na noite de ontem, um caminhão contendo televisores de última geração foi interceptado por criminosos armados na região de Heliópolis. O motorista relatou que foi abordado de forma agressiva por dois homens utilizando uma van Sprinter branca. O líder da quadrilha era careca de compleição atlética e possuía uma tatuagem visível de palhaço no braço, proferindo ameaças verbais com uma pistola calibre 380, auxiliado por um comparsa alto conhecido como Neguinho.'
-                            )
-                          }
+                          onClick={() => {
+                            const cargoCase = 'Na noite de ontem, um caminhão contendo televisores de última geração foi interceptado por criminosos armados na região de Heliópolis. O motorista relatou que foi abordado de forma agressiva por dois homens utilizando uma van Sprinter branca. O líder da quadrilha era careca de compleição atlética e possuía uma tatuagem visível de palhaço no braço, proferindo ameaças verbais com uma pistola calibre 380, auxiliado por um comparsa alto conhecido como Neguinho.';
+                            setNarrativeInput(cargoCase);
+                            handleRunIntelligenceAnalysis(cargoCase);
+                          }}
                           className="px-2 py-1 bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-[10px] rounded transition font-mono cursor-pointer"
                         >
                           Exemplo Carga (Palhaço/Armado)
                         </button>
                         <button
-                          onClick={() =>
-                            setNarrativeInput(
-                              'Dois indivíduos numa motocicleta Honda preta assaltaram um estudante na passarela do Brás. O motorista era de cor parda, vestia blusa cinza e fazia alusão de portar arma sob o casaco. O rapaz que estava na garupa foi identificado como "Didi", de dente de ouro frontal superior, o qual recolheu os celulares das vítimas ameaçando-as verbalmente antes de fugir.'
-                            )
-                          }
+                          onClick={() => {
+                            const transeunteCase = 'Dois indivíduos numa motocicleta Honda preta assaltaram um estudante na passarela do Brás. O motorista era de cor parda, vestia blusa cinza e fazia alusão de portar arma sob o casaco. O rapaz que estava na garupa foi identificado como "Didi", de dente de ouro frontal superior, o qual recolheu os celulares das vítimas ameaçando-as verbalmente antes de fugir.';
+                            setNarrativeInput(transeunteCase);
+                            handleRunIntelligenceAnalysis(transeunteCase);
+                          }}
                           className="px-2 py-1 bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-[10px] rounded transition font-mono cursor-pointer"
                         >
                           Exemplo Transeunte (Didi)
@@ -3484,7 +3518,25 @@ export default function App() {
                                   <span className="text-[9px] text-zinc-500 block">Vestimentas</span>
                                   <span className="text-zinc-200 font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.vestimentas || 'Não declarada'}</span>
                                 </div>
+                                {intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.altura && (
+                                  <div>
+                                    <span className="text-[9px] text-zinc-500 block">Estatura Estimada</span>
+                                    <span className="text-amber-300 font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas.altura}</span>
+                                  </div>
+                                )}
+                                {intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.compleicao && (
+                                  <div>
+                                    <span className="text-[9px] text-zinc-500 block">Compleição Física</span>
+                                    <span className="text-zinc-200 font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas.compleicao}</span>
+                                  </div>
+                                )}
                               </div>
+                              {intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.rota_fuga && intelligenceResult.ocorrencia_processada.caracteristicas_declaradas.rota_fuga !== 'Não informada' && (
+                                <div className="bg-amber-950/20 p-1.5 rounded border border-amber-900/30">
+                                  <span className="text-[9px] text-amber-400 block uppercase font-bold">Rota de Fuga Indicada</span>
+                                  <span className="text-zinc-200 text-xs font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas.rota_fuga}</span>
+                                </div>
+                              )}
                               {(intelligenceResult.ocorrencia_processada.caracteristicas_declaradas as any)?.tatuagens && (
                                 <div>
                                   <span className="text-[9px] text-zinc-500 block">Tatuagens Declaradas</span>
@@ -3505,6 +3557,12 @@ export default function App() {
                                 <span className="text-[9px] text-zinc-500 block">Armas & Veículos</span>
                                 <span className="text-red-300 text-xs font-semibold">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.armas_veiculos || 'Nenhum'}</span>
                               </div>
+                              {intelligenceResult.ocorrencia_processada.caracteristicas_declaradas?.desafetos_comparsas && (
+                                <div>
+                                  <span className="text-[9px] text-zinc-500 block">Comparsas / Desafetos</span>
+                                  <span className="text-zinc-300 text-xs">{intelligenceResult.ocorrencia_processada.caracteristicas_declaradas.desafetos_comparsas}</span>
+                                </div>
+                              )}
                             </div>
 
                             <button

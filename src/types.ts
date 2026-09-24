@@ -130,9 +130,15 @@ export interface OcorrenciaProcessada {
   modus_operandi_resumo: string;
   caracteristicas_declaradas: {
     pele: string;
+    altura?: string;
+    compleicao?: string;
     vestimentas?: string;
+    tatuagens?: string;
+    cicatrizes?: string;
     sinais_particulares: string;
     armas_veiculos: string;
+    rota_fuga?: string;
+    desafetos_comparsas?: string;
   };
 }
 
