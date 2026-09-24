@@ -1018,21 +1018,34 @@ export default function App() {
         alert('Preencha ao menos o Número do B.O. / REDS e a Tipificação Penal.');
         return;
       }
+
+      const existingGlobal = matchOccurrenceByBo(suspectNewOcData.numero_bo, occurrences);
+      const boClean = normalizeBo(suspectNewOcData.numero_bo);
+
+      const isAlreadyInList = suspectOccurrencesList.some(
+        (item) => (item.numero_bo && normalizeBo(item.numero_bo) === boClean) || (existingGlobal && item.ocorrencia_id === existingGlobal.id)
+      );
+      if (isAlreadyInList) {
+        alert(`O B.O. Nº ${suspectNewOcData.numero_bo} já foi adicionado à lista deste infrator.`);
+        return;
+      }
+
       setSuspectOccurrencesList((prev) => [
         ...prev,
         {
           tempId: `tmp-${Date.now()}-${Math.random()}`,
-          isNew: true,
-          numero_bo: suspectNewOcData.numero_bo.trim(),
-          tipificacao_penal: suspectNewOcData.tipificacao_penal.trim(),
-          papel_no_crime: suspectOcPapel,
-          data_hora: suspectNewOcData.data_hora,
-          descricao_fato: suspectNewOcData.descricao_fato,
-          modus_operandi: suspectNewOcData.modus_operandi,
-          armas_utilizadas: suspectNewOcData.armas_utilizadas,
-          veiculo_utilizado: suspectNewOcData.veiculo_utilizado,
-          lat: suspectNewOcData.lat,
-          lng: suspectNewOcData.lng,
+          isNew: !existingGlobal,
+          ocorrencia_id: existingGlobal ? existingGlobal.id : undefined,
+          numero_bo: existingGlobal ? existingGlobal.numero_bo : suspectNewOcData.numero_bo.trim(),
+          tipificacao_penal: existingGlobal ? existingGlobal.tipificacao_penal : suspectNewOcData.tipificacao_penal.trim(),
+          papel_no_crime: suspectOcPapel || 'Autor',
+          data_hora: existingGlobal?.data_hora || suspectNewOcData.data_hora,
+          descricao_fato: existingGlobal?.descricao_fato || suspectNewOcData.descricao_fato,
+          modus_operandi: existingGlobal?.modus_operandi || suspectNewOcData.modus_operandi,
+          armas_utilizadas: existingGlobal?.armas_utilizadas || suspectNewOcData.armas_utilizadas,
+          veiculo_utilizado: existingGlobal?.veiculo_utilizado || suspectNewOcData.veiculo_utilizado,
+          lat: existingGlobal?.geom_crime?.lat !== undefined ? String(existingGlobal.geom_crime.lat) : suspectNewOcData.lat,
+          lng: existingGlobal?.geom_crime?.lng !== undefined ? String(existingGlobal.geom_crime.lng) : suspectNewOcData.lng,
         },
       ]);
       setSuspectNewOcData({
@@ -1046,7 +1059,137 @@ export default function App() {
         lat: '-19.7712',
         lng: '-43.8564',
       });
+      setToastMessage(
+        existingGlobal
+          ? `B.O. Nº ${existingGlobal.numero_bo} vinculado à ficha sem gerar duplicidade!`
+          : `Ocorrência B.O. Nº ${suspectNewOcData.numero_bo} adicionada à lista.`
+      );
+      setTimeout(() => setToastMessage(null), 3500);
     }
+  };
+
+  // Helper to normalize BO/REDS alphanumeric characters for smart matching
+  const normalizeBo = (bo?: string): string => {
+    if (!bo) return '';
+    return bo.toLowerCase().replace(/[^a-z0-9]/g, '');
+  };
+
+  // Intelligent matching of BO query against existing occurrences (handles prefixes, hyphens, and casing)
+  const matchOccurrenceByBo = (query: string, list: OcorrenciaCriminal[]): OcorrenciaCriminal | null => {
+    const raw = (query || '').trim();
+    if (!raw || raw.length < 3) return null;
+    const qLower = raw.toLowerCase();
+
+    // 1. Direct exact match
+    const exact = list.find((o) => (o.numero_bo || '').trim().toLowerCase() === qLower);
+    if (exact) return exact;
+
+    // 2. Normalized alphanumeric match
+    const qNorm = qLower.replace(/[^a-z0-9]/g, '');
+    if (qNorm.length >= 4) {
+      const normMatch = list.find((o) => {
+        const oNorm = (o.numero_bo || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return oNorm === qNorm;
+      });
+      if (normMatch) return normMatch;
+
+      // 3. Match without prefix 'reds' or 'bo'
+      const qCore = qNorm.replace(/^(reds|bo|bol)/, '');
+      if (qCore.length >= 5) {
+        const coreMatch = list.find((o) => {
+          const oNorm = (o.numero_bo || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const oCore = oNorm.replace(/^(reds|bo|bol)/, '');
+          return oCore === qCore || (oCore.length >= 6 && oCore.includes(qCore)) || (qCore.length >= 6 && qCore.includes(oCore));
+        });
+        if (coreMatch) return coreMatch;
+      }
+    }
+
+    return null;
+  };
+
+  // Check if typed B.O. in suspect registration form already exists in system database
+  const suspectMatchingExistingOc = React.useMemo(() => {
+    return matchOccurrenceByBo(suspectNewOcData.numero_bo, occurrences);
+  }, [suspectNewOcData.numero_bo, occurrences]);
+
+  // Check if typed B.O. in suspect drawer already exists in system database
+  const directMatchingExistingOc = React.useMemo(() => {
+    return matchOccurrenceByBo(directNewOcData.numero_bo, occurrences);
+  }, [directNewOcData.numero_bo, occurrences]);
+
+  // Check if typed B.O. in general incident form already exists in system database
+  const incidentMatchingExistingOc = React.useMemo(() => {
+    return matchOccurrenceByBo(newIncidentForm.numero_bo, occurrences);
+  }, [newIncidentForm.numero_bo, occurrences]);
+
+  // Copy data from existing occurrence and link directly to suspect without creating duplicate occurrence
+  const handleCopyAndLinkExistingOccurrenceDirectly = (oc: OcorrenciaCriminal) => {
+    const isAlreadyInList = suspectOccurrencesList.some(
+      (item) => item.ocorrencia_id === oc.id || (item.numero_bo && normalizeBo(item.numero_bo) === normalizeBo(oc.numero_bo))
+    );
+
+    if (isAlreadyInList) {
+      alert(`O B.O. Nº ${oc.numero_bo} já foi adicionado à lista deste infrator.`);
+      return;
+    }
+
+    setSuspectOccurrencesList((prev) => [
+      ...prev,
+      {
+        tempId: `tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        isNew: false,
+        ocorrencia_id: oc.id,
+        numero_bo: oc.numero_bo,
+        tipificacao_penal: oc.tipificacao_penal,
+        papel_no_crime: suspectOcPapel || 'Autor',
+        data_hora: oc.data_hora,
+        descricao_fato: oc.descricao_fato,
+        modus_operandi: oc.modus_operandi,
+        armas_utilizadas: oc.armas_utilizadas,
+        veiculo_utilizado: oc.veiculo_utilizado,
+        lat: oc.geom_crime?.lat !== undefined ? String(oc.geom_crime.lat) : '-19.7712',
+        lng: oc.geom_crime?.lng !== undefined ? String(oc.geom_crime.lng) : '-43.8564',
+      },
+    ]);
+
+    // Clear input fields and dismiss alert cleanly
+    setSuspectNewOcData({
+      numero_bo: '',
+      tipificacao_penal: 'Roubo a Mão Armada',
+      data_hora: new Date().toISOString().slice(0, 16),
+      descricao_fato: '',
+      modus_operandi: '',
+      armas_utilizadas: 'Pistola 9mm',
+      veiculo_utilizado: 'Motocicleta',
+      lat: '-19.7712',
+      lng: '-43.8564',
+    });
+
+    setToastMessage(`Dados do B.O. Nº ${oc.numero_bo} copiados e vinculados ao infrator sem gerar duplicidade!`);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  // Pre-fill fields only so officer can inspect before saving
+  const handleCopyExistingOccurrenceFields = (oc: OcorrenciaCriminal) => {
+    setSuspectNewOcData({
+      numero_bo: oc.numero_bo || '',
+      tipificacao_penal: oc.tipificacao_penal || 'Roubo a Mão Armada',
+      data_hora: oc.data_hora ? new Date(oc.data_hora).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+      descricao_fato: oc.descricao_fato || '',
+      modus_operandi: oc.modus_operandi || '',
+      armas_utilizadas: oc.armas_utilizadas || '',
+      veiculo_utilizado: oc.veiculo_utilizado || '',
+      lat: oc.geom_crime?.lat !== undefined ? String(oc.geom_crime.lat) : ((oc as any).lat || '-19.7712'),
+      lng: oc.geom_crime?.lng !== undefined ? String(oc.geom_crime.lng) : ((oc as any).lng || '-43.8564'),
+    });
+    setToastMessage(`Campos preenchidos com os dados existentes do B.O. Nº ${oc.numero_bo}.`);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Backwards compatible alias
+  const handleCopyAndLinkExistingOccurrence = (oc: OcorrenciaCriminal) => {
+    handleCopyAndLinkExistingOccurrenceDirectly(oc);
   };
 
   // Link occurrence directly from the other suspects / global picker into registration list
@@ -1960,24 +2103,26 @@ export default function App() {
       // Collect all occurrences to link including any unadded draft in the input fields
       const occurrencesToLink = [...suspectOccurrencesList];
       if (suspectNewOcData.numero_bo.trim() && suspectNewOcData.tipificacao_penal.trim()) {
-        const boNorm = suspectNewOcData.numero_bo.trim().toLowerCase();
+        const existingGlobal = matchOccurrenceByBo(suspectNewOcData.numero_bo, occurrences);
+        const boNorm = normalizeBo(suspectNewOcData.numero_bo);
         const exists = occurrencesToLink.some(
-          (o) => (o.numero_bo || '').trim().toLowerCase() === boNorm
+          (o) => (o.numero_bo && normalizeBo(o.numero_bo) === boNorm) || (existingGlobal && o.ocorrencia_id === existingGlobal.id)
         );
         if (!exists) {
           occurrencesToLink.push({
             tempId: `tmp-${Date.now()}`,
-            isNew: true,
-            numero_bo: suspectNewOcData.numero_bo.trim(),
-            tipificacao_penal: suspectNewOcData.tipificacao_penal.trim(),
+            isNew: !existingGlobal,
+            ocorrencia_id: existingGlobal ? existingGlobal.id : undefined,
+            numero_bo: existingGlobal ? existingGlobal.numero_bo : suspectNewOcData.numero_bo.trim(),
+            tipificacao_penal: existingGlobal ? existingGlobal.tipificacao_penal : suspectNewOcData.tipificacao_penal.trim(),
             papel_no_crime: suspectOcPapel || 'Autor',
-            data_hora: suspectNewOcData.data_hora || new Date().toISOString(),
-            descricao_fato: suspectNewOcData.descricao_fato || suspectNewOcData.modus_operandi || '',
-            modus_operandi: suspectNewOcData.modus_operandi || '',
-            armas_utilizadas: suspectNewOcData.armas_utilizadas || '',
-            veiculo_utilizado: suspectNewOcData.veiculo_utilizado || '',
-            lat: suspectNewOcData.lat,
-            lng: suspectNewOcData.lng,
+            data_hora: existingGlobal?.data_hora || suspectNewOcData.data_hora || new Date().toISOString(),
+            descricao_fato: existingGlobal?.descricao_fato || suspectNewOcData.descricao_fato || suspectNewOcData.modus_operandi || '',
+            modus_operandi: existingGlobal?.modus_operandi || suspectNewOcData.modus_operandi || '',
+            armas_utilizadas: existingGlobal?.armas_utilizadas || suspectNewOcData.armas_utilizadas || '',
+            veiculo_utilizado: existingGlobal?.veiculo_utilizado || suspectNewOcData.veiculo_utilizado || '',
+            lat: existingGlobal?.geom_crime?.lat !== undefined ? String(existingGlobal.geom_crime.lat) : suspectNewOcData.lat,
+            lng: existingGlobal?.geom_crime?.lng !== undefined ? String(existingGlobal.geom_crime.lng) : suspectNewOcData.lng,
           });
         }
       }
@@ -4499,15 +4644,27 @@ export default function App() {
                               ) : (
                                 <>
                                   <div>
-                                    <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
-                                      Número do B.O. / REDS *
-                                    </label>
+                                    <div className="flex items-center justify-between mb-1">
+                                      <label className="text-[9px] uppercase text-zinc-400 font-bold block">
+                                        Número do B.O. / REDS *
+                                      </label>
+                                      {suspectMatchingExistingOc && (
+                                        <span className="text-[9px] font-bold text-amber-400 flex items-center gap-1 font-mono animate-pulse">
+                                          <AlertTriangle className="w-3 h-3 text-amber-400" />
+                                          B.O. Encontrado!
+                                        </span>
+                                      )}
+                                    </div>
                                     <input
                                       type="text"
                                       placeholder="Ex: REDS-2026-00458921-001"
                                       value={suspectNewOcData.numero_bo}
                                       onChange={(e) => setSuspectNewOcData({ ...suspectNewOcData, numero_bo: e.target.value })}
-                                      className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs text-zinc-200 focus:outline-none"
+                                      className={`w-full bg-[#0A0A0B] border rounded p-2 text-xs text-zinc-200 focus:outline-none transition font-mono ${
+                                        suspectMatchingExistingOc
+                                          ? 'border-amber-500 ring-1 ring-amber-500/50 text-amber-200 bg-amber-950/20'
+                                          : 'border-zinc-800'
+                                      }`}
                                     />
                                   </div>
                                   <div>
@@ -4537,6 +4694,159 @@ export default function App() {
                                       <option value="Outros">Outros / Não Especificado</option>
                                     </select>
                                   </div>
+
+                                  {/* ALERTA DE B.O. EXISTENTE & OPÇÕES PARA COPIAR REGISTRO JÁ PREENCHIDO (ANTI-DUPLICIDADE) */}
+                                  {suspectMatchingExistingOc && (() => {
+                                    const isAlreadyInList = suspectOccurrencesList.some(
+                                      (item) => item.ocorrencia_id === suspectMatchingExistingOc.id || (item.numero_bo && normalizeBo(item.numero_bo) === normalizeBo(suspectMatchingExistingOc.numero_bo))
+                                    );
+
+                                    if (isAlreadyInList) {
+                                      return (
+                                        <div className="sm:col-span-3 bg-[#0A1610] border-2 border-emerald-500/80 p-3.5 rounded-lg shadow-xl space-y-2.5">
+                                          <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2.5">
+                                              <div className="p-1.5 bg-emerald-500/20 rounded border border-emerald-500/40">
+                                                <CheckCircle className="w-4 h-4 text-emerald-400" />
+                                              </div>
+                                              <div>
+                                                <h4 className="text-xs font-bold text-emerald-300 uppercase tracking-wider font-mono">
+                                                  B.O. / REDS JÁ ADICIONADO À FICHA DESTE INFRATOR!
+                                                </h4>
+                                                <p className="text-[10px] text-zinc-400 font-mono">
+                                                  Este boletim já está incluído na lista abaixo para vínculo automático ao salvar.
+                                                </p>
+                                              </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
+                                                Nº {suspectMatchingExistingOc.numero_bo}
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={() => setSuspectNewOcData({ ...suspectNewOcData, numero_bo: '' })}
+                                                className="px-2 py-0.5 bg-zinc-850 hover:bg-zinc-750 text-zinc-300 text-[10px] rounded transition flex items-center gap-1 cursor-pointer font-mono"
+                                              >
+                                                <X className="w-3 h-3" /> Limpar
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+
+                                    const linkedSuspects = getLinkedSuspectsForOccurrence(suspectMatchingExistingOc);
+
+                                    return (
+                                      <div className="sm:col-span-3 bg-[#17130A] border-2 border-amber-500/90 p-4 rounded-lg shadow-2xl space-y-3 animate-fadeIn">
+                                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/30 pb-2.5">
+                                          <div className="flex items-center gap-2.5">
+                                            <div className="p-2 bg-amber-500/20 rounded border border-amber-500/50 shadow-inner">
+                                              <AlertTriangle className="w-5 h-5 text-amber-400 animate-pulse" />
+                                            </div>
+                                            <div>
+                                              <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider font-mono flex items-center gap-2">
+                                                <span>ALERTA ANTI-DUPLICIDADE: B.O. / REDS JÁ CADASTRADO NO SISTEMA!</span>
+                                              </h4>
+                                              <p className="text-[10px] text-zinc-400 font-mono">
+                                                Este número já consta no armazenamento central. Para evitar duplicidade de registros, copie o registro já preenchido.
+                                              </p>
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 font-bold tracking-wider">
+                                              Nº {suspectMatchingExistingOc.numero_bo}
+                                            </span>
+                                            <span className="text-[9px] font-bold uppercase bg-zinc-900 border border-zinc-700 text-zinc-400 px-2 py-1 rounded">
+                                              Registro Central
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        {/* Resumo do B.O. existente */}
+                                        <div className="bg-[#090B10] border border-amber-500/25 rounded p-3 text-xs text-zinc-300 font-mono space-y-2">
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="text-zinc-500 uppercase text-[10px] font-bold">Crime / Tipificação:</span>
+                                              <span className="font-bold text-amber-300">{suspectMatchingExistingOc.tipificacao_penal}</span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="text-zinc-500 uppercase text-[10px] font-bold">Data do Fato:</span>
+                                              <span className="text-zinc-300">{new Date(suspectMatchingExistingOc.data_hora).toLocaleString('pt-BR')}</span>
+                                            </div>
+                                          </div>
+
+                                          {suspectMatchingExistingOc.modus_operandi && (
+                                            <div className="text-[11px] text-zinc-300 pt-1 border-t border-zinc-850">
+                                              <strong className="text-zinc-500 uppercase text-[10px]">Modus Operandi: </strong>
+                                              <span className="italic">{suspectMatchingExistingOc.modus_operandi}</span>
+                                            </div>
+                                          )}
+
+                                          {(suspectMatchingExistingOc.armas_utilizadas || suspectMatchingExistingOc.veiculo_utilizado) && (
+                                            <div className="flex flex-wrap gap-4 text-[10px] text-zinc-400 pt-1 border-t border-zinc-850">
+                                              {suspectMatchingExistingOc.armas_utilizadas && (
+                                                <span><strong className="text-zinc-500 uppercase">Armas:</strong> {suspectMatchingExistingOc.armas_utilizadas}</span>
+                                              )}
+                                              {suspectMatchingExistingOc.veiculo_utilizado && (
+                                                <span><strong className="text-zinc-500 uppercase">Veículo:</strong> {suspectMatchingExistingOc.veiculo_utilizado}</span>
+                                              )}
+                                            </div>
+                                          )}
+
+                                          {linkedSuspects.length > 0 && (
+                                            <div className="text-[10px] text-zinc-400 pt-1.5 border-t border-zinc-850 flex flex-wrap items-center gap-1.5">
+                                              <span className="text-zinc-500 font-bold uppercase">Infratores já vinculados neste B.O.:</span>
+                                              {linkedSuspects.map((l) => (
+                                                <span key={l.id} className="px-1.5 py-0.5 rounded bg-zinc-900 text-amber-300 font-mono text-[9px] border border-zinc-700">
+                                                  {l.nome} ({l.papel})
+                                                </span>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        {/* Ações de Cópia e Vinculação Anti-Duplicidade */}
+                                        <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
+                                          <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90 font-mono">
+                                            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                                            <span>Selecione a opção desejada para reaproveitar os dados sem duplicidade:</span>
+                                          </div>
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => handleCopyAndLinkExistingOccurrenceDirectly(suspectMatchingExistingOc)}
+                                              className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black font-extrabold text-xs uppercase rounded transition flex items-center gap-1.5 cursor-pointer font-mono shadow-lg shadow-amber-500/20"
+                                              title="Copia os dados e vincula diretamente à ficha do infrator sem gerar duplicidade de B.O."
+                                            >
+                                              <Copy className="w-3.5 h-3.5 stroke-[2.5]" />
+                                              <Link2 className="w-3.5 h-3.5 stroke-[2.5]" />
+                                              <span>Copiar Registro Já Preenchido & Vincular</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={() => handleCopyExistingOccurrenceFields(suspectMatchingExistingOc)}
+                                              className="px-3 py-2 bg-zinc-850 hover:bg-zinc-800 text-amber-300 border border-amber-500/40 text-xs font-bold uppercase rounded transition flex items-center gap-1.5 cursor-pointer font-mono"
+                                              title="Preenche os campos abaixo com os dados do registro existente para você revisar"
+                                            >
+                                              <Sliders className="w-3.5 h-3.5" />
+                                              <span>Apenas Preencher Campos</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={() => setSuspectNewOcData({ ...suspectNewOcData, numero_bo: '' })}
+                                              className="px-2.5 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 text-xs rounded transition flex items-center gap-1 cursor-pointer font-mono"
+                                              title="Limpar número digitado"
+                                            >
+                                              <X className="w-3.5 h-3.5" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
                                 </>
                               )}
                             </div>
@@ -4759,14 +5069,26 @@ export default function App() {
                       
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                          <label className="text-[9px] uppercase text-zinc-500 font-bold block mb-1">Número do B.O. / REDS *</label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[9px] uppercase text-zinc-500 font-bold block">Número do B.O. / REDS *</label>
+                            {incidentMatchingExistingOc && (
+                              <span className="text-[9px] font-bold text-amber-400 bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.5 rounded flex items-center gap-1 font-mono animate-pulse">
+                                <AlertTriangle className="w-3 h-3 text-amber-400" />
+                                B.O. Já Cadastrado!
+                              </span>
+                            )}
+                          </div>
                           <input
                             type="text"
                             required
                             placeholder="Ex: REDS-2026-00458921-001"
                             value={newIncidentForm.numero_bo}
                             onChange={(e) => setNewIncidentForm({ ...newIncidentForm, numero_bo: e.target.value })}
-                            className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none focus:border-amber-500 text-zinc-200"
+                            className={`w-full bg-[#0A0A0B] border rounded p-2 text-xs focus:outline-none transition font-mono ${
+                              incidentMatchingExistingOc
+                                ? 'border-amber-500 ring-2 ring-amber-500/50 text-amber-200 bg-amber-950/25 font-bold'
+                                : 'border-zinc-800 text-zinc-200'
+                            }`}
                           />
                         </div>
                         <div>
@@ -4920,7 +5242,78 @@ export default function App() {
                           />
                         </div>
 
-                        {/* FERRAMENTA: Vincular Infrator ao Registro Policial */}
+                        {/* ALERTA DE B.O. EXISTENTE & BOTÃO PARA COPIAR REGISTRO JÁ PREENCHIDO (ANTI-DUPLICIDADE) */}
+                        {incidentMatchingExistingOc && (
+                          <div className="md:col-span-3 bg-[#17130A] border-2 border-amber-500/90 p-4 rounded-lg shadow-xl space-y-3 font-mono animate-fadeIn">
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/30 pb-2">
+                              <div className="flex items-center gap-2">
+                                <div className="p-1.5 bg-amber-500/20 rounded border border-amber-500/40">
+                                  <AlertTriangle className="w-4 h-4 text-amber-400 animate-pulse" />
+                                </div>
+                                <div>
+                                  <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                                    B.O. / REDS JÁ CONSTA NO ARMAZENAMENTO CENTRAL!
+                                  </h4>
+                                  <p className="text-[10px] text-zinc-400">
+                                    Este número de boletim já possui registro cadastrado na base de dados policial.
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 font-bold">
+                                Nº {incidentMatchingExistingOc.numero_bo}
+                              </span>
+                            </div>
+
+                            <div className="bg-[#090B10] border border-amber-500/20 rounded p-2.5 text-xs text-zinc-300 space-y-1.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-amber-300 font-bold">Crime: {incidentMatchingExistingOc.tipificacao_penal}</span>
+                                <span className="text-[10px] text-zinc-400">Data: {new Date(incidentMatchingExistingOc.data_hora).toLocaleString('pt-BR')}</span>
+                              </div>
+                              {incidentMatchingExistingOc.modus_operandi && (
+                                <p className="text-[11px] text-zinc-300 italic"><strong className="text-zinc-500 uppercase text-[10px]">Modus Operandi:</strong> {incidentMatchingExistingOc.modus_operandi}</p>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                              <span className="text-[10px] text-amber-300 flex items-center gap-1">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Copie os dados para não gerar duplicidade de B.O. no armazenamento:</span>
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setNewIncidentForm({
+                                      ...newIncidentForm,
+                                      numero_bo: incidentMatchingExistingOc.numero_bo,
+                                      tipificacao_penal: incidentMatchingExistingOc.tipificacao_penal || 'Roubo a Mão Armada',
+                                      data_hora: incidentMatchingExistingOc.data_hora ? new Date(incidentMatchingExistingOc.data_hora).toISOString().slice(0, 16) : newIncidentForm.data_hora,
+                                      descricao_fato: incidentMatchingExistingOc.descricao_fato || '',
+                                      modus_operandi: incidentMatchingExistingOc.modus_operandi || '',
+                                      armas_utilizadas: incidentMatchingExistingOc.armas_utilizadas || '',
+                                      veiculo_utilizado: incidentMatchingExistingOc.veiculo_utilizado || '',
+                                      lat: incidentMatchingExistingOc.geom_crime?.lat !== undefined ? String(incidentMatchingExistingOc.geom_crime.lat) : newIncidentForm.lat,
+                                      lng: incidentMatchingExistingOc.geom_crime?.lng !== undefined ? String(incidentMatchingExistingOc.geom_crime.lng) : newIncidentForm.lng,
+                                    });
+                                    setToastMessage(`Dados do B.O. Nº ${incidentMatchingExistingOc.numero_bo} copiados para o formulário.`);
+                                    setTimeout(() => setToastMessage(null), 3500);
+                                  }}
+                                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs uppercase rounded transition flex items-center gap-1.5 cursor-pointer shadow"
+                                >
+                                  <Copy className="w-3.5 h-3.5 stroke-[2.5]" />
+                                  <span>Copiar Registro Já Preenchido</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setNewIncidentForm({ ...newIncidentForm, numero_bo: '' })}
+                                  className="px-2 py-1.5 bg-zinc-850 hover:bg-zinc-750 text-zinc-300 text-xs rounded transition flex items-center gap-1 cursor-pointer"
+                                >
+                                  <X className="w-3 h-3" /> Limpar
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                         <div className="md:col-span-3 bg-[#0A0D15] p-4 rounded border border-amber-500/30 space-y-3">
                           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2">
                             <div>
@@ -5895,15 +6288,27 @@ export default function App() {
                                 ) : (
                                   <div className="space-y-2.5">
                                     <div>
-                                      <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-0.5">
-                                        Número do B.O. / REDS *
-                                      </label>
+                                      <div className="flex items-center justify-between mb-0.5">
+                                        <label className="text-[9px] uppercase text-zinc-400 font-bold block">
+                                          Número do B.O. / REDS *
+                                        </label>
+                                        {directMatchingExistingOc && (
+                                          <span className="text-[9px] font-bold text-amber-400 bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.5 rounded flex items-center gap-1 font-mono animate-pulse">
+                                            <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />
+                                            B.O. Encontrado!
+                                          </span>
+                                        )}
+                                      </div>
                                       <input
                                         type="text"
                                         placeholder="Ex: REDS-2026-00458921-001"
                                         value={directNewOcData.numero_bo}
                                         onChange={(e) => setDirectNewOcData({ ...directNewOcData, numero_bo: e.target.value })}
-                                        className="w-full bg-[#121216] border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none"
+                                        className={`w-full bg-[#121216] border rounded p-1.5 text-xs text-zinc-200 focus:outline-none transition font-mono ${
+                                          directMatchingExistingOc
+                                            ? 'border-amber-500 ring-1 ring-amber-500/50 text-amber-200 bg-amber-950/20 font-bold'
+                                            : 'border-zinc-800'
+                                        }`}
                                       />
                                     </div>
                                     <div>
@@ -5933,6 +6338,54 @@ export default function App() {
                                         <option value="Outros">Outros / Não Especificado</option>
                                       </select>
                                     </div>
+
+                                    {/* ALERTA DE B.O. EXISTENTE NO DRAWER */}
+                                    {directMatchingExistingOc && (
+                                      <div className="bg-[#17130A] border-2 border-amber-500/80 p-2.5 rounded-lg shadow-lg space-y-2 font-mono">
+                                        <div className="flex items-center justify-between gap-1 border-b border-amber-500/30 pb-1.5">
+                                          <div className="flex items-center gap-1.5">
+                                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />
+                                            <span className="text-[11px] font-bold text-amber-300 uppercase">
+                                              B.O. Nº {directMatchingExistingOc.numero_bo} Já Cadastrado!
+                                            </span>
+                                          </div>
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40">
+                                            {directMatchingExistingOc.tipificacao_penal}
+                                          </span>
+                                        </div>
+                                        <p className="text-[10px] text-zinc-400">
+                                          Este registro já existe. Para evitar duplicidade, copie os dados ou vincule diretamente.
+                                        </p>
+                                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              handleDirectLinkOccurrenceFromPicker(directMatchingExistingOc, directOcPapel);
+                                              setDirectNewOcData({ ...directNewOcData, numero_bo: '' });
+                                            }}
+                                            className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold text-[10px] uppercase rounded transition flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <Link2 className="w-3 h-3" />
+                                            <span>Copiar e Vincular</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDirectCopyOccurrenceToForm(directMatchingExistingOc)}
+                                            className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] rounded transition flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <Copy className="w-3 h-3" />
+                                            <span>Preencher Campos</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setDirectNewOcData({ ...directNewOcData, numero_bo: '' })}
+                                            className="px-2 py-1 bg-zinc-850 hover:bg-zinc-750 text-zinc-400 text-[10px] rounded transition flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
                                     
                                     <div className="grid grid-cols-2 gap-2">
                                       <div>

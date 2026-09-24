@@ -344,22 +344,39 @@ export async function initFirebaseSync(onDataChange?: () => void): Promise<void>
 export async function persistSuspectToFirebase(suspectFull: SuspectWithDetails): Promise<void> {
   if (!suspectFull || !suspectFull.id) return;
   try {
-    // Normalize occurrences
-    const normalizedOccurrences = (suspectFull.ocorrencias || []).map((oc: any, idx: number) => ({
-      id: oc.id || `oc-${Date.now()}-${idx}`,
-      numero_bo: (oc.numero_bo || 'S/N').trim(),
-      data_hora: oc.data_hora || new Date().toISOString(),
-      tipificacao_penal: (oc.tipificacao_penal || 'Não informada').trim(),
-      descricao_fato: oc.descricao_fato || '',
-      modus_operandi: oc.modus_operandi || '',
-      armas_utilizadas: oc.armas_utilizadas || '',
-      veiculo_utilizado: oc.veiculo_utilizado || '',
-      papel: oc.papel || oc.papel_no_crime || 'Autor',
-      geom_crime: {
-        lat: oc.geom_crime?.lat !== undefined ? Number(oc.geom_crime.lat) : (oc.lat !== undefined ? Number(oc.lat) : -19.7712),
-        lng: oc.geom_crime?.lng !== undefined ? Number(oc.geom_crime.lng) : (oc.lng !== undefined ? Number(oc.lng) : -43.8564)
-      }
-    }));
+    // Normalize occurrences with deduplication against existing database occurrences
+    const normalizedOccurrences = (suspectFull.ocorrencias || []).map((oc: any, idx: number) => {
+      const cleanBo = (oc.numero_bo || '').trim();
+      const qNorm = cleanBo.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const existingMatch = cleanBo ? db.ocorrencias_criminais.find((o) => {
+        if (!o.numero_bo) return false;
+        const oLower = o.numero_bo.trim().toLowerCase();
+        if (oLower === cleanBo.toLowerCase()) return true;
+        const oNorm = oLower.replace(/[^a-z0-9]/g, '');
+        if (qNorm.length >= 4 && oNorm === qNorm) return true;
+        const qCore = qNorm.replace(/^(reds|bo|bol)/, '');
+        const oCore = oNorm.replace(/^(reds|bo|bol)/, '');
+        if (qCore.length >= 5 && oCore === qCore) return true;
+        return false;
+      }) : null;
+
+      const ocId = oc.id || (existingMatch ? existingMatch.id : `oc-${Date.now()}-${idx}`);
+      return {
+        id: ocId,
+        numero_bo: cleanBo || existingMatch?.numero_bo || 'S/N',
+        data_hora: oc.data_hora || existingMatch?.data_hora || new Date().toISOString(),
+        tipificacao_penal: (oc.tipificacao_penal || existingMatch?.tipificacao_penal || 'Não informada').trim(),
+        descricao_fato: oc.descricao_fato || existingMatch?.descricao_fato || '',
+        modus_operandi: oc.modus_operandi || existingMatch?.modus_operandi || '',
+        armas_utilizadas: oc.armas_utilizadas || existingMatch?.armas_utilizadas || '',
+        veiculo_utilizado: oc.veiculo_utilizado || existingMatch?.veiculo_utilizado || '',
+        papel: oc.papel || oc.papel_no_crime || 'Autor',
+        geom_crime: {
+          lat: oc.geom_crime?.lat !== undefined ? Number(oc.geom_crime.lat) : (existingMatch?.geom_crime?.lat ?? (oc.lat !== undefined ? Number(oc.lat) : -19.7712)),
+          lng: oc.geom_crime?.lng !== undefined ? Number(oc.geom_crime.lng) : (existingMatch?.geom_crime?.lng ?? (oc.lng !== undefined ? Number(oc.lng) : -43.8564))
+        }
+      };
+    });
 
     // 1. Save Infrator doc (with embedded occurrences for instantaneous single-document retrieval)
     const infratorData: Infrator & { fisicas?: any; enderecos?: any; ocorrencias?: any } = {

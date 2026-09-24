@@ -242,28 +242,12 @@ app.post('/api/infratores', (req, res) => {
             papel_no_crime: papel
           });
         } else if (item.numero_bo && item.tipificacao_penal) {
-          // Create new occurrence on the fly and link
-          const ocId = `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-          const createdOc = {
-            id: ocId,
-            numero_bo: item.numero_bo,
-            data_hora: item.data_hora || new Date().toISOString(),
-            tipificacao_penal: item.tipificacao_penal,
+          const linkedOc = db.addOcorrencia({
+            ...item,
+            id: item.id || undefined,
             descricao_fato: item.descricao_fato || `Ocorrência registrada referente a ${item.tipificacao_penal} com participação de ${newInfrator.nome_completo} como ${papel}.`,
-            modus_operandi: item.modus_operandi || 'Padrão em apuração',
-            armas_utilizadas: item.armas_utilizadas || 'Não informada',
-            veiculo_utilizado: item.veiculo_utilizado || 'Não informado',
-            geom_crime: {
-              lat: item.lat !== undefined ? Number(item.lat) : -19.7712,
-              lng: item.lng !== undefined ? Number(item.lng) : -43.8564
-            }
-          };
-          db.ocorrencias_criminais.push(createdOc);
-          db.infrator_ocorrencia.push({
-            infrator_id: id,
-            ocorrencia_id: ocId,
-            papel_no_crime: papel
           });
+          db.linkInfratorOcorrencia(id, linkedOc.id, papel);
         }
       }
     }
@@ -586,7 +570,7 @@ app.post('/api/ocorrencias', (req, res) => {
     }
 
     const id = req.body.id || `oc-${Date.now()}`;
-    const newOcorrencia = {
+    const newOcorrencia = db.addOcorrencia({
       id,
       numero_bo,
       data_hora: data_hora || new Date().toISOString(),
@@ -596,17 +580,11 @@ app.post('/api/ocorrencias', (req, res) => {
       armas_utilizadas: armas_utilizadas || 'Nenhuma',
       veiculo_utilizado: veiculo_utilizado || 'Nenhum',
       geom_crime: { lat: Number(lat), lng: Number(lng) }
-    };
-
-    db.ocorrencias_criminais.push(newOcorrencia);
+    });
 
     if (Array.isArray(envolvidos_ids)) {
       for (const env of envolvidos_ids) {
-        db.infrator_ocorrencia.push({
-          infrator_id: env.infrator_id,
-          ocorrencia_id: id,
-          papel_no_crime: env.papel || 'Suspeito'
-        });
+        db.linkInfratorOcorrencia(env.infrator_id, newOcorrencia.id, env.papel || 'Suspeito');
       }
     }
 

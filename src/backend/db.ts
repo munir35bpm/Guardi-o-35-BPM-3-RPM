@@ -399,27 +399,12 @@ class CrimIntelDatabase {
             papel_no_crime: papel
           });
         } else if (item.numero_bo && item.tipificacao_penal) {
-          const ocId = `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-          const createdOc: OcorrenciaCriminal = {
-            id: ocId,
-            numero_bo: item.numero_bo,
-            data_hora: item.data_hora || new Date().toISOString(),
-            tipificacao_penal: item.tipificacao_penal,
+          const linkedOc = this.addOcorrencia({
+            ...item,
+            id: item.id || undefined,
             descricao_fato: item.descricao_fato || `Ocorrência registrada referente a ${item.tipificacao_penal} com participação de ${newInfrator.nome_completo} como ${papel}.`,
-            modus_operandi: item.modus_operandi || 'Padrão em apuração',
-            armas_utilizadas: item.armas_utilizadas || 'Não informada',
-            veiculo_utilizado: item.veiculo_utilizado || 'Não informado',
-            geom_crime: {
-              lat: item.lat !== undefined && !isNaN(Number(item.lat)) ? Number(item.lat) : -19.7712,
-              lng: item.lng !== undefined && !isNaN(Number(item.lng)) ? Number(item.lng) : -43.8564
-            }
-          };
-          this.ocorrencias_criminais.unshift(createdOc);
-          this.infrator_ocorrencia.push({
-            infrator_id: id,
-            ocorrencia_id: ocId,
-            papel_no_crime: papel
           });
+          this.linkInfratorOcorrencia(id, linkedOc.id, papel);
         }
       }
     }
@@ -428,6 +413,24 @@ class CrimIntelDatabase {
   }
 
   public addOcorrencia(data: any): OcorrenciaCriminal {
+    if (data.numero_bo) {
+      const q = String(data.numero_bo).trim().toLowerCase();
+      const qNorm = q.replace(/[^a-z0-9]/g, '');
+      const existing = this.ocorrencias_criminais.find((o) => {
+        if (!o.numero_bo) return false;
+        const oLower = o.numero_bo.trim().toLowerCase();
+        if (oLower === q) return true;
+        const oNorm = oLower.replace(/[^a-z0-9]/g, '');
+        if (qNorm.length >= 4 && oNorm === qNorm) return true;
+        const qCore = qNorm.replace(/^(reds|bo|bol)/, '');
+        const oCore = oNorm.replace(/^(reds|bo|bol)/, '');
+        if (qCore.length >= 5 && oCore === qCore) return true;
+        return false;
+      });
+      if (existing) {
+        return existing;
+      }
+    }
     const id = data.id || `oc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const newOc: OcorrenciaCriminal = {
       id,
