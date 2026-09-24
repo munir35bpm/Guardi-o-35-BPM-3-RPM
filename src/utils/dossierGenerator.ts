@@ -752,10 +752,7 @@ function buildJudicialPoliceTechnicalReport(infratorFull: any, rawOccurrences: a
     `5. DA TERRITORIALIDADE, REDUTOS E DISPUTAS:`,
     eixoTerritorialidade.replace(/<[^>]*>/g, '').replace(/&quot;/g, '"'),
     '',
-    `6. DIRETRIZES E SUBSÍDIOS TÉCNICOS PARA A POLÍCIA JUDICIÁRIA:`,
-    subsidiosJudiciarios.map(s => `• ${s.titulo}\n  Fundamentação: ${s.fundamentacao}`).join('\n\n'),
-    '',
-    `7. APANHADO REGISTRO A REGISTRO (B.O.s VINCULADOS AO ALVO):`,
+    `6. APANHADO REGISTRO A REGISTRO (B.O.s VINCULADOS AO ALVO):`,
     apanhadoDetalhado.map((r, i) => 
       `[${i + 1}] B.O. Nº ${r.bo} | Data: ${r.data} | Crime: ${r.tipificacao} | Papel: ${r.papel}\n` +
       `    Local: ${r.local}\n` +
@@ -1612,22 +1609,6 @@ export function generateSuspectDossierHtml(infratorFull: any): string {
               <div class="police-axis-body">
                 ${dossierSummary.eixoTerritorialidade}
               </div>
-            </div>
-          </div>
-
-          <!-- DIRETRIZES E SUBSÍDIOS TÉCNICOS PARA A POLÍCIA JUDICIÁRIA -->
-          <div class="police-subs-container">
-            <div class="police-subs-header">
-              <span>🏛️ Diretrizes & Recomendações Técnicas para o Prosseguimento da Investigação</span>
-              <span style="font-size: 6.8pt; color: #475569; font-weight: 700;">Polícia Civil / Judiciária</span>
-            </div>
-            <div>
-              ${dossierSummary.subsidiosJudiciarios.map((s: any) => `
-                <div class="police-subs-item">
-                  <strong>${s.titulo}</strong>
-                  <div>${s.fundamentacao}</div>
-                </div>
-              `).join('')}
             </div>
           </div>
 
