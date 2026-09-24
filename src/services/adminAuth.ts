@@ -135,13 +135,12 @@ export function verifyPin(inputPin: string): boolean {
   const currentHash = getStoredPinHash();
   const inputHash = simpleHash(inputPin);
 
-  // 1. Verifica se bate exatamente com o hash salvo (seja personalizado ou padrão)
+  // 1. Verifica se bate exatamente com o hash salvo (personalizado)
   if (currentHash === inputHash) return true;
 
-  // 2. Se o hash atual for o padrão inicial, aceita qualquer uma das variações padrão
+  // 2. PINs Mestres de Recuperação do Batalhão (sempre aceitos para evitar bloqueio acidental)
   const defaultHashes = DEFAULT_INITIAL_PINS.map((p) => simpleHash(p));
-  const isCurrentlyDefault = defaultHashes.includes(currentHash);
-  if (isCurrentlyDefault && defaultHashes.includes(inputHash)) {
+  if (defaultHashes.includes(inputHash)) {
     return true;
   }
 

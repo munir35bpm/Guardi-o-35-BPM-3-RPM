@@ -506,6 +506,11 @@ export async function unlinkOccurrenceFromSuspectInFirebase(
     // 2. Update local db
     db.unlinkInfratorOcorrencia(infratorId, targetId);
 
+    // Also persist updated occurrence to Firestore if present
+    if (oc) {
+      await saveOcorrencia(oc).catch(() => null);
+    }
+
     // 3. Update full suspect in Firestore
     const fullSuspect = db.getInfratorFull(infratorId);
     if (fullSuspect) {

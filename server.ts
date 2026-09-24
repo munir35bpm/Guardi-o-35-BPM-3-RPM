@@ -358,6 +358,7 @@ app.delete('/api/infratores/:id/ocorrencias/:ocorrencia_id', (req, res) => {
   try {
     const { id, ocorrencia_id } = req.params;
     db.unlinkInfratorOcorrencia(id, ocorrencia_id);
+    saveDatabaseToDiskCache();
     res.json({ success: true, updated: db.getInfratorFull(id) });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -584,7 +585,7 @@ app.post('/api/ocorrencias', (req, res) => {
       return;
     }
 
-    const id = `oc-${Date.now()}`;
+    const id = req.body.id || `oc-${Date.now()}`;
     const newOcorrencia = {
       id,
       numero_bo,

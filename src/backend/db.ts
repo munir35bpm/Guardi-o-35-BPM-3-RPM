@@ -524,6 +524,13 @@ class CrimIntelDatabase {
       );
     }
 
+    // Remove from occurrence's embedded envolvidos array if present
+    if (oc && Array.isArray((oc as any).envolvidos)) {
+      (oc as any).envolvidos = (oc as any).envolvidos.filter(
+        (e: any) => e.id !== infrator_id && (!infrator || e.nome !== infrator.nome_completo)
+      );
+    }
+
     return true;
   }
 

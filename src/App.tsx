@@ -58,6 +58,7 @@ import Logo35BPM from './components/Logo35BPM';
 import { OrcrimWindow } from './components/OrcrimWindow';
 import FacialRecognitionModule from './components/FacialRecognitionModule';
 import OccurrencePickerFromSuspects from './components/OccurrencePickerFromSuspects';
+import { LinkSuspectToOccurrenceModal } from './components/LinkSuspectToOccurrenceModal';
 import { GangAreaEditModal } from './components/GangAreaEditModal';
 import { AdminPinModal } from './components/AdminPinModal';
 import { ChangePinModal } from './components/ChangePinModal';
@@ -403,6 +404,16 @@ export default function App() {
     lat: '-19.7712',
     lng: '-43.8564',
   });
+
+  // Offender Linking in Incident Registration Form
+  const [incidentLinkedSuspects, setIncidentLinkedSuspects] = useState<
+    Array<{ infrator_id: string; nome: string; vulgo: string; papel: string; foto_url?: string }>
+  >([]);
+  const [selectedSuspectToLinkInIncident, setSelectedSuspectToLinkInIncident] = useState<string>('');
+  const [selectedPapelForIncident, setSelectedPapelForIncident] = useState<string>('Autor');
+
+  // Modal to Link Suspect to Existing Occurrence from Grid
+  const [occurrenceToLinkModal, setOccurrenceToLinkModal] = useState<OcorrenciaCriminal | null>(null);
 
   // New Address Form
   const [newAddressForm, setNewAddressForm] = useState({
@@ -2204,14 +2215,28 @@ export default function App() {
           geom_crime: {
             lat: Number(newIncidentForm.lat) || -19.7712,
             lng: Number(newIncidentForm.lng) || -43.8564,
-          }
+          },
+          envolvidos: incidentLinkedSuspects.map((s) => ({
+            id: s.infrator_id,
+            nome: s.nome,
+            vulgo: s.vulgo,
+            papel: s.papel,
+          })),
         };
 
         try {
           await fetch('/api/ocorrencias', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(ocObj),
+            body: JSON.stringify({
+              ...ocObj,
+              lat: ocObj.geom_crime.lat,
+              lng: ocObj.geom_crime.lng,
+              envolvidos_ids: incidentLinkedSuspects.map((s) => ({
+                infrator_id: s.infrator_id,
+                papel: s.papel,
+              })),
+            }),
           });
         } catch (e) {
           console.warn('Backend API unavailable, saving to local in-memory DB', e);
@@ -2219,10 +2244,32 @@ export default function App() {
 
         db.addOcorrencia(ocObj);
 
+        // Link in local in-memory DB
+        for (const s of incidentLinkedSuspects) {
+          db.linkInfratorOcorrencia(s.infrator_id, ocObj.id, s.papel);
+        }
+
         // Persist to Firebase Firestore
         await persistOccurrenceToFirebase(ocObj);
 
+        // Persist each suspect link in Firebase
+        for (const s of incidentLinkedSuspects) {
+          try {
+            await linkOccurrenceToSuspectInFirebase(s.infrator_id, {
+              id: ocObj.id,
+              ...ocObj,
+              papel_no_crime: s.papel,
+            });
+          } catch (fireErr) {
+            console.warn('Erro ao persistir vínculo no Firebase:', fireErr);
+          }
+        }
+
+        const linkedCount = incidentLinkedSuspects.length;
         setIsAddingOccurrence(false);
+        setIncidentLinkedSuspects([]);
+        setSelectedSuspectToLinkInIncident('');
+        setSelectedPapelForIncident('Autor');
         setNewIncidentForm({
           numero_bo: '',
           tipificacao_penal: '',
@@ -2235,10 +2282,129 @@ export default function App() {
           lng: '-43.8564',
         });
         await fetchTelemetry();
-        setToastMessage('Ocorrência registrada e salva com sucesso!');
+        setToastMessage(
+          `Ocorrência B.O. Nº ${ocObj.numero_bo} registrada com sucesso! ${
+            linkedCount > 0 ? `(${linkedCount} infrator(es) vinculado(s))` : ''
+          }`
+        );
         setTimeout(() => setToastMessage(null), 3500);
       } catch (err) {
         console.error('Error adding incident:', err);
+      }
+    });
+  };
+
+  // Link a suspect to an existing occurrence from the B.O. Grid modal
+  const handleLinkSuspectToBo = async (suspectId: string, papel: string) => {
+    if (!occurrenceToLinkModal) return;
+    const oc = occurrenceToLinkModal;
+
+    // 1. Backend API
+    try {
+      await fetch(`/api/infratores/${suspectId}/ocorrencias`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ocorrencia_id: oc.id,
+          papel_no_crime: papel,
+        }),
+      });
+    } catch (e) {
+      console.warn('Backend link endpoint not available, saving locally', e);
+    }
+
+    // 2. Local in-memory DB
+    db.linkInfratorOcorrencia(suspectId, oc.id, papel);
+
+    // 3. Firebase Firestore
+    try {
+      await linkOccurrenceToSuspectInFirebase(suspectId, {
+        id: oc.id,
+        ...oc,
+        papel_no_crime: papel,
+      });
+    } catch (fireErr) {
+      console.warn('Erro ao salvar vínculo no Firestore:', fireErr);
+    }
+
+    await fetchTelemetry();
+    setToastMessage(`Infrator vinculado com sucesso ao B.O. Nº ${oc.numero_bo}!`);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Unlink a suspect from an existing occurrence from the B.O. Grid modal
+  const handleUnlinkSuspectFromBo = async (suspectId: string) => {
+    if (!occurrenceToLinkModal) return;
+    const oc = occurrenceToLinkModal;
+
+    // 1. Backend API
+    try {
+      await fetch(`/api/infratores/${suspectId}/ocorrencias/${oc.id}`, {
+        method: 'DELETE',
+      }).catch(() => null);
+    } catch (e) {
+      console.warn('Backend unlink endpoint not available', e);
+    }
+
+    // 2. Local in-memory DB
+    db.unlinkInfratorOcorrencia(suspectId, oc.id);
+
+    // 3. Firebase Firestore
+    try {
+      await unlinkOccurrenceFromSuspectInFirebase(suspectId, oc.id, oc.numero_bo);
+    } catch (fireErr) {
+      console.warn('Erro ao desvincular no Firestore:', fireErr);
+    }
+
+    await fetchTelemetry();
+    setToastMessage(`Infrator desvinculado do B.O. Nº ${oc.numero_bo}.`);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Directly exclude a linked suspect from an occurrence in the B.O. Grid
+  const handleDirectUnlinkSuspect = (oc: OcorrenciaCriminal, suspectId: string, suspectNome: string) => {
+    requireAdmin(`Excluir Infrator ${suspectNome} do B.O. ${oc.numero_bo}`, async () => {
+      let targetId = suspectId;
+      if (!targetId) {
+        const found = suspects.find(
+          (sp) =>
+            sp.nome_completo.toLowerCase() === suspectNome.toLowerCase() ||
+            (sp.vulgo && sp.vulgo.toLowerCase() === suspectNome.toLowerCase())
+        );
+        if (found) targetId = found.id;
+      }
+
+      if (!targetId) {
+        alert('Não foi possível identificar o identificador deste infrator.');
+        return;
+      }
+
+      try {
+        // 1. Backend API
+        try {
+          await fetch(`/api/infratores/${targetId}/ocorrencias/${oc.id}`, {
+            method: 'DELETE',
+          }).catch(() => null);
+        } catch (e) {
+          console.warn('Backend unlink endpoint not available', e);
+        }
+
+        // 2. Local in-memory DB
+        db.unlinkInfratorOcorrencia(targetId, oc.id);
+
+        // 3. Firebase Firestore
+        try {
+          await unlinkOccurrenceFromSuspectInFirebase(targetId, oc.id, oc.numero_bo);
+        } catch (fireErr) {
+          console.warn('Erro ao desvincular no Firestore:', fireErr);
+        }
+
+        await fetchTelemetry();
+        setToastMessage(`Infrator "${suspectNome}" excluído do registro B.O. Nº ${oc.numero_bo} com sucesso!`);
+        setTimeout(() => setToastMessage(null), 3500);
+      } catch (err: any) {
+        console.error('Erro ao excluir infrator do registro:', err);
+        alert(`Erro ao excluir infrator do registro: ${err?.message || 'Falha de comunicação'}`);
       }
     });
   };
@@ -2336,7 +2502,7 @@ export default function App() {
 
   // Helper to find all suspects linked to an occurrence
   const getLinkedSuspectsForOccurrence = (oc: OcorrenciaCriminal) => {
-    const list: Array<{ id: string; nome: string; vulgo: string; papel: string }> = [];
+    const list: Array<{ id: string; nome: string; vulgo: string; papel: string; foto_url?: string }> = [];
     const seen = new Set<string>();
 
     const links = db.getInfratorOcorrenciaLinks().filter(
@@ -2351,6 +2517,7 @@ export default function App() {
           nome: s.nome_completo,
           vulgo: s.vulgo,
           papel: l.papel_no_crime || 'Autor',
+          foto_url: s.foto_url,
         });
       }
     });
@@ -2359,11 +2526,13 @@ export default function App() {
       (oc as any).envolvidos.forEach((env: any) => {
         if (env.nome && !seen.has(env.nome)) {
           seen.add(env.nome);
+          const s = suspects.find((sp) => sp.id === env.id || sp.nome_completo === env.nome);
           list.push({
-            id: env.id || '',
+            id: env.id || (s ? s.id : ''),
             nome: env.nome,
-            vulgo: env.vulgo || '',
+            vulgo: env.vulgo || (s ? s.vulgo : ''),
             papel: env.papel || 'Autor',
+            foto_url: s?.foto_url,
           });
         }
       });
@@ -4750,6 +4919,164 @@ export default function App() {
                             className="w-full bg-[#0A0A0B] border border-zinc-800 rounded p-2 text-xs focus:outline-none focus:border-amber-500 h-20 resize-none text-zinc-200 font-sans"
                           />
                         </div>
+
+                        {/* FERRAMENTA: Vincular Infrator ao Registro Policial */}
+                        <div className="md:col-span-3 bg-[#0A0D15] p-4 rounded border border-amber-500/30 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2">
+                            <div>
+                              <label className="text-xs uppercase text-amber-400 font-bold flex items-center gap-1.5 tracking-wider font-mono">
+                                <UserPlus className="w-4 h-4 text-amber-400" />
+                                Vincular Infrator(es) a este Registro Policial
+                              </label>
+                              <span className="text-[10px] text-zinc-400 font-mono">
+                                Associe os infratores identificados para que conste na ficha individual e no dossiê de inteligência
+                              </span>
+                            </div>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 font-mono font-bold">
+                              {incidentLinkedSuspects.length} infrator(es) vinculado(s)
+                            </span>
+                          </div>
+
+                          {/* Seletor de Infrator e Papel */}
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                            <div className="sm:col-span-6">
+                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                Selecionar Infrator (Banco de Investigados)
+                              </label>
+                              <select
+                                value={selectedSuspectToLinkInIncident}
+                                onChange={(e) => setSelectedSuspectToLinkInIncident(e.target.value)}
+                                className="w-full bg-[#0F0F14] border border-zinc-700 rounded p-2 text-xs text-zinc-200 font-mono focus:outline-none focus:border-amber-500"
+                              >
+                                <option value="">-- Escolha um infrator cadastrado --</option>
+                                {suspects.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.nome_completo} {s.vulgo ? `("${s.vulgo}")` : ''} {s.gangue_faccao ? `• [${s.gangue_faccao}]` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="sm:col-span-3">
+                              <label className="text-[9px] uppercase text-zinc-400 font-bold block mb-1">
+                                Papel no Crime
+                              </label>
+                              <select
+                                value={selectedPapelForIncident}
+                                onChange={(e) => setSelectedPapelForIncident(e.target.value)}
+                                className="w-full bg-[#0F0F14] border border-zinc-700 rounded p-2 text-xs text-zinc-200 font-mono focus:outline-none focus:border-amber-500"
+                              >
+                                <option value="Autor">Autor (Principal)</option>
+                                <option value="Coautor">Coautor</option>
+                                <option value="Partícipe">Partícipe</option>
+                                <option value="Mandante">Mandante</option>
+                                <option value="Investigado">Investigado / Suspeito</option>
+                                <option value="Vítima">Vítima</option>
+                                <option value="Testemunha">Testemunha</option>
+                              </select>
+                            </div>
+
+                            <div className="sm:col-span-3">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!selectedSuspectToLinkInIncident) {
+                                    alert('Selecione um infrator no menu para vincular.');
+                                    return;
+                                  }
+                                  const alreadyAdded = incidentLinkedSuspects.some(
+                                    (s) => s.infrator_id === selectedSuspectToLinkInIncident
+                                  );
+                                  if (alreadyAdded) {
+                                    alert('Este infrator já foi adicionado a este registro.');
+                                    return;
+                                  }
+                                  const targetSuspect = suspects.find((s) => s.id === selectedSuspectToLinkInIncident);
+                                  if (targetSuspect) {
+                                    setIncidentLinkedSuspects((prev) => [
+                                      ...prev,
+                                      {
+                                        infrator_id: targetSuspect.id,
+                                        nome: targetSuspect.nome_completo,
+                                        vulgo: targetSuspect.vulgo || '',
+                                        papel: selectedPapelForIncident || 'Autor',
+                                        foto_url: targetSuspect.foto_url,
+                                      },
+                                    ]);
+                                    setSelectedSuspectToLinkInIncident('');
+                                  }
+                                }}
+                                className="w-full py-2 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs uppercase rounded transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-amber-500/10"
+                              >
+                                <UserPlus className="w-3.5 h-3.5 text-black stroke-[2.5]" />
+                                <span>+ Vincular Infrator</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Lista de Infratores Selecionados para este B.O. */}
+                          {incidentLinkedSuspects.length > 0 ? (
+                            <div className="space-y-1.5 pt-2">
+                              <span className="text-[9px] uppercase text-zinc-400 font-bold block">
+                                Infratores que serão vinculados a este B.O.:
+                              </span>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                                {incidentLinkedSuspects.map((s, idx) => {
+                                  const badge = getPapelBadge(s.papel);
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className="bg-[#121622] border border-zinc-800 p-2 rounded flex items-center justify-between gap-2"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        {s.foto_url ? (
+                                          <img
+                                            src={s.foto_url}
+                                            alt={s.nome}
+                                            className="w-7 h-7 rounded object-cover border border-zinc-700 flex-shrink-0"
+                                          />
+                                        ) : (
+                                          <div className="w-7 h-7 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center flex-shrink-0">
+                                            <Users className="w-3.5 h-3.5 text-zinc-500" />
+                                          </div>
+                                        )}
+                                        <div className="min-w-0">
+                                          <div className="text-xs font-bold text-zinc-100 truncate">
+                                            {s.nome}
+                                          </div>
+                                          {s.vulgo && (
+                                            <div className="text-[10px] text-amber-400 font-mono truncate">
+                                              "{s.vulgo}"
+                                            </div>
+                                          )}
+                                          <span className={`inline-block text-[8px] font-bold px-1 rounded border ${badge.bg}`}>
+                                            {s.papel}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setIncidentLinkedSuspects((prev) =>
+                                            prev.filter((item) => item.infrator_id !== s.infrator_id)
+                                          );
+                                        }}
+                                        className="text-zinc-500 hover:text-red-400 p-1 rounded transition cursor-pointer"
+                                        title="Remover infrator deste registro"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="p-2.5 bg-zinc-900/30 border border-dashed border-zinc-800/80 rounded text-[11px] text-zinc-500 font-mono">
+                              Nenhum infrator vinculado a este B.O. ainda. Selecione um investigado no menu acima e clique em <strong>"+ Vincular Infrator"</strong> para associá-lo a este registro policial.
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       <div className="flex justify-end gap-2 pt-2">
@@ -6009,15 +6336,32 @@ export default function App() {
                         {filteredOccurrences.length} registros policiais indexados
                       </span>
                     </div>
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-500" />
-                      <input
-                        type="text"
-                        placeholder="Buscar por Nº B.O., crime, modus, arma, infrator..."
-                        value={occurrenceSearchQuery}
-                        onChange={(e) => setOccurrenceSearchQuery(e.target.value)}
-                        className="bg-[#0A0A0B] border border-zinc-800 rounded p-2 pl-8 text-xs font-mono focus:outline-none focus:border-amber-500 w-72 text-zinc-200"
-                      />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          requireAdmin('Registrar Ocorrência (B.O.)', () => {
+                            setIsAddingOccurrence(true);
+                            setIsAddingSuspect(false);
+                            setIsAddingAddress(false);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          });
+                        }}
+                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs uppercase rounded transition flex items-center gap-1.5 cursor-pointer font-mono shadow-md shadow-amber-500/10"
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>Novo B.O.</span>
+                      </button>
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+                        <input
+                          type="text"
+                          placeholder="Buscar por Nº B.O., crime, modus, arma, infrator..."
+                          value={occurrenceSearchQuery}
+                          onChange={(e) => setOccurrenceSearchQuery(e.target.value)}
+                          className="bg-[#0A0A0B] border border-zinc-800 rounded p-2 pl-8 text-xs font-mono focus:outline-none focus:border-amber-500 w-64 text-zinc-200"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -6082,35 +6426,72 @@ export default function App() {
 
                                 <td className="p-2.5 align-top">
                                   {linkedSuspects.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1">
-                                      {linkedSuspects.map((ls, idx) => {
-                                        const badge = getPapelBadge(ls.papel);
-                                        return (
-                                          <button
-                                            key={idx}
-                                            type="button"
-                                            onClick={() => {
-                                              if (ls.id) {
-                                                setDbSubTab('suspects');
-                                                handleViewSuspectDetail(ls.id);
-                                              }
-                                            }}
-                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition ${
-                                              ls.id ? 'hover:scale-105 cursor-pointer' : 'cursor-default'
-                                            } ${badge.bg}`}
-                                            title={ls.id ? 'Clique para inspecionar a ficha do infrator' : undefined}
-                                          >
-                                            <span>{ls.nome}</span>
-                                            {ls.vulgo && <span className="opacity-80">"{ls.vulgo}"</span>}
-                                            <span className="opacity-60 text-[8px]">({ls.papel})</span>
-                                          </button>
-                                        );
-                                      })}
+                                    <div className="space-y-1.5">
+                                      <div className="flex flex-wrap gap-1">
+                                        {linkedSuspects.map((ls, idx) => {
+                                          const badge = getPapelBadge(ls.papel);
+                                          return (
+                                            <div
+                                              key={idx}
+                                              className={`inline-flex items-center rounded text-[9px] font-bold border transition ${badge.bg}`}
+                                            >
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  if (ls.id) {
+                                                    setDbSubTab('suspects');
+                                                    handleViewSuspectDetail(ls.id);
+                                                  }
+                                                }}
+                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 ${
+                                                  ls.id ? 'hover:brightness-125 cursor-pointer' : 'cursor-default'
+                                                }`}
+                                                title={ls.id ? 'Clique para inspecionar a ficha do infrator' : undefined}
+                                              >
+                                                <span>{ls.nome}</span>
+                                                {ls.vulgo && <span className="opacity-80">"{ls.vulgo}"</span>}
+                                                <span className="opacity-60 text-[8px]">({ls.papel})</span>
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleDirectUnlinkSuspect(oc, ls.id, ls.nome);
+                                                }}
+                                                className="px-1 py-0.5 border-l border-current/25 hover:bg-red-800 text-red-300 hover:text-white transition cursor-pointer flex items-center justify-center"
+                                                title={`Excluir ${ls.nome} deste registro policial (B.O. ${oc.numero_bo})`}
+                                              >
+                                                <Trash2 className="w-2.5 h-2.5 stroke-[2.5]" />
+                                              </button>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => setOccurrenceToLinkModal(oc)}
+                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border border-zinc-700 bg-zinc-900/90 hover:bg-zinc-800 text-amber-400 hover:text-amber-300 transition cursor-pointer"
+                                        title="Vincular mais um infrator a este B.O."
+                                      >
+                                        <UserPlus className="w-2.5 h-2.5" />
+                                        <span>+ Vincular Outro</span>
+                                      </button>
                                     </div>
                                   ) : (
-                                    <span className="text-[10px] text-zinc-500 font-mono italic">
-                                      Sem infrator vinculado
-                                    </span>
+                                    <div className="space-y-1">
+                                      <span className="text-[10px] text-zinc-500 font-mono italic block">
+                                        Sem infrator vinculado
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setOccurrenceToLinkModal(oc)}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 transition cursor-pointer"
+                                        title="Vincular infrator da base a este Boletim de Ocorrência"
+                                      >
+                                        <UserPlus className="w-3 h-3 text-amber-400" />
+                                        <span>+ Vincular Infrator</span>
+                                      </button>
+                                    </div>
                                   )}
                                 </td>
 
@@ -6143,6 +6524,15 @@ export default function App() {
                                       <span>Mapa</span>
                                     </button>
                                   )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setOccurrenceToLinkModal(oc)}
+                                    className="px-2 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-amber-400 hover:text-amber-300 rounded text-[10px] font-bold transition inline-flex items-center gap-1 cursor-pointer"
+                                    title="Gerenciar ou vincular infratores a este B.O."
+                                  >
+                                    <UserPlus className="w-3 h-3 text-amber-500" />
+                                    <span>Vincular</span>
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -6485,6 +6875,20 @@ export default function App() {
         selectedCoords={selectedCoords}
         onSave={handleSaveGangZone}
         onDelete={handleDeleteGangZone}
+      />
+
+      {/* Modal de Vínculo de Infrator ao Boletim de Ocorrência */}
+      <LinkSuspectToOccurrenceModal
+        isOpen={!!occurrenceToLinkModal}
+        occurrence={occurrenceToLinkModal}
+        suspects={suspects}
+        onClose={() => setOccurrenceToLinkModal(null)}
+        onLinkSuspect={handleLinkSuspectToBo}
+        onUnlinkSuspect={handleUnlinkSuspectFromBo}
+        isAdmin={isAdmin}
+        requireAdmin={requireAdmin}
+        getLinkedSuspectsForOccurrence={getLinkedSuspectsForOccurrence}
+        getPapelBadge={getPapelBadge}
       />
 
       {/* Admin PIN Validation Modal */}

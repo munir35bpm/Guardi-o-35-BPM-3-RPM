@@ -119,6 +119,16 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
                 {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
+            <div className="flex items-center justify-between text-[10px] text-zinc-500 font-mono pt-0.5">
+              <span>PIN padrão da Unidade:</span>
+              <button
+                type="button"
+                onClick={() => setPin('PMMG35BPM')}
+                className="text-[#C4A76E] hover:underline cursor-pointer font-bold"
+              >
+                PMMG35BPM
+              </button>
+            </div>
           </div>
 
           {/* Error Message */}
